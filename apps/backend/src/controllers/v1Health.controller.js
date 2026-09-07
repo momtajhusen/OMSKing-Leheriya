@@ -1,4 +1,4 @@
-const { successResponse } = require('../../utils/response');
+const { successResponse } = require('../utils/response');
 
 const healthCheck = (req, res) => {
   return successResponse(res, {
