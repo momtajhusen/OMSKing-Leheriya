@@ -9,12 +9,21 @@
   ],
   "scripts": {
     "dev": "turbo run dev",
+    "dev:backend": "pnpm --filter @omsking/backend run dev",
+    "dev:admin": "pnpm --filter @omsking/admin run dev",
+    "dev:all": "concurrently -n mongo,backend,admin -c gray.bold,magenta.bold,cyan.bold --handle-input \"pnpm:wait:mongo\" \"pnpm:start:backend\" \"pnpm:start:admin\"",
+    "wait:mongo": "wait-on tcp:27017 -t 60000 && echo 'MongoDB ready on :27017' && tail -f /dev/null",
+    "start:backend": "wait-on tcp:27017 -t 60000 && pnpm --filter @omsking/backend run dev",
+    "start:admin": "wait-on tcp:5001 -t 60000 && pnpm --filter @omsking/admin run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "clean": "turbo run clean && rm -rf node_modules .turbo"
+    "clean": "turbo run clean && rm -rf node_modules .turbo",
+    "stop": "lsof -ti:5001,5173 | xargs kill -9 2>/dev/null || true"
   },
   "devDependencies": {
-    "turbo": "^2.0.0"
+    "concurrently": "^10.0.5",
+    "turbo": "^2.0.0",
+    "wait-on": "^9.1.0"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {
