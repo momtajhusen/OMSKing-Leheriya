@@ -1,0 +1,17 @@
+{
+  "name": "@omsking/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.js",
+  "type": "commonjs",
+  "exports": {
+    ".": "./src/index.js",
+    "./constants": "./src/constants/index.js",
+    "./utils": "./src/utils/index.js"
+  },
+  "scripts": {
+    "build": "node -e \"console.log('Shared build placeholder')\"",
+    "lint": "node -e \"console.log('Lint placeholder')\"",
+    "clean": "rm -rf dist build"
+  }
+}
