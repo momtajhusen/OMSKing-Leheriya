@@ -1,0 +1,36 @@
+// Vendors fixture
+export const vendors = [
+  {
+    id: 'VND-001',
+    name: 'Sandeep Textiles',
+    location: 'Jaipur, Rajasthan',
+    phone: '+91 98765 43210',
+    email: 'sandeep@textiles.com',
+    telegramGroup: '@sandeep_textiles',
+    assignedOrders: 156,
+    rating: 4.5,
+    status: 'Active',
+  },
+  {
+    id: 'VND-002',
+    name: 'Rajshree Fabrics',
+    location: 'Ahmedabad, Gujarat',
+    phone: '+91 87654 32109',
+    email: 'rajshree@fabrics.com',
+    telegramGroup: '@rajshree_fabrics',
+    assignedOrders: 89,
+    rating: 4.2,
+    status: 'Active',
+  },
+  {
+    id: 'VND-003',
+    name: 'Meera Creations',
+    location: 'Surat, Gujarat',
+    phone: '+91 76543 21098',
+    email: 'meera@creations.com',
+    telegramGroup: '@meera_creations',
+    assignedOrders: 234,
+    rating: 4.7,
+    status: 'Active',
+  },
+];

@@ -4,15 +4,21 @@
 
 ---
 
-## ⚠️ Current Phase: 0 — Architecture & Foundation
+## ⚠️ Current Phase: 1 — UI Foundation & Design System (In Progress)
 
-**Do NOT write business-module code yet.** This phase sets up the complete technical skeleton & blueprint. All architecture decisions are locked and documented under [`docs/`](./docs/).
+Build Admin + Vendor UI shells, professional design system with Tailwind CSS 3, shared reusable components (18+ primitives), 23 module pages with realistic dummy data, Light + Dark theme, Recharts dashboard, role-aware React Router, Excel-style Vendor console. No backend integration yet — mock fixtures only.
 
-- ✅ Monorepo (pnpm workspaces + Turborepo)
-- ✅ Folder skeleton: `apps/admin`, `apps/backend`, `packages/shared`
-- ✅ All planning & architecture documents in [`docs/`](./docs/)
-- ✅ Health-check endpoint: `GET /api/v1`
-- ⏭️ **Next: Phase 1 — UI Foundation & Design System**
+- ✅ Phase 0 — Architecture & Foundation (docs, monorepo skeleton, health endpoint, GitHub)
+- 🔄 Phase 1 — UI Foundation & Design System (*You are here*)
+  - Tailwind CSS 3 + shadcn-style semantic tokens + Light/Dark mode
+  - 18+ UI primitives (Button, Input, Table, Tabs, Modal, Drawer, KpiCard, etc.)
+  - Admin shell: 3-pane layout, 23-module sidebar, route transitions (bezier 0.22,1,0.36,1)
+  - Vendor shell: Excel-style compact density
+  - 23 Admin pages + 6 Vendor pages + 2 Auth pages + Reports (6 tabs) + /ui/showcase
+  - 6 KPI cards + 3 Recharts + 2 tables + staggered activity feed on Dashboard
+  - 14 mock fixtures (Leheriya domain, INR, City+District only, HSN/GST, Delhivery couriers)
+  - Demo role-switch login (Super Admin / Vendor) with form validation (RHF + Zod)
+- ⏭️ **Next: Phase 2 — Authentication + RBAC + Multi-Tenant**
 
 ---
 

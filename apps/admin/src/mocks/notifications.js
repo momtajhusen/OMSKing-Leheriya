@@ -1,0 +1,111 @@
+// Notifications mock data
+export const notifications = [
+  {
+    id: 'NOT-001',
+    event: 'New Order',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: true,
+      other: false,
+    },
+    description: 'Notify when a new order is received',
+    isOwnerAlert: false,
+  },
+  {
+    id: 'NOT-002',
+    event: 'Vendor Order',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: true,
+      other: false,
+    },
+    description: 'Notify when an order is assigned to a vendor',
+    isOwnerAlert: false,
+  },
+  {
+    id: 'NOT-003',
+    event: 'Dispatch Update',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: false,
+      other: false,
+    },
+    description: 'Notify when order is dispatched',
+    isOwnerAlert: false,
+  },
+  {
+    id: 'NOT-004',
+    event: 'Shipping Update',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: true,
+      other: false,
+    },
+    description: 'Notify on shipping status changes',
+    isOwnerAlert: false,
+  },
+  {
+    id: 'NOT-005',
+    event: 'Delivery Update',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: true,
+      other: false,
+    },
+    description: 'Notify when order is delivered',
+    isOwnerAlert: false,
+  },
+  {
+    id: 'NOT-006',
+    event: 'Return',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: true,
+      other: false,
+    },
+    description: 'Notify when return request is initiated',
+    isOwnerAlert: false,
+  },
+  {
+    id: 'NOT-007',
+    event: 'Inventory Alerts',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: false,
+      other: false,
+    },
+    description: 'Notify on low stock or out of stock',
+    isOwnerAlert: false,
+  },
+  {
+    id: 'NOT-008',
+    event: 'System Alerts',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: false,
+      other: false,
+    },
+    description: 'Notify on system errors or issues',
+    isOwnerAlert: false,
+  },
+  {
+    id: 'NOT-009',
+    event: 'Owner Alert on Vendor Assignment',
+    channels: {
+      telegram: true,
+      email: true,
+      whatsapp: true,
+      other: false,
+    },
+    description: 'Alert owner when vendor is assigned to order',
+    isOwnerAlert: true,
+  },
+];

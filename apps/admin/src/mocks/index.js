@@ -1,0 +1,20 @@
+// Mock fixtures index - re-exports all fixture data
+export { orders } from './orders';
+export { products } from './products';
+export { masterSkus } from './masterSkus';
+export { skuMappings } from './skuMappings';
+export { inventory } from './inventory';
+export { warehouses } from './warehouses';
+export { vendors } from './vendors';
+export { shipments } from './shipments';
+export { returns } from './returns';
+export { rto } from './rto';
+export { ndr } from './ndr';
+export { invoices } from './invoices';
+export { payments } from './payments';
+export { reconciliations } from './reconciliations';
+export { users } from './users';
+export { auditLogs } from './auditLogs';
+export { notifications } from './notifications';
+export { dashboardSeries } from './dashboardSeries';
+export { reports } from './reports';
