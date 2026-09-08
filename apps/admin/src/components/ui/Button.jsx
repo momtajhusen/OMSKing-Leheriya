@@ -3,19 +3,19 @@ import { cn } from '../../lib/utils';
 
 const Button = forwardRef(({ className, variant = 'default', size = 'default', loading, disabled, ...props }, ref) => {
   const variants = {
-    default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+    default: 'bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] text-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200',
     destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-    outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-    secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-    ghost: 'hover:bg-accent hover:text-accent-foreground',
-    link: 'text-primary underline-offset-4 hover:underline',
+    outline: 'border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] hover:bg-[hsl(var(--color-muted))] hover:text-foreground transition-all duration-200',
+    secondary: 'bg-[hsl(var(--color-muted))] text-secondary-foreground hover:bg-[hsl(var(--color-muted))]/80 transition-all duration-200',
+    ghost: 'hover:bg-[hsl(var(--color-muted))] hover:text-foreground transition-all duration-200',
+    link: 'text-[hsl(var(--color-primary-blue))] underline-offset-4 hover:underline',
   };
 
   const sizes = {
-    sm: 'h-8 px-3 text-xs',
-    default: 'h-10 px-4 py-2',
-    lg: 'h-12 px-8 text-lg',
-    icon: 'h-10 w-10',
+    sm: 'h-8 px-3 text-xs rounded-lg',
+    default: 'h-10 px-4 py-2 rounded-lg',
+    lg: 'h-12 px-8 text-lg rounded-lg',
+    icon: 'h-10 w-10 rounded-lg',
   };
 
   return (
@@ -23,7 +23,7 @@ const Button = forwardRef(({ className, variant = 'default', size = 'default', l
       ref={ref}
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-all duration-200 ease-premium active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--color-primary-blue))]/20 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
         variants[variant],
         sizes[size],
         className

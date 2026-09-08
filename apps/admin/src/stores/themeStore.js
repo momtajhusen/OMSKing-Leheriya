@@ -1,42 +1,51 @@
 import { create } from 'zustand';
 
-const useThemeStore = create((set) => ({
-  theme: (() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('oms-theme');
-      if (stored) return stored;
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+export const THEME_STORAGE_KEY = 'oms-theme';
+export const THEME_DEFAULT_FLAG = 'oms-theme-default';
+export const DEFAULT_THEME = 'light';
+
+function applyTheme(theme) {
+  if (typeof document === 'undefined') return;
+  if (document.documentElement.classList.contains('force-light')) return;
+  if (theme === 'dark') {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+}
+
+/** One-time: old installs stored dark as the product default. Admin now starts light. */
+function resolveTheme() {
+  if (typeof window === 'undefined') return DEFAULT_THEME;
+  try {
+    if (localStorage.getItem(THEME_DEFAULT_FLAG) !== DEFAULT_THEME) {
+      localStorage.setItem(THEME_DEFAULT_FLAG, DEFAULT_THEME);
+      localStorage.setItem(THEME_STORAGE_KEY, DEFAULT_THEME);
+      return DEFAULT_THEME;
     }
-    return 'light';
-  })(),
+    return localStorage.getItem(THEME_STORAGE_KEY) || DEFAULT_THEME;
+  } catch {
+    return DEFAULT_THEME;
+  }
+}
+
+const useThemeStore = create((set) => ({
+  theme: resolveTheme(),
 
   initializeTheme: () => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('oms-theme');
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const theme = stored || (prefersDark ? 'dark' : 'light');
-      
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-      
-      set({ theme });
-    }
+    const theme = resolveTheme();
+    applyTheme(theme);
+    set({ theme });
   },
 
   toggleTheme: () => {
     set((state) => {
       const newTheme = state.theme === 'light' ? 'dark' : 'light';
       if (typeof window !== 'undefined') {
-        localStorage.setItem('oms-theme', newTheme);
-        if (newTheme === 'dark') {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
+        localStorage.setItem(THEME_STORAGE_KEY, newTheme);
+        localStorage.setItem(THEME_DEFAULT_FLAG, DEFAULT_THEME);
       }
+      applyTheme(newTheme);
       return { theme: newTheme };
     });
   },
@@ -44,13 +53,10 @@ const useThemeStore = create((set) => ({
   setTheme: (value) => {
     set(() => {
       if (typeof window !== 'undefined') {
-        localStorage.setItem('oms-theme', value);
-        if (value === 'dark') {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
+        localStorage.setItem(THEME_STORAGE_KEY, value);
+        localStorage.setItem(THEME_DEFAULT_FLAG, DEFAULT_THEME);
       }
+      applyTheme(value);
       return { theme: value };
     });
   },

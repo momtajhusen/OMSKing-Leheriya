@@ -18,13 +18,21 @@ export default function SkuMappingPage() {
     console.log('Creating new product for mapping:', mappingId);
   };
 
+  const isMapped = (m) => ['Synced', 'Pending'].includes(m.status);
+
   const tabs = [
-    { id: 'mapped', label: 'Mapped Listings', count: skuMappings.filter(m => m.status === 'Synced').length },
-    { id: 'unmapped', label: 'Unmapped Listings', count: skuMappings.filter(m => m.status !== 'Synced').length },
+    { id: 'mapped', label: 'Mapped', count: skuMappings.filter(isMapped).length },
+    { id: 'unmapped', label: 'Unmapped', count: skuMappings.filter((m) => m.status === 'Unmapped').length },
+    { id: 'failed', label: 'Failed', count: skuMappings.filter((m) => m.status === 'Error').length },
+    { id: 'unlisted', label: 'Unlisted', count: skuMappings.filter((m) => m.status === 'Unlisted').length },
   ];
 
-  const filteredMappings = skuMappings.filter(m => {
-    return activeTab === 'mapped' ? m.status === 'Synced' : m.status !== 'Synced';
+  const filteredMappings = skuMappings.filter((m) => {
+    if (activeTab === 'mapped') return isMapped(m);
+    if (activeTab === 'unmapped') return m.status === 'Unmapped';
+    if (activeTab === 'failed') return m.status === 'Error';
+    if (activeTab === 'unlisted') return m.status === 'Unlisted';
+    return true;
   });
 
   return (
@@ -33,7 +41,7 @@ export default function SkuMappingPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">SKU Mapping</h1>
-          <p className="text-muted-foreground">Map channel SKUs to master SKU codes</p>
+          <p className="text-muted-foreground">Tie Amazon / Myntra / Shopify listing SKUs to a Master SKU. Unmapped rows sit here until ops maps them.</p>
         </div>
         <Button>
           <Plus className="w-4 h-4 mr-2" />
@@ -122,10 +130,12 @@ export default function SkuMappingPage() {
       )}
 
       {/* Unmapped Listings */}
-      {activeTab === 'unmapped' && (
+      {(activeTab === 'unmapped' || activeTab === 'failed' || activeTab === 'unlisted') && (
         <Card>
           <CardHeader>
-            <CardTitle>Unmapped Listings</CardTitle>
+            <CardTitle>
+              {activeTab === 'failed' ? 'Failed sync' : activeTab === 'unlisted' ? 'Unlisted' : 'Unmapped Listings'}
+            </CardTitle>
             <CardDescription>Channel SKUs requiring mapping to master SKU</CardDescription>
           </CardHeader>
           <CardContent>
@@ -218,7 +228,7 @@ export default function SkuMappingPage() {
               {masterSkus.slice(0, 10).map(sku => (
                 <TableRow key={sku.id}>
                   <TableCell className="font-medium">{sku.code}</TableCell>
-                  <TableCell>{sku.productName}</TableCell>
+                  <TableCell>{sku.name}</TableCell>
                   <TableCell>
                     {Object.entries(sku.attributes).map(([key, value]) => (
                       <span key={key} className="text-sm mr-2">

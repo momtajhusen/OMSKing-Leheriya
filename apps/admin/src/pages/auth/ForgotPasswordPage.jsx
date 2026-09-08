@@ -33,8 +33,8 @@ export default function ForgotPasswordPage() {
   return (
     <div className="w-full">
       <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-primary/10 rounded-full mb-4">
-          <Mail className="w-8 h-8 text-primary" />
+        <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
+          <Mail className="h-8 w-8" />
         </div>
         <h1 className="text-3xl font-bold mb-2">Forgot Password</h1>
         <p className="text-muted-foreground">

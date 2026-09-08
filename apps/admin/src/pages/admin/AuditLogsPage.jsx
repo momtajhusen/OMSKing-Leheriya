@@ -13,7 +13,7 @@ export default function AuditLogsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Audit Logs</h1>
-          <p className="text-muted-foreground">Track all system activities and changes</p>
+          <p className="text-muted-foreground">Who changed what inside this tenant. Platform Admin has a separate audit on the SaaS side.</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline">
@@ -35,7 +35,11 @@ export default function AuditLogsPage() {
             <input
               type="text"
               placeholder="Search logs by user, action, or IP address..."
-              className="w-full pl-10 pr-4 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20 focus:border-[hsl(var(--color-primary-blue))] transition-all"
+              style={{
+                backgroundColor: 'hsl(var(--color-card-bg))',
+                color: 'hsl(var(--color-foreground))'
+              }}
             />
           </div>
         </CardContent>

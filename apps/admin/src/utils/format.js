@@ -28,29 +28,63 @@ export const formatPercent = (value) => {
 export const statusBadgeVariant = (status) => {
   const statusMap = {
     // Order statuses
+    'New': 'default',
     'Pending': 'secondary',
     'Processing': 'default',
-    'Awaiting_Shipment': 'default',
-    'Shipped': 'default',
+    'Packed': 'default',
+    'Ready to Ship': 'default',
+    'Dispatched': 'default',
     'Delivered': 'outline',
-    'Return_Requested': 'destructive',
-    'RTO_In_Transit': 'destructive',
+    'Cancelled': 'secondary',
+    'Return Requested': 'destructive',
+    'RTO In Transit': 'destructive',
+    'Unfulfillable': 'destructive',
     'NDR': 'destructive',
-    
+
     // Payment statuses
     'Paid': 'outline',
     'Unpaid': 'destructive',
     'Partially Paid': 'secondary',
     'Void': 'secondary',
-    
+
     // Sync statuses
     'Synced': 'outline',
-    'Pending': 'secondary',
     'Error': 'destructive',
-    
+
+    // QC / reverse-logistics statuses
+    'QC Pending': 'secondary',
+    'QC Complete': 'outline',
+    'QC Done': 'outline',
+    'Approved': 'outline',
+    'Rejected': 'destructive',
+    'Completed': 'outline',
+    'Restocked': 'outline',
+    'Awaiting Pickup': 'secondary',
+    'In Transit': 'default',
+    'Received': 'outline',
+    'Escalated': 'destructive',
+    'Closed': 'outline',
+
+    // Reconciliation statuses
+    'matched': 'outline',
+    'pending': 'secondary',
+    'short_paid': 'destructive',
+    'overpaid': 'secondary',
+    'mismatch': 'destructive',
+    'Payment Received': 'outline',
+    'Return Received': 'outline',
+    'Refund Pending': 'secondary',
+
+    // Vendor order statuses
+    'Pending Acceptance': 'secondary',
+    'Accepted': 'default',
+    'Ready to Dispatch': 'default',
+
     // General statuses
     'Active': 'outline',
     'Inactive': 'secondary',
+    'Expired': 'secondary',
+    'Connected': 'outline',
     'Critical': 'destructive',
     'Low': 'secondary',
     'Matched': 'outline',

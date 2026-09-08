@@ -4,21 +4,29 @@
 
 ---
 
-## ⚠️ Current Phase: 1 — UI Foundation & Design System (In Progress)
+## ⚠️ Current Phase: 2 — Authentication + RBAC + Multi-Tenant (Next)
 
-Build Admin + Vendor UI shells, professional design system with Tailwind CSS 3, shared reusable components (18+ primitives), 23 module pages with realistic dummy data, Light + Dark theme, Recharts dashboard, role-aware React Router, Excel-style Vendor console. No backend integration yet — mock fixtures only.
+Phase 0 and Phase 1 are complete. Dummy UI only — no live Shopify / Amazon / Myntra APIs yet.
 
 - ✅ Phase 0 — Architecture & Foundation (docs, monorepo skeleton, health endpoint, GitHub)
-- 🔄 Phase 1 — UI Foundation & Design System (*You are here*)
-  - Tailwind CSS 3 + shadcn-style semantic tokens + Light/Dark mode
+- ✅ Phase 1 — UI Foundation & Design System
+  - Tailwind CSS 3 + semantic tokens + Light/Dark mode
   - 18+ UI primitives (Button, Input, Table, Tabs, Modal, Drawer, KpiCard, etc.)
-  - Admin shell: 3-pane layout, 23-module sidebar, route transitions (bezier 0.22,1,0.36,1)
+  - Admin shell: sidebar, header, 23-module routes
   - Vendor shell: Excel-style compact density
-  - 23 Admin pages + 6 Vendor pages + 2 Auth pages + Reports (6 tabs) + /ui/showcase
-  - 6 KPI cards + 3 Recharts + 2 tables + staggered activity feed on Dashboard
-  - 14 mock fixtures (Leheriya domain, INR, City+District only, HSN/GST, Delhivery couriers)
-  - Demo role-switch login (Super Admin / Vendor) with form validation (RHF + Zod)
-- ⏭️ **Next: Phase 2 — Authentication + RBAC + Multi-Tenant**
+  - 23 Admin pages + 6 Vendor pages + auth pages + Reports + `/ui/showcase`
+  - Dashboard KPIs/charts + mock fixtures (dummy data only)
+  - Demo role-switch login (Super Admin / Vendor)
+- ⏭️ **Next: Phase 2 backend** — live JWT APIs, tenant middleware, Mongo users. The **UI design** for Authentication, Platform vs Merchant, Users & Roles is in the admin app (dummy login).
+
+Demo accounts (password `password123`) — listed in [docs/DEMO-LOGINS.md](./docs/DEMO-LOGINS.md), not on the login screen:
+
+| Account | Email | Lands on |
+|---|---|---|
+| **Platform Admin** (SaaS owner) | `platform@omsking.com` | `/platform` — all subscribers |
+| Merchant Super Admin | `superadmin@omsking.com` | `/dashboard` — Leheriya only |
+| Ops Admin | `ops@leheriya.com` | `/dashboard` |
+| Vendor | `vendor@omsking.com` | `/vendor/orders` |
 
 ---
 
@@ -57,7 +65,9 @@ omsking/
 │   ├── 04-RBAC-BLUEPRINT.md         Super Admin / Admin / Vendor + permission matrix
 │   ├── 05-API-CONVENTIONS.md        Response format, pagination, status codes
 │   ├── 06-GITHUB-WORKFLOW.md        Branch strategy + commit format
-│   └── 07-FOLDER-STRUCTURE.md       Layer rules, naming conventions
+│   ├── 07-FOLDER-STRUCTURE.md       Layer rules, naming conventions
+│   ├── 08-DOMAIN-RULES.md           Master SKU / WH / Order / ATS / isolation
+│   └── 09-MAIN-PAGES.md             Business spine: pages in order by category
 │
 ├── package.json
 ├── pnpm-workspace.yaml
@@ -132,7 +142,7 @@ pnpm clean
 
 **Multi-tenancy.** Every collection (except `tenants`) has `tenantId: ObjectId`. It can only come from the JWT — never from request body/params/query. A Mongoose plugin auto-injects the filter on every find/update/aggregate. Leaks prevented; see [docs/03-MULTI-TENANCY.md](./docs/03-MULTI-TENANCY.md).
 
-**RBAC.** Every route needs `auth → tenant → requirePermission(key)` middleware. Vendor role gets an additional scope filter so it only sees its assigned vendor's rows. See [docs/04-RBAC-BLUEPRINT.md](./docs/04-RBAC-BLUEPRINT.md).
+**RBAC.** Routes use `auth → tenant → requirePermission(key)` — never role name alone. Vendor scope filters assigned rows. Tenant A cannot read Tenant B (`tenantId` from JWT only). See [docs/04-RBAC-BLUEPRINT.md](./docs/04-RBAC-BLUEPRINT.md).
 
 **API format.** Every response is `{ success, message, data, meta }`. Lists use pagination (`page`, `limit`, `meta.totalPages`). Status codes follow REST norms. See [docs/05-API-CONVENTIONS.md](./docs/05-API-CONVENTIONS.md).
 

@@ -12,7 +12,7 @@ export default function MasterSkuPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Master SKU</h1>
-          <p className="text-muted-foreground">Manage internal SKU codes and variants</p>
+          <p className="text-muted-foreground">One internal identity per style. Marketplace SKUs map here so stock is not double-counted.</p>
         </div>
         <Button>
           <Plus className="w-4 h-4 mr-2" />
@@ -28,7 +28,11 @@ export default function MasterSkuPage() {
             <input
               type="text"
               placeholder="Search by Master SKU or product name..."
-              className="w-full pl-10 pr-4 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20 focus:border-[hsl(var(--color-primary-blue))] transition-all"
+              style={{
+                backgroundColor: 'hsl(var(--color-card-bg))',
+                color: 'hsl(var(--color-foreground))'
+              }}
             />
           </div>
         </CardContent>
@@ -61,7 +65,7 @@ export default function MasterSkuPage() {
                       {sku.code}
                     </div>
                   </TableCell>
-                  <TableCell>{sku.productName}</TableCell>
+                  <TableCell>{sku.name}</TableCell>
                   <TableCell>
                     <div className="space-y-1">
                       {Object.entries(sku.attributes).map(([key, value]) => (
@@ -71,11 +75,11 @@ export default function MasterSkuPage() {
                       ))}
                     </div>
                   </TableCell>
-                  <TableCell>{sku.baseProduct}</TableCell>
+                  <TableCell>{sku.category}</TableCell>
                   <TableCell>
-                    <Badge variant="outline">{sku.channelMappings} channels</Badge>
+                    <Badge variant="outline">{sku.channelMappings.length} channels</Badge>
                   </TableCell>
-                  <TableCell>{sku.totalStock}</TableCell>
+                  <TableCell>{sku.stock}</TableCell>
                   <TableCell>
                     <Button variant="ghost" size="sm">View</Button>
                   </TableCell>

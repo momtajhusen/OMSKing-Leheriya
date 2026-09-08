@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/utils';
-import { ChevronDown } from 'lucide-react';
 
-function DropdownMenu({ trigger, children, align = 'end' }) {
+const DropdownContext = createContext({ close: () => {} });
+
+function DropdownMenu({ trigger, children, align = 'end', className }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -12,8 +13,15 @@ function DropdownMenu({ trigger, children, align = 'end' }) {
         setOpen(false);
       }
     }
+    function handleEscape(event) {
+      if (event.key === 'Escape') setOpen(false);
+    }
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, []);
 
   const alignments = {
@@ -24,30 +32,39 @@ function DropdownMenu({ trigger, children, align = 'end' }) {
 
   return (
     <div ref={ref} className="relative inline-block">
-      <div onClick={() => setOpen(!open)}>{trigger}</div>
+      <div onClick={() => setOpen((prev) => !prev)}>{trigger}</div>
       {open && (
-        <div
-          className={cn(
-            'absolute z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md',
-            'top-full mt-2',
-            alignments[align]
-          )}
-        >
-          {children}
-        </div>
+        <DropdownContext.Provider value={{ close: () => setOpen(false) }}>
+          <div
+            className={cn(
+              'absolute z-50 min-w-[12rem] overflow-hidden rounded-xl border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] text-popover-foreground shadow-pop',
+              'top-full mt-2 p-1.5',
+              alignments[align],
+              className
+            )}
+          >
+            {children}
+          </div>
+        </DropdownContext.Provider>
       )}
     </div>
   );
 }
 
-function DropdownMenuItem({ className, children, onClick, ...props }) {
+function DropdownMenuItem({ className, children, onClick, closeOnSelect = true, ...props }) {
+  const { close } = useContext(DropdownContext);
+
   return (
     <button
+      type="button"
       onClick={() => {
         onClick?.();
+        if (closeOnSelect) close();
       }}
       className={cn(
-        'relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex w-full cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none transition-colors',
+        'hover:bg-[hsl(var(--color-muted))] focus:bg-[hsl(var(--color-muted))]',
+        'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className
       )}
       {...props}
@@ -58,7 +75,15 @@ function DropdownMenuItem({ className, children, onClick, ...props }) {
 }
 
 function DropdownMenuSeparator({ className }) {
-  return <div className={cn('my-1 h-px bg-border', className)} />;
+  return <div className={cn('-mx-1.5 my-1.5 h-px bg-[hsl(var(--color-border-premium))]', className)} />;
 }
 
-export { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator };
+function DropdownMenuLabel({ className, children }) {
+  return (
+    <div className={cn('px-2.5 py-1.5 text-xs font-medium text-muted-foreground', className)}>
+      {children}
+    </div>
+  );
+}
+
+export { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel };

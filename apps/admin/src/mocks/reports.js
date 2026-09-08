@@ -17,11 +17,11 @@ export const reports = {
       { month: 'Sep', revenue: 5950000, orders: 725 },
     ],
     tableData: [
-      { date: '2024-09-07', orders: 85, revenue: 685000, channel: 'Shopify' },
-      { date: '2024-09-06', orders: 72, revenue: 580000, channel: 'Amazon' },
-      { date: '2024-09-05', orders: 68, revenue: 545000, channel: 'Myntra' },
-      { date: '2024-09-04', orders: 75, revenue: 620000, channel: 'Shopify' },
-      { date: '2024-09-03', orders: 62, revenue: 510000, channel: 'Amazon' },
+      { date: '2026-09-07', orders: 85, revenue: 685000, channel: 'Shopify' },
+      { date: '2026-09-06', orders: 72, revenue: 580000, channel: 'Amazon' },
+      { date: '2026-09-05', orders: 68, revenue: 545000, channel: 'Myntra' },
+      { date: '2026-09-04', orders: 75, revenue: 620000, channel: 'Shopify' },
+      { date: '2026-09-03', orders: 62, revenue: 510000, channel: 'Amazon' },
     ],
   },
   // Inventory report data
@@ -62,11 +62,11 @@ export const reports = {
       { courier: 'Xpressbees', shipments: 60, delivered: 40, avgTime: 3.5 },
     ],
     tableData: [
-      { awb: 'DEL123456789', orderId: '65207-LEH', courier: 'Delhivery', status: 'Delivered', date: '2024-09-05' },
-      { awb: 'BLU987654321', orderId: '65208-LEH', courier: 'Bluedart', status: 'In Transit', date: '2024-09-06' },
-      { awb: 'ECO456789123', orderId: '65211-LEH', courier: 'Ecom Express', status: 'Delivered', date: '2024-09-04' },
-      { awb: 'XPR789123456', orderId: '65215-LEH', courier: 'Xpressbees', status: 'Exception', date: '2024-09-07' },
-      { awb: 'DEL321654987', orderId: '65218-LEH', courier: 'Delhivery', status: 'Delivered', date: '2024-09-03' },
+      { awb: 'DEL123456789', orderId: '65207-LEH', courier: 'Delhivery', status: 'Delivered', date: '2026-09-05' },
+      { awb: 'BLU987654321', orderId: '65208-LEH', courier: 'Bluedart', status: 'In Transit', date: '2026-09-06' },
+      { awb: 'ECO456789123', orderId: '65211-LEH', courier: 'Ecom Express', status: 'Delivered', date: '2026-09-04' },
+      { awb: 'XPR789123456', orderId: '65215-LEH', courier: 'Xpressbees', status: 'Exception', date: '2026-09-07' },
+      { awb: 'DEL321654987', orderId: '65218-LEH', courier: 'Delhivery', status: 'Delivered', date: '2026-09-03' },
     ],
   },
   // Returns report data

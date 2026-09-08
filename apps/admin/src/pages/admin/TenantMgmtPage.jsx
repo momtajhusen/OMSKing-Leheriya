@@ -1,223 +1,315 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
+import { CHANNEL_CATALOG, SUBSCRIPTION_PLANS } from '../../mocks';
+import { PLATFORM_TENANTS } from '../../mocks/platform';
+import { useAuth } from '../../hooks/useAuth';
+import { useSimulatedLoad } from '../../hooks/useSimulatedLoad';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import { Building2, Plus, ArrowRight, CheckCircle, Upload, Link } from 'lucide-react';
+import Input from '../../components/ui/Input';
+import Select from '../../components/ui/Select';
+import PageLoader from '../../components/ui/PageLoader';
+import Modal from '../../components/ui/Modal';
+import { Building2, Plus, CheckCircle } from 'lucide-react';
+import { PlatformPage, PlatformSheet } from '../../components/platform/PlatformChrome';
 
 export default function TenantMgmtPage() {
+  const navigate = useNavigate();
+  const { impersonateTenant } = useAuth();
+  const [tab, setTab] = useState('tenants');
+  const [tenants, setTenants] = useState(PLATFORM_TENANTS);
   const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
+  const [merchantName, setMerchantName] = useState('');
+  const [ownerEmail, setOwnerEmail] = useState('');
+  const [planId, setPlanId] = useState('growth');
+  const [picked, setPicked] = useState([]);
+  const [planTenant, setPlanTenant] = useState(null);
+  const [nextPlan, setNextPlan] = useState('growth');
+  const loading = useSimulatedLoad(tab);
 
-  const tenants = [
-    { id: 'TNT-001', name: 'Leheriya Creations', status: 'Active', type: 'Production', channels: 3, lastSync: '2024-09-08 10:30 AM' },
-    { id: 'TNT-002', name: 'Demo Tenant 2', status: 'Trial', type: 'Trial', channels: 1, lastSync: '2024-09-07 04:15 PM' },
-    { id: 'TNT-003', name: 'Test Tenant', status: 'Inactive', type: 'Development', channels: 0, lastSync: 'Never' },
-  ];
-
-  const handleStartWizard = () => {
+  const startWizard = () => {
     setShowWizard(true);
     setWizardStep(1);
+    setMerchantName('');
+    setOwnerEmail('');
+    setPlanId('growth');
+    setPicked([]);
   };
 
-  const handleNextStep = () => {
-    if (wizardStep < 3) {
-      setWizardStep(wizardStep + 1);
-    } else {
-      setShowWizard(false);
-      setWizardStep(1);
-    }
+  const completeWizard = () => {
+    const plan = SUBSCRIPTION_PLANS.find((p) => p.id === planId);
+    const names = CHANNEL_CATALOG.filter((c) => picked.includes(c.id)).map((c) => c.name);
+    const id = `TNT-${String(tenants.length + 1).padStart(3, '0')}`;
+    setTenants((prev) => [
+      {
+        id,
+        name: merchantName,
+        owner: ownerEmail.split('@')[0],
+        email: ownerEmail,
+        status: 'Trial',
+        plan: plan?.name || 'Growth',
+        channels: names,
+        users: 1,
+        lastSync: 'Never',
+        mrr: 0,
+      },
+      ...prev,
+    ]);
+    toast.success(`${merchantName} onboarded. Invite sent to ${ownerEmail}`);
+    setShowWizard(false);
   };
 
-  const handlePreviousStep = () => {
-    if (wizardStep > 1) {
-      setWizardStep(wizardStep - 1);
-    }
+  const setStatus = (tenant, status) => {
+    setTenants((prev) => prev.map((item) => (item.id === tenant.id ? { ...item, status } : item)));
+    toast.success(`${tenant.name} marked ${status}`);
   };
+
+  const openMerchant = (tenant) => {
+    if (tenant.status === 'Suspended') {
+      toast.error('Activate this tenant before opening it');
+      return;
+    }
+    impersonateTenant(tenant);
+    toast.success(`Opened ${tenant.name}`);
+    navigate('/dashboard');
+  };
+
+  const savePlan = () => {
+    if (!planTenant) return;
+    const plan = SUBSCRIPTION_PLANS.find((p) => p.id === nextPlan);
+    setTenants((prev) => prev.map((item) => (item.id === planTenant.id ? { ...item, plan: plan?.name || item.plan } : item)));
+    toast.success(`${planTenant.name} moved to ${plan?.name}`);
+    setPlanTenant(null);
+  };
+
+  if (loading) return <PageLoader label="Loading subscribers..." />;
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Tenant/Merchant Management</h1>
-          <p className="text-muted-foreground">Manage multi-tenant accounts and onboarding</p>
-        </div>
-        <Button onClick={handleStartWizard}>
+    <PlatformPage
+      title="Subscribers"
+      subtitle="Each row is a merchant tenant — own users, channels, and data. Not a vendor packing list."
+      action={
+        <Button onClick={startWizard}>
           <Plus className="w-4 h-4 mr-2" />
           New Tenant
         </Button>
+      }
+    >
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={tab === 'tenants' ? 'pill-tab pill-tab-active' : 'pill-tab pill-tab-inactive'} onClick={() => setTab('tenants')}>
+          Tenants
+        </button>
+        <button type="button" className={tab === 'plans' ? 'pill-tab pill-tab-active' : 'pill-tab pill-tab-inactive'} onClick={() => setTab('plans')}>
+          Plans & Subscriptions
+        </button>
       </div>
 
-      {/* Business Rule Info */}
-      <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="pt-6">
-          <div className="flex items-start gap-3">
-            <Building2 className="w-5 h-5 text-primary mt-0.5" />
-            <div>
-              <p className="font-medium">New Tenant Onboarding Flow</p>
-              <p className="text-sm text-muted-foreground">
-                Import products channel-wise: Shopify → Myntra → Amazon. 
-                Same SKU items are auto-mapped to existing Master SKU codes.
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {tab === 'plans' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {SUBSCRIPTION_PLANS.map((plan) => (
+            <Card key={plan.id} className={`premium-card border-0 ${plan.id === 'enterprise' ? 'ring-2 ring-indigo-500/30' : ''}`}>
+              <CardHeader>
+                <CardTitle>{plan.name}</CardTitle>
+                <CardDescription>{plan.price}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm mb-3">
+                  {plan.channelLimit == null ? 'Unlimited channels' : `${plan.channelLimit} channel(s)`}
+                </p>
+                <ul className="text-sm text-muted-foreground space-y-1">
+                  {plan.features.map((f) => (
+                    <li key={f}>• {f}</li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
-      {/* New Tenant Wizard */}
-      {showWizard && (
-        <Card className="border-primary/50">
+      {tab === 'tenants' && showWizard && (
+        <Card className="premium-card border-0 ring-2 ring-indigo-500/25">
           <CardHeader>
-            <CardTitle>New Tenant Onboarding Wizard</CardTitle>
-            <CardDescription>Step {wizardStep} of 3: Import products from sales channels</CardDescription>
+            <CardTitle>New tenant</CardTitle>
+            <CardDescription>Step {wizardStep} of 4 — merchant, channels, Super Admin, then bulk catalog import.</CardDescription>
           </CardHeader>
-          <CardContent>
-            {/* Wizard Steps */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${wizardStep >= 1 ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-                    {wizardStep > 1 ? <CheckCircle className="w-4 h-4" /> : '1'}
-                  </div>
-                  <span className={wizardStep >= 1 ? 'font-medium' : 'text-muted-foreground'}>Shopify</span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                <div className="flex items-center gap-2">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${wizardStep >= 2 ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-                    {wizardStep > 2 ? <CheckCircle className="w-4 h-4" : '2'}
-                  </div>
-                  <span className={wizardStep >= 2 ? 'font-medium' : 'text-muted-foreground'}>Myntra</span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                <div className="flex items-center gap-2">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${wizardStep >= 3 ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-                    {wizardStep > 3 ? <CheckCircle className="w-4 h-4" /> : '3'}
-                  </div>
-                  <span className={wizardStep >= 3 ? 'font-medium' : 'text-muted-foreground'}>Amazon</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Step Content */}
+          <CardContent className="space-y-4">
             {wizardStep === 1 && (
-              <div className="space-y-4">
-                <h3 className="font-medium">Step 1: Import from Shopify</h3>
-                <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                  <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-muted-foreground mb-4">Connect to Shopify store or upload product file</p>
-                  <Button variant="outline">
-                    <Link className="w-4 h-4 mr-2" />
-                    Connect Shopify
-                  </Button>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium">Merchant name</label>
+                  <Input value={merchantName} onChange={(e) => setMerchantName(e.target.value)} placeholder="e.g. Leheriya Creations" />
                 </div>
-                <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-                  <p className="text-sm text-green-800 dark:text-green-200">
-                    <CheckCircle className="w-4 h-4 inline mr-2" />
-                    Same SKU items will be auto-mapped to existing Master SKU codes
-                  </p>
+                <div>
+                  <label className="text-sm font-medium">Owner email</label>
+                  <Input value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} placeholder="owner@merchant.com" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Subscription plan</label>
+                  <Select value={planId} onChange={(e) => setPlanId(e.target.value)}>
+                    {SUBSCRIPTION_PLANS.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name} — {p.price}</option>
+                    ))}
+                  </Select>
                 </div>
               </div>
             )}
-
             {wizardStep === 2 && (
-              <div className="space-y-4">
-                <h3 className="font-medium">Step 2: Import from Myntra</h3>
-                <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                  <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-muted-foreground mb-4">Connect to Myntra partner account or upload product file</p>
-                  <Button variant="outline">
-                    <Link className="w-4 h-4 mr-2" />
-                    Connect Myntra
-                  </Button>
+              <div>
+                <p className="text-sm text-muted-foreground mb-3">Select launch channels. Merchant Super Admin can add more later.</p>
+                <div className="max-w-sm mb-3">
+                  <Select
+                    value=""
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      if (id && !picked.includes(id)) setPicked((prev) => [...prev, id]);
+                    }}
+                  >
+                    <option value="">Select channel</option>
+                    {CHANNEL_CATALOG.filter((c) => !picked.includes(c.id)).map((channel) => (
+                      <option key={channel.id} value={channel.id}>{channel.name}</option>
+                    ))}
+                  </Select>
                 </div>
-                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-                  <p className="text-sm text-blue-800 dark:text-blue-200">
-                    <Link className="w-4 h-4 inline mr-2" />
-                    Products from Myntra will be mapped to existing SKUs where possible
-                  </p>
-                </div>
+                {picked.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {picked.map((id) => (
+                      <Badge key={id} variant="outline" className="gap-1">
+                        {CHANNEL_CATALOG.find((c) => c.id === id)?.name}
+                        <button type="button" className="ml-1" onClick={() => setPicked((prev) => prev.filter((x) => x !== id))}>×</button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
-
             {wizardStep === 3 && (
-              <div className="space-y-4">
-                <h3 className="font-medium">Step 3: Import from Amazon</h3>
-                <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                  <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-muted-foreground mb-4">Connect to Amazon Seller Central or upload product file</p>
-                  <Button variant="outline">
-                    <Link className="w-4 h-4 mr-2" />
-                    Connect Amazon
-                  </Button>
-                </div>
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg">
-                  <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                    <CheckCircle className="w-4 h-4 inline mr-2" />
-                    Final step: Complete product catalog import and mapping
-                  </p>
-                </div>
+              <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-300">
+                <CheckCircle className="w-4 h-4" />
+                Default roles (Super Admin, Admin, Vendor), warehouses and notification seeds will be cloned for this tenant.
               </div>
             )}
-
-            {/* Wizard Actions */}
-            <div className="flex justify-between mt-6 pt-4 border-t">
-              <Button
-                variant="outline"
-                onClick={handlePreviousStep}
-                disabled={wizardStep === 1}
-              >
-                Previous
+            {wizardStep === 4 && (
+              <p className="text-sm text-muted-foreground">
+                After create, import products Shopify → Myntra → Amazon. Same SKU auto-maps. Remainder sits in Unmapped Listings.
+              </p>
+            )}
+            <div className="flex justify-between pt-4 border-t">
+              <Button variant="outline" onClick={() => (wizardStep === 1 ? setShowWizard(false) : setWizardStep(wizardStep - 1))}>
+                {wizardStep === 1 ? 'Cancel' : 'Previous'}
               </Button>
-              <Button onClick={handleNextStep}>
-                {wizardStep === 3 ? 'Complete' : 'Next'}
-                <ArrowRight className="w-4 h-4 ml-2" />
+              <Button
+                onClick={() => {
+                  if (wizardStep === 1 && (!merchantName.trim() || !ownerEmail.includes('@'))) {
+                    toast.error('Enter merchant name and owner email');
+                    return;
+                  }
+                  if (wizardStep === 2 && picked.length === 0) {
+                    toast.error('Select at least one channel');
+                    return;
+                  }
+                  if (wizardStep < 4) setWizardStep(wizardStep + 1);
+                  else {
+                    completeWizard();
+                    toast.success('Tenant created. Open merchant, then Catalog → Bulk import (Shopify → Myntra → Amazon).');
+                  }
+                }}
+              >
+                {wizardStep === 4 ? 'Create & open import' : 'Next'}
               </Button>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Tenant Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Tenant List ({tenants.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Tenant ID</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Channels</TableHead>
-                <TableHead>Last Sync</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tenants.map(tenant => (
-                <TableRow key={tenant.id}>
-                  <TableCell className="font-medium">{tenant.id}</TableCell>
-                  <TableCell>{tenant.name}</TableCell>
-                  <TableCell>
-                    <Badge variant={tenant.status === 'Active' ? 'outline' : 'secondary'}>
-                      {tenant.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{tenant.type}</TableCell>
-                  <TableCell>{tenant.channels}</TableCell>
-                  <TableCell>{tenant.lastSync}</TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm">Manage</Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
+      {tab === 'tenants' && (
+        <>
+          <div className="premium-card bg-indigo-50/80 p-4 dark:bg-indigo-950/30">
+            <div className="flex items-start gap-3">
+              <Building2 className="mt-0.5 h-5 w-5 text-indigo-600" />
+              <div>
+                <p className="font-medium">SaaS isolation</p>
+                <p className="text-sm text-muted-foreground">
+                  Open merchant puts you inside that tenant as Super Admin (impersonation). Tenant data stays filtered by tenantId. Vendor users never see this screen.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <PlatformSheet>
+            <div className="border-b border-[hsl(var(--color-border-premium))] px-4 py-3">
+              <h2 className="font-semibold">Tenant list ({tenants.length})</h2>
+            </div>
+            <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tenant</TableHead>
+                    <TableHead>Owner</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Plan</TableHead>
+                    <TableHead>Channels</TableHead>
+                    <TableHead>Users</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tenants.map((tenant) => (
+                    <TableRow key={tenant.id}>
+                      <TableCell>
+                        <div className="font-medium">{tenant.name}</div>
+                        <div className="text-xs text-muted-foreground">{tenant.id}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div>{tenant.owner}</div>
+                        <div className="text-xs text-muted-foreground">{tenant.email}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={tenant.status === 'Active' ? 'outline' : 'secondary'}>{tenant.status}</Badge>
+                      </TableCell>
+                      <TableCell>{tenant.plan}</TableCell>
+                      <TableCell className="text-sm">{tenant.channels.length ? tenant.channels.join(', ') : '—'}</TableCell>
+                      <TableCell>{tenant.users}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openMerchant(tenant)}>Open</Button>
+                          <Button variant="ghost" size="sm" onClick={() => { setPlanTenant(tenant); setNextPlan('growth'); }}>Plan</Button>
+                          {tenant.status === 'Suspended' ? (
+                            <Button variant="ghost" size="sm" onClick={() => setStatus(tenant, 'Active')}>Activate</Button>
+                          ) : (
+                            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setStatus(tenant, 'Suspended')}>Suspend</Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+          </PlatformSheet>
+        </>
+      )}
+
+      <Modal
+        open={!!planTenant}
+        onOpenChange={(open) => !open && setPlanTenant(null)}
+        title="Change plan"
+        description={planTenant ? planTenant.name : ''}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setPlanTenant(null)}>Cancel</Button>
+            <Button onClick={savePlan}>Save plan</Button>
+          </>
+        }
+      >
+        <Select value={nextPlan} onChange={(e) => setNextPlan(e.target.value)}>
+          {SUBSCRIPTION_PLANS.map((p) => (
+            <option key={p.id} value={p.id}>{p.name} — {p.price}</option>
+          ))}
+        </Select>
+      </Modal>
+    </PlatformPage>
   );
 }

@@ -3,29 +3,31 @@ import { cn } from '../../lib/utils';
 
 const Input = forwardRef(({ className, type = 'text', error, iconLeft, iconRight, ...props }, ref) => {
   return (
-    <div className="relative">
-      {iconLeft && (
-        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-          {iconLeft}
-        </div>
-      )}
-      <input
-        type={type}
-        ref={ref}
-        className={cn(
-          'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
-          error && 'border-destructive focus-visible:ring-destructive',
-          iconLeft && 'pl-10',
-          iconRight && 'pr-10',
-          className
+    <div>
+      <div className="relative">
+        {iconLeft && (
+          <span className="pointer-events-none absolute inset-y-0 left-0 z-10 flex w-11 items-center justify-center text-slate-400">
+            {iconLeft}
+          </span>
         )}
-        {...props}
-      />
-      {iconRight && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-          {iconRight}
-        </div>
-      )}
+        <input
+          type={type}
+          ref={ref}
+          className={cn(
+            'flex h-10 w-full rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-3 py-2 text-sm text-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--color-primary-blue))]/20 focus-visible:ring-offset-2 focus-visible:border-[hsl(var(--color-primary-blue))] disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200',
+            error && 'border-destructive focus-visible:ring-destructive focus-visible:border-destructive',
+            iconLeft && 'pl-11',
+            iconRight && 'pr-11',
+            className
+          )}
+          {...props}
+        />
+        {iconRight && (
+          <span className="pointer-events-none absolute inset-y-0 right-0 z-10 flex w-11 items-center justify-center text-slate-400">
+            {iconRight}
+          </span>
+        )}
+      </div>
       {error && (
         <p className="mt-1 text-xs text-destructive">{error}</p>
       )}

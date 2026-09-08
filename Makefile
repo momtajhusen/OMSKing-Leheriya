@@ -4,7 +4,7 @@
 # Usage: make <target>
 # ============================================================
 
-.PHONY: help install install-ci mongo-start mongo-stop mongo-status \
+.PHONY: help install install-ci mongo-start mongo-stop mongo-status ensure-mongo \
 	run dev all backend admin build stop clean status test
 
 SHELL := /bin/bash
@@ -70,28 +70,51 @@ mongo-status: ## Check MongoDB connectivity
 	  echo "❌ MongoDB: NOT RUNNING on :27017. Start with 'make mongo-start'"; \
 	fi
 
+ensure-mongo: ## Auto-start MongoDB if not running
+	@if nc -z localhost 27017 2>/dev/null; then \
+	  echo "✅ MongoDB already running on tcp://localhost:27017"; \
+	else \
+	  echo "🚀 Starting MongoDB..."; \
+	  brew services start mongodb-community 2>/dev/null || \
+	   (mongod --config /opt/homebrew/etc/mongod.conf --fork && echo "Started via --fork"); \
+	  echo "⏳ Waiting for MongoDB to be ready..."; \
+	  for i in $$(seq 1 30); do \
+	    if nc -z localhost 27017 2>/dev/null; then \
+	      echo "✅ MongoDB is now ready on tcp://localhost:27017"; \
+	      exit 0; \
+	    fi; \
+	    sleep 1; \
+	  done; \
+	  echo "❌ MongoDB failed to start within 30 seconds"; \
+	  exit 1; \
+	fi
+
 # ============================================================
 # Run (primary targets you'll use every day)
 # ============================================================
 run: dev ## ⭐ Default — start everything together (mongo-check + backend + admin)
 dev: all ## Alias for 'make all'
-all: mongo-status ## Start backend + admin together (concurrently, color-coded). Ctrl+C to stop all.
+all: ensure-mongo ## Start backend + admin together (concurrently, color-coded). Ctrl+C to stop all.
 	@echo ""
 	@echo "╔═══════════════════════════════════════════════════╗"
 	@echo "║  OMSKing — Starting all services                  ║"
-	@echo "║  Backend  → http://localhost:5001  (magenta)      ║"
-	@echo "║  Admin UI → http://localhost:5173  (cyan)         ║"
-	@echo "║  MongoDB  → tcp://localhost:27017  (gray)         ║"
+	@echo "║  Backend     → http://localhost:5001  (magenta)    ║"
+	@echo "║  App         → http://localhost:5173  (cyan)      ║"
+	@echo "║    Public    → /  /about  /features  /pricing     ║"
+	@echo "║    Login     → /auth/login                         ║"
+	@echo "║    Platform  → /platform   (SaaS control)          ║"
+	@echo "║    Merchant  → /dashboard  Vendor → /vendor/orders ║"
+	@echo "║  MongoDB     → tcp://localhost:27017  (gray)       ║"
 	@echo "║                                                   ║"
 	@echo "║  Press Ctrl+C ONCE to stop EVERYTHING cleanly     ║"
 	@echo "╚═══════════════════════════════════════════════════╝"
 	@echo ""
 	@pnpm run dev:all
 
-backend: mongo-status ## Only run backend (port 5001)
+backend: ensure-mongo ## Only run backend (port 5001)
 	@pnpm run dev:backend
 
-admin: mongo-status ## Only run admin (port 5173) — auto waits for backend
+admin: ensure-mongo ## Only run frontend (port 5173) — public + admin, waits for backend
 	@pnpm run start:admin
 
 # ============================================================
@@ -100,7 +123,7 @@ admin: mongo-status ## Only run admin (port 5173) — auto waits for backend
 build: ## Production build admin + backend check
 	@pnpm run build
 
-stop: ## Kill backend (5001) + admin (5173) dev servers
+stop: ## Kill backend (5001) + frontend (5173) dev servers
 	@-lsof -ti:5001,5173 | xargs kill -9 2>/dev/null || true
 	@echo "✅ Stopped processes on ports 5001 and 5173."
 
@@ -111,7 +134,7 @@ clean: ## Remove node_modules + dist + build artifacts
 status: ## Quick status — mongo, ports
 	@$(MAKE) --no-print-directory mongo-status
 	@if nc -z localhost 5001 2>/dev/null; then echo "✅ Backend : running on http://localhost:5001"; else echo "◻️  Backend : not running on :5001"; fi
-	@if nc -z localhost 5173 2>/dev/null; then echo "✅ Admin   : running on http://localhost:5173"; else echo "◻️  Admin   : not running on :5173"; fi
+	@if nc -z localhost 5173 2>/dev/null; then echo "✅ App     : running on http://localhost:5173"; else echo "◻️  App     : not running on :5173"; fi
 
 test: build ## Placeholder test: just ensures build passes
 	@echo "✅ Build OK — real tests added Phase 2+."

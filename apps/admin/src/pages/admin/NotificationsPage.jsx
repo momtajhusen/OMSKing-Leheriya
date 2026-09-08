@@ -52,7 +52,7 @@ export default function NotificationsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Notifications</h1>
-          <p className="text-muted-foreground">Configure notification preferences for different events</p>
+          <p className="text-muted-foreground">Telegram, email, WhatsApp per Shopify / Amazon / Myntra event. Vendor Telegram on assign.</p>
         </div>
         <Button onClick={handleSave}>
           <Save className="w-4 h-4 mr-2" />
@@ -190,6 +190,36 @@ export default function NotificationsPage() {
               <span className="text-muted-foreground">Owner Alert (Always On)</span>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Delivery status</CardTitle>
+          <CardDescription>queued → sent → delivered, or failed → retry. Event-driven engine.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Event</TableHead>
+                <TableHead>Channel</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow>
+                <TableCell>order.new</TableCell>
+                <TableCell>Telegram</TableCell>
+                <TableCell><Badge variant="outline">delivered</Badge></TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>label.failure</TableCell>
+                <TableCell>Email</TableCell>
+                <TableCell><Badge variant="secondary">failed → retry</Badge></TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </div>

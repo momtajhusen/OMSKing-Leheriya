@@ -1,185 +1,127 @@
 # RBAC Blueprint — OMSKing
 
-## Philosophy
-
-Flat, simple, auditable. No ABAC, no policies, no policy engines at launch.
-
-Launch roles (exactly 3, extensible):
-
-| Role code | Friendly name | Who gets it | Scope |
-|-----------|---------------|-------------|-------|
-| `super_admin` | Super Admin | Leheriya owners + trusted ops managers | EVERYTHING — no restrictions. Creates/edits users, manages tenants, does finance. |
-| `admin` | Admin / Ops | Day-to-day operations staff | All business modules except: user mgmt, tenant settings, finance (reconciliation), audit logs view |
-| `vendor` | Vendor | External vendors / dropshippers | **Only their assigned vendors' rows.** Sees orders assigned to them, can accept/reject, update dispatch, upload AWB in bulk (Excel-style, Phase 11). Cannot see other vendors, cannot see prices/costs, cannot see finance. |
-
-Additional roles (Operations Manager, Customer Support, Finance, Warehouse Picker, etc.) will be added by Phase 2+ as rows in the `roles` collection — no code changes, just permission bit changes.
+Design matches product spec §12 (Permissions / RBAC). Frontend guards are UX only. **Server-side `tenantId` + `requirePermission(key)` is the security boundary.**
 
 ---
 
-## Permission Model — Flat Permission Keys
+## 12.1 Platform Roles
 
-Format: `<module>.<action>`  
-Modules: `auth`, `tenants`, `users`, `roles`, `dashboard`, `products`, `master_skus`, `sku_mappings`, `warehouses`, `inventory`, `orders`, `fulfilment`, `vendors`, `shipping`, `returns`, `rto`, `ndr`, `invoices`, `payments`, `reconciliations`, `notifications`, `audit_logs`, `integrations`, `settings`.
+| Role code | Name | Scope |
+|-----------|------|--------|
+| `platform_admin` | Platform Admin | Full **SaaS** access: subscribers, plans, Open tenant. No merchant packing desk of its own. |
+| `super_admin` | Merchant Super Admin | Full access **inside own tenant only**. Users, settings, finance, catalog, ops. |
+| `operations` | Operations | Orders, fulfilment, shipping, vendors. |
+| `warehouse` | Warehouse | Inventory, picking, packing, dispatch. |
+| `accounts` | Accounts | Payments, reconciliation, finance. |
+| `catalog_manager` | Catalog Manager | Products, SKUs, mappings. |
+| `customer_support` | Customer Support | Orders, customers, returns, shipment info on the order (not label generate). |
+| `vendor` | Vendor | Assigned vendor orders and required dispatch only. |
 
-Actions: `read`, `create`, `update`, `delete`, `export`, `approve`, `manage` (manage = all + destructive).
+`admin` is a **legacy alias** of `operations` (old demo logins / tokens). New users get `operations`.
 
-Example permission keys:
+Platform Admin is **not** a tenant role and is never assigned on Users & Roles inside a merchant.
+
+---
+
+## 12.2 Permission Model
+
+Do **not** authorize with `if (role === 'operations')`. Store a `permissions: string[]` on the role (and copy onto the JWT). Check keys:
+
 ```
-orders.read
-orders.create
-orders.update
-orders.delete
-orders.export
-orders.approve          (e.g. approve cancellation / approve return)
-orders.manage
-inventory.update
-invoices.create
-reconciliations.read
-audit_logs.read
+orders.view
+orders.edit
+orders.cancel
+inventory.view
+inventory.adjust
+shipping.generate
+shipping.cancel
+returns.approve
+finance.view
+finance.reconcile
 users.manage
+settings.manage
 ```
 
-`manage` = meta-permission that implies `read,create,update,delete,export,approve` for that module.
+Catalog / support extras (same pattern):
 
-### Launch Permission Matrix
+```
+catalog.view
+catalog.edit
+customers.view
+```
 
-| Module | super_admin | admin | vendor |
-|--------|:-----------:|:-----:|:------:|
-| auth (self) | ✓ | ✓ | ✓ |
-| tenants | manage | — | — |
-| users | manage | read | — |
-| roles | manage | — | — |
-| dashboard | read | read | limited (own stats) |
-| products | manage | manage | — |
-| master_skus | manage | manage | — |
-| sku_mappings | manage | manage | — |
-| warehouses | manage | read | — |
-| inventory | manage | read + update (PO/adjust limited) | — |
-| orders | manage | read + update | read + update (only assigned) |
-| fulfilment | manage | manage | read + update (only assigned) |
-| vendors | manage | read | read (only own row) |
-| shipping | manage | manage | limited (AWB upload only) |
-| returns | manage | read + approve | — |
-| rto | manage | read + update | — |
-| ndr | manage | read + update | — |
-| invoices | manage | read + create | — |
-| payments | manage | read | — |
-| reconciliations | manage | read | — |
-| notifications | manage | read | read (own) |
-| audit_logs | read | limited | — |
-| integrations | manage | read | — |
-| settings | manage | read-only (non-secret) | — |
+SaaS-only:
 
-"limited" = defined at query time by extra filters (see Vendor Scope middleware).
+```
+tenants.manage
+```
+
+Default grants (seed). Super Admin has every **tenant** key. Platform Admin has `tenants.manage`, `users.manage`, `settings.manage` on the platform account only.
+
+| Key | Super Admin | Operations | Warehouse | Accounts | Catalog | Support | Vendor |
+|-----|:-----------:|:----------:|:---------:|:--------:|:-------:|:-------:|:------:|
+| orders.view | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ assigned |
+| orders.edit | ✓ | ✓ | ✓ | — | — | — | ✓ assigned |
+| orders.cancel | ✓ | ✓ | — | — | — | — | — |
+| inventory.view | ✓ | ✓ | ✓ | — | ✓ | — | — |
+| inventory.adjust | ✓ | — | ✓ | — | — | — | — |
+| shipping.generate | ✓ | ✓ | ✓ | — | — | — | ✓ assigned |
+| shipping.cancel | ✓ | ✓ | — | — | — | — | — |
+| returns.approve | ✓ | ✓ | — | — | — | ✓ | — |
+| finance.view | ✓ | — | — | ✓ | — | — | — |
+| finance.reconcile | ✓ | — | — | ✓ | — | — | — |
+| users.manage | ✓ | — | — | — | — | — | — |
+| settings.manage | ✓ | — | — | — | — | — | — |
+| catalog.view | ✓ | ✓ | — | — | ✓ | — | — |
+| catalog.edit | ✓ | — | — | — | ✓ | — | — |
+| customers.view | ✓ | ✓ | — | ✓ | — | ✓ | — |
+
+A Super Admin may tighten a custom role by editing the `permissions` array — the middleware does not care about the role code.
 
 ---
 
-## Backend Middleware Stack (per protected route)
+## 12.3 Tenant Isolation
 
-```
-Route:  /api/v1/orders
+A user belonging to **Tenant A must never access Tenant B**.
 
-Middleware chain (left → right):
-1. authMiddleware           → decode JWT access token, attach req.user
-                              (if invalid/expired → 401)
+Enforced **server-side** only:
 
-2. tenantMiddleware         → verify req.user.tenantId exists in DB,
-                              tenant.status = active. attach req.tenant
-                              (if bad tenant → 403)
+1. `tenantId` is taken from the **JWT**, never from body / query / URL.
+2. `tenantMiddleware` attaches `req.tenantId`.
+3. Mongoose plugin adds `{ tenantId: req.tenantId }` on every find/update/aggregate (except `tenants` collection and Platform Admin subscriber list).
+4. Cross-tenant ids return **404**, not 403.
 
-3. requirePermission(       → compare req.user.role.permissions array
-     "orders.read"          against the required key(s). If any match
-   )                        → allow. Else 403 + detail "Missing permission:
-                              orders.read".
-
-4. vendorScopeMiddleware    → ONLY if role === 'vendor'. Auto-injects
-                              additional filters (e.g.
-                              where({ assignedVendorId: {$in: user.assignedVendorIds} })).
-                              If a vendor tries to read an order that is
-                              NOT assigned to one of their vendorIds → 404,
-                              NOT 403 (prevents ID enumeration).
-
-5. Controller / Handler     → actual logic. req.user + req.tenant GUARANTEED
-                              at this point.
-```
-
-### Example route registration
-
-```
-// apps/backend/src/routes/v1/orders.routes.js
-router.get(
-  '/',
-  auth,
-  tenant,
-  requirePermission('orders.read'),
-  vendorScope('orders'),
-  listOrders,
-);
-
-router.patch(
-  '/:id/status',
-  auth,
-  tenant,
-  requirePermission('orders.update'),
-  vendorScope('orders', { allowWrite: true }),
-  updateOrderStatus,
-);
-```
+Platform Admin listing subscribers is the only cross-tenant read. Impersonate copies that merchant’s `tenantId` into the session; after exit, JWT has no merchant tenant.
 
 ---
 
-## Frontend Route Guards (React Router v6)
+## Backend middleware
 
 ```
-<Route element={<ProtectedRoute allowedRoles={[SUPER_ADMIN, ADMIN, VENDOR]} />}>
-  <Route element={<AppShell />}>
-
-    <Route element={<RequirePermission permission="dashboard.read" />}>
-      <Route path="/dashboard" element={<Dashboard />} />
-    </Route>
-
-    <Route element={<RequireAnyPermission perms={["products.read","products.manage"]} />}>
-      <Route path="/products" element={<ProductsPage />} />
-    </Route>
-
-    <Route element={<RequireRole roles={[SUPER_ADMIN, ADMIN]} />}>
-      <Route path="/users" element={<UsersPage />} />
-      <Route path="/finance/reconciliation" element={<ReconPage />} />
-    </Route>
-
-    {/* Vendor-specific layout variant — wraps children in Excel-style shell */}
-    <Route element={<VendorLayout />}>
-      <Route element={<RequireRole roles={[VENDOR]} />}>
-        <Route path="/v/orders" element={<VendorOrders />} />
-        <Route path="/v/shipments" element={<VendorShipments />} />
-      </Route>
-    </Route>
-
-  </Route>
-</Route>
+auth → tenant → requirePermission('orders.view') → vendorScope → handler
 ```
 
-Additionally: every menu item, every action button, every sensitive number (cost prices, margins, payouts) must be wrapped in the same permission hooks at render time. Frontend guards are UX convenience, NOT security. **Backend middleware is the real security boundary.**
+```js
+router.get('/', auth, tenant, requirePermission('orders.view'), vendorScope('orders'), listOrders);
+router.post('/:id/cancel', auth, tenant, requirePermission('orders.cancel'), cancelOrder);
+router.post('/labels', auth, tenant, requirePermission('shipping.generate'), vendorScope('orders'), createLabel);
+```
+
+Vendor scope: `assignedVendorIds` on the user. Miss → 404.
+
+Files: `apps/backend/src/middleware/{auth,tenant,requirePermission,vendorScope}.js`.
 
 ---
 
-## Session & Logout Model
+## Frontend
 
-- **Access token:** JWT, 15 minutes, stored in-memory (React state) on Admin client.
-- **Refresh token:** JWT, 7 days, stored in HTTP-only Secure cookie with `sameSite: lax`.
-- **Logout (button):** Call `POST /api/v1/auth/logout` → backend increments `refreshTokenVersion` on the user row → clears the HTTP cookie → frontend clears memory access token → redirects to login.
-- **Sessions page (super_admin):** Shows all active refresh token versions. "Log out user" = bump version.
-- **Password change / reset:** Bump `refreshTokenVersion` too (all old sessions killed).
+- Sidebar and `ProtectedRoute` hide/block screens using `ROUTE_PERMISSION` + `user.permissions`.
+- This is convenience. Repeating the same key on the API is mandatory.
 
 ---
 
-## Adding a New Role (Future, no code change)
+## Adding keys later
 
-1. Super Admin → Settings → Roles → Create role → name, code
-2. Tick permission checkboxes per module (uses the flat matrix)
-3. Assign to users
-4. Backend middleware `requirePermission(key)` already works because it checks the permissions array stored on the role row.
-
-The ONLY code changes needed for future roles are:
-- If a brand-new module is introduced → add its keys to the seed list
-- If a brand-new scope restriction is introduced (e.g. "warehouse picker can only see their own WH") → extend `vendorScopeMiddleware` into a generic `scopeMiddleware` that understands scope configs per role row.
+1. Add the string to `PERMISSIONS` / role seed.
+2. Call `requirePermission('new.key')` on the route.
+3. No new role enum required unless you want a preset.

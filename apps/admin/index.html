@@ -3,7 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <meta name="theme-color" content="#1d4ed8" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,9 +17,22 @@
     <script>
       (function () {
         try {
-          var t = localStorage.getItem('oms-theme');
-          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          if (t === 'dark' || (!t && prefersDark)) {
+          var FLAG = 'oms-theme-default';
+          var KEY = 'oms-theme';
+          if (localStorage.getItem(FLAG) !== 'light') {
+            localStorage.setItem(FLAG, 'light');
+            localStorage.setItem(KEY, 'light');
+          }
+          var t = localStorage.getItem(KEY) || 'light';
+          var p = location.pathname;
+          var marketing =
+            p === '/' ||
+            p === '/about' ||
+            p === '/features' ||
+            p === '/pricing' ||
+            p === '/contact' ||
+            p.indexOf('/auth') === 0;
+          if (t === 'dark' && !marketing) {
             document.documentElement.classList.add('dark');
           } else {
             document.documentElement.classList.remove('dark');
@@ -23,7 +40,7 @@
         } catch (_) {}
       })();
     </script>
-    <title>OMSKing — Omnichannel Order Management</title>
+    <title>OMSKing — OMS for Leheriya Creations</title>
   </head>
   <body>
     <div id="root"></div>

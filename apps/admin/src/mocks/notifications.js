@@ -109,3 +109,51 @@ export const notifications = [
     isOwnerAlert: true,
   },
 ];
+
+export const inboxNotifications = [
+  {
+    id: 'INB-001',
+    title: 'Order #65207 shipped',
+    detail: 'Delhivery · AWB 145892',
+    time: '2 min ago',
+    unread: true,
+    type: 'shipping',
+    href: '/shipping',
+  },
+  {
+    id: 'INB-002',
+    title: 'New vendor assigned',
+    detail: 'Sandeep Textiles · Order #65211',
+    time: '18 min ago',
+    unread: true,
+    type: 'vendor',
+    href: '/orders',
+  },
+  {
+    id: 'INB-003',
+    title: 'Inventory low alert',
+    detail: 'LC-104 at WH-001 · 4 units left',
+    time: '1 hr ago',
+    unread: true,
+    type: 'inventory',
+    href: '/inventory',
+  },
+  {
+    id: 'INB-004',
+    title: 'NDR action needed',
+    detail: 'Order #65188 · Customer unavailable',
+    time: '3 hr ago',
+    unread: true,
+    type: 'alert',
+    href: '/ndr',
+  },
+  {
+    id: 'INB-005',
+    title: 'GST invoice generated',
+    detail: 'Order #65207 · Invoice ready',
+    time: 'Yesterday',
+    unread: true,
+    type: 'invoice',
+    href: '/gst-invoice',
+  },
+];

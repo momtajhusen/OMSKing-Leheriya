@@ -52,10 +52,10 @@ Every collection also has:
 |-------|------|-------|
 | **tenantId** | ObjectId → tenants | **Required** (global default roles are cloned per tenant) |
 | name | String, required | e.g. "Super Admin", "Vendor" |
-| code | String, required, unique per tenant | Enums: `super_admin`, `admin`, `vendor` — extensible later |
+| code | String, required, unique per tenant | `super_admin`, `operations`, `warehouse`, `accounts`, `catalog_manager`, `customer_support`, `vendor`. Legacy `admin` = operations. `platform_admin` is SaaS-only, not cloned per tenant. |
 | description | String | |
-| permissions | [String] | Flat permission key array, e.g. `["orders.read","orders.create","inventory.write"]`. See RBAC doc. |
-| isSystem | Boolean, default false | `true` for the 3 launch roles — non-deletable |
+| permissions | [String] | Granular keys, e.g. `orders.view`, `finance.reconcile`. Authorization uses this array, not the role name. See `docs/04-RBAC-BLUEPRINT.md`. |
+| isSystem | Boolean, default false | `true` for seeded roles — non-deletable |
 
 ---
 
@@ -138,6 +138,25 @@ Indexes: `{ tenantId, channel, channelVariantId } unique` (prevents duplicate ma
 | contactPhone | String | |
 | status | Enum: `active` \| `inactive` | |
 
+**Channel sellable flag** on warehouse or mapping: Amazon/Myntra may only consume WH rows with `sellOnAmazon` / `sellOnMyntra` true. Default WH-001 true, WH-002 false.
+
+---
+
+## 7b. warehouse_location_maps
+
+Shopify (and later others) location id → logical warehouse. A location is not automatically a warehouse.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| **tenantId** | ObjectId | Required |
+| warehouseId | ObjectId → warehouses | Required |
+| channel | Enum: `shopify` \| `amazon` \| `myntra` | |
+| externalLocationId | String | Shopify location gid/id, Amazon warehouse, Myntra warehouse code |
+| label | String | e.g. Location A / Location B |
+| isPrimaryForChannel | Boolean | |
+
+Unique: `{ tenantId, channel, externalLocationId }`.
+
 ---
 
 ## 8. inventory (Current "available + reserved" snapshot per SKU × warehouse)
@@ -183,6 +202,25 @@ Every stock movement = 1 ledger entry. Double-entry pattern: every +X in one row
 
 ---
 
+## 9b. inventory_reservations
+
+Concurrency-safe hold until pack/cancel.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| **tenantId** | ObjectId | Required |
+| masterSkuId | ObjectId | Required |
+| warehouseId | ObjectId | Required |
+| orderId | ObjectId → orders | |
+| qty | Number | |
+| status | Enum: `held` \| `consumed` \| `released` | |
+| idempotencyKey | String | Unique with tenant |
+| createdAt | Date | |
+
+Unique: `{ tenantId, orderId, masterSkuId, warehouseId }` for the active hold.
+
+---
+
 ## 10. orders (Master Orders — one row per channel order)
 
 | Field | Type | Notes |
@@ -192,9 +230,9 @@ Every stock movement = 1 ledger entry. Double-entry pattern: every +X in one row
 | channel | Enum: `shopify` \| `amazon` \| `myntra` \| `manual` | **Required** |
 | channelOrderId | String | Marketplace's own order ID. `{ tenantId, channel, channelOrderId } unique`. |
 | channelOrderNo | String | Displayed to customer (Amazon has both ID + "Order #123-456") |
-| status | Enum | Status-machine: `pending` → `processing` → `awaiting_fulfilment` → `shipped` → `delivered` → `completed` / `cancelled`. Separate states for RTO-in-progress and return-in-progress. |
+| status | Enum | See `docs/08-DOMAIN-RULES.md` state machine. One channel order = one row. |
 | orderDate | Date | When placed on marketplace |
-| paymentStatus | Enum: `pending` \| `paid` \| `cod` \| `refunded` \| `partially_refunded` | |
+| paymentStatus | Enum: `pending` \| `paid` \| `cod` \| `refunded` \| `partially_refunded` \| `partially_paid` | Partially paid treated as COD until settled |
 | paymentMethod | String | Razorpay, UPI, COD, Amazon Pay, etc. |
 | customer | Object | name, email, phone (PII) |
 | shippingAddress | Object | line1, line2, city, state, pincode, phone, countryCode=IN |
@@ -250,6 +288,22 @@ Every stock movement = 1 ledger entry. Double-entry pattern: every +X in one row
 | taxAmount | Number | Line total GST |
 | lineTotal | Number | (qtyOrdered × sellingPrice) − discount + tax |
 | status | Enum: mirrors order.status but per-line | Allows partial ship / partial cancel / partial return. |
+| fulfillmentGroupId | ObjectId → fulfillment_groups | Nullable |
+
+---
+
+## 11b. fulfillment_groups
+
+Internal split under **one** Master Order (different WH / vendor). Never a second Master Order.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| **tenantId** | ObjectId | Required |
+| orderId | ObjectId → orders | Required |
+| warehouseId | ObjectId | Nullable |
+| vendorId | ObjectId | Nullable |
+| status | String | pick / pack / shipped |
+| sequence | Number | |
 
 ---
 
@@ -468,6 +522,8 @@ Every stock movement = 1 ledger entry. Double-entry pattern: every +X in one row
 | lastTriggeredAt | Date | |
 | createdBy | ObjectId → users | "system" for defaults |
 
+Deliveries live in `notification_deliveries`: status `queued` → `sent` → `delivered` or `failed` (then retry). Include correlationId.
+
 Seed rows per tenant for every event with default channels (telegram to super_admins for critical).
 
 ---
@@ -522,12 +578,26 @@ Webhook failures → create a new integration_job row per failed attempt so retr
 
 ---
 
+## 22b. webhook_events
+
+Idempotent ingest. Unique `{ tenantId, channel, externalEventId }`. Duplicate → stored, not re-applied.
+
+| Field | Notes |
+|-------|--------|
+| payload, headers, receivedAt, processedAt, status `received \| processed \| duplicate \| failed`, correlationId, lastError | |
+
+## 22c. courier_invoices
+
+Freight recon separate from marketplace settlement: AWB, billed weight vs expected, COD/RTO/NDR charges, variance, status.
+
+---
+
 ## 23. settings (Tenant-level keyed settings — Phase 10)
 
 | Field | Type | Notes |
 |-------|------|-------|
 | **tenantId** | ObjectId → tenants | **Required** |
-| group | Enum: `company` \| `channels` \| `couriers` \| `tax_gst` \| `api_credentials` \| `notifications` \| `ui` \| `features` | |
+| group | Enum: `company` \| `channels` \| `couriers` \| `tax_gst` \| `api_credentials` \| `notifications` \| `ui` \| `features` \| `inventory` | |
 | key | String, required | `{ tenantId, group, key } unique`. E.g. (couriers, delhivery_api_key) |
 | value | Mixed | Scalar or JSON |
 | valueType | Enum: `string` \| `number` \| `boolean` \| `json` \| `secret` | `secret` values = encrypted at rest (Phase 10) |
@@ -535,6 +605,8 @@ Webhook failures → create a new integration_job row per failed attempt so retr
 | updatedBy | ObjectId → users | |
 
 Channel credentials (Shopify Admin API token, Amazon SP-API creds, Myntra Partner API creds) live here in group=channels, valueType=secret.
+
+`inventory.authority` = `oms` \| `shopify` — who may edit sellable qty (see `docs/08-DOMAIN-RULES.md`).
 
 ---
 
@@ -544,7 +616,11 @@ Channel credentials (Shopify Admin API token, Amazon SP-API creds, Myntra Partne
 tenants 1──N users
 tenants 1──N roles
 tenants 1──N products 1──N master_skus 1──N sku_mappings (× channels)
-tenants 1──N warehouses
+tenants 1──N warehouse_location_maps (Shopify Location A/B → WH)
+tenants 1──N inventory_reservations
+tenants 1──N fulfillment_groups (under one Master Order)
+tenants 1──N webhook_events (idempotent)
+tenants 1──N courier_invoices (freight recon)
 tenants 1──N inventory (master_sku × warehouse)
 tenants 1──N inventory_ledgers (append-only, every stock move)
 tenants 1──N orders 1──N order_items → master_skus / sku_mappings

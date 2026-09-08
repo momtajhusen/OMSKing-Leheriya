@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { cn } from '../../lib/utils';
 import { X } from 'lucide-react';
 
-function Modal({ open, onOpenChange, title, description, children, footer }) {
+function Modal({ open, onOpenChange, title, description, children, footer, className }) {
   useEffect(() => {
     if (open) {
       document.body.style.overflow = 'hidden';
@@ -22,7 +22,7 @@ function Modal({ open, onOpenChange, title, description, children, footer }) {
         className="fixed inset-0 bg-background/80 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
       />
-      <div className="relative z-50 w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg">
+      <div className={cn('relative z-50 w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg', className)}>
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-lg font-semibold">{title}</h2>

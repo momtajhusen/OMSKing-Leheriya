@@ -18,7 +18,9 @@ omsking/
 │   ├── 04-RBAC-BLUEPRINT.md
 │   ├── 05-API-CONVENTIONS.md
 │   ├── 06-GITHUB-WORKFLOW.md
-│   └── 07-FOLDER-STRUCTURE.md     (this file)
+│   ├── 07-FOLDER-STRUCTURE.md     (this file)
+│   ├── 08-DOMAIN-RULES.md         Warehouses, ATS, Master Order, GST, UAT
+│   └── 09-MAIN-PAGES.md           Business page map (ops order)
 │
 ├── .gitignore
 ├── package.json                   Root workspace manifest (devDeps: turbo)

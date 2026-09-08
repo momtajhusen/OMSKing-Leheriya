@@ -1,15 +1,20 @@
 import { useState } from 'react';
-import { returns, orders } from '../../mocks';
+import { toast } from 'react-hot-toast';
+import { returns } from '../../mocks';
 import { formatINR, formatDate, statusBadgeVariant } from '../../utils/format';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
+import Modal from '../../components/ui/Modal';
 import { RotateCcw, Package, CheckCircle, XCircle, RefreshCw, AlertTriangle } from 'lucide-react';
 
 export default function ReturnsPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [selectedReturns, setSelectedReturns] = useState({});
+  const [receiveFor, setReceiveFor] = useState(null);
+  const [receiveWarehouse, setReceiveWarehouse] = useState('WH-001');
+  const [receiveAction, setReceiveAction] = useState('restock');
 
   const handleRestockChange = (returnId, destination) => {
     setSelectedReturns(prev => ({
@@ -19,7 +24,17 @@ export default function ReturnsPage() {
   };
 
   const handleApproveReturn = (returnId) => {
-    console.log('Approving return:', returnId, 'Restock to:', selectedReturns[returnId]);
+    toast.success(`Return ${returnId} approved — wait for Received to restock`);
+  };
+
+  const confirmReceived = () => {
+    if (!receiveFor) return;
+    toast.success(
+      receiveAction === 'none'
+        ? `${receiveFor.id} received — no restock (hold/dispose)`
+        : `${receiveFor.id} received — inventory ledger +${receiveAction === 'restock' ? 'qty' : 'QC hold'} at ${receiveWarehouse}`
+    );
+    setReceiveFor(null);
   };
 
   const handleRejectReturn = (returnId) => {
@@ -45,7 +60,7 @@ export default function ReturnsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Returns</h1>
-          <p className="text-muted-foreground">Manage return requests and restock destinations</p>
+          <p className="text-muted-foreground">Customer returns on a Master Order. Restock destination is chosen at QC.</p>
         </div>
         <Button variant="outline">
           <RefreshCw className="w-4 h-4 mr-2" />
@@ -144,6 +159,7 @@ export default function ReturnsPage() {
                 <TableHead>Order ID</TableHead>
                 <TableHead>Customer</TableHead>
                 <TableHead>Reason</TableHead>
+                <TableHead>Requested</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Restock Destination</TableHead>
@@ -152,13 +168,13 @@ export default function ReturnsPage() {
             </TableHeader>
             <TableBody>
               {filteredReturns.map((ret) => {
-                const order = orders.find(o => o.id === ret.orderId);
                 return (
                   <TableRow key={ret.id}>
                     <TableCell className="font-medium">{ret.id}</TableCell>
                     <TableCell>{ret.orderId}</TableCell>
-                    <TableCell>{order?.customerName || 'N/A'}</TableCell>
+                    <TableCell>{ret.customer}</TableCell>
                     <TableCell>{ret.reason}</TableCell>
+                    <TableCell>{formatDate(ret.requestDate)}</TableCell>
                     <TableCell>{formatINR(ret.amount)}</TableCell>
                     <TableCell>
                       <Badge variant={statusBadgeVariant(ret.status)}>
@@ -184,7 +200,7 @@ export default function ReturnsPage() {
                         </div>
                       ) : (
                         <span className="text-sm text-muted-foreground">
-                          {selectedReturns[ret.id] || 'Not specified'}
+                          {ret.restockDestination || 'Not specified'}
                         </span>
                       )}
                     </TableCell>
@@ -212,7 +228,27 @@ export default function ReturnsPage() {
                         </div>
                       )}
                       {ret.status === 'Approved' && (
-                        <Badge variant="outline">QC Pending</Badge>
+                        <div className="flex flex-col gap-2">
+                          <Badge variant="outline">QC / inbound</Badge>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => toast.success(`Return label generated for ${ret.id}`)}
+                          >
+                            Return label
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setReceiveFor(ret);
+                              setReceiveWarehouse('WH-001');
+                              setReceiveAction('restock');
+                            }}
+                          >
+                            <Package className="w-4 h-4 mr-1" />
+                            Mark received
+                          </Button>
+                        </div>
                       )}
                       {ret.status === 'Completed' && (
                         <Badge variant="outline">Restocked</Badge>
@@ -262,6 +298,48 @@ export default function ReturnsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Modal
+        open={Boolean(receiveFor)}
+        onOpenChange={(open) => { if (!open) setReceiveFor(null); }}
+        title="Received — inventory"
+        description="Spec: on Received, choose restock destination so ATS updates. Dummy write for now."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setReceiveFor(null)}>Cancel</Button>
+            <Button onClick={confirmReceived}>Post to inventory ledger</Button>
+          </>
+        }
+      >
+        {receiveFor && (
+          <div className="space-y-3 text-sm">
+            <p><span className="text-muted-foreground">Return</span> {receiveFor.id} · order {receiveFor.orderId}</p>
+            <label className="block">
+              <span className="text-muted-foreground">Warehouse</span>
+              <select
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2"
+                value={receiveWarehouse}
+                onChange={(e) => setReceiveWarehouse(e.target.value)}
+              >
+                <option value="WH-001">WH-001 physical (Shopify A + Amazon + Myntra)</option>
+                <option value="WH-002">WH-002 virtual (Shopify B only)</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-muted-foreground">Action</span>
+              <select
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2"
+                value={receiveAction}
+                onChange={(e) => setReceiveAction(e.target.value)}
+              >
+                <option value="restock">QC pass — restock sellable</option>
+                <option value="hold">QC hold — do not sell yet</option>
+                <option value="none">Do not restock</option>
+              </select>
+            </label>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

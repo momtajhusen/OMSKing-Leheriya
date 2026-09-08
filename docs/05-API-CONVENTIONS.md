@@ -228,11 +228,15 @@ Client sends a header `X-Idempotency-Key: <UUID>` on the first attempt.
 - If the same key comes again within 24 hours → replay the cached response without re-executing.
 - 409 if a different request body is sent with the same key.
 
-Affected endpoints (Phase 9+):
+Channel webhooks: unique `{ tenantId, channel, externalEventId }` on `webhook_events`. Second delivery is stored as `duplicate` and must not create a second Master Order or reservation.
+
+Affected endpoints (Phase 4+):
+- POST `/api/v1/inventory/reserve`
 - POST `/api/v1/invoices`
 - POST `/api/v1/payments/:id/reconcile`
 - POST `/api/v1/inventory/:id/adjust`
 - POST `/api/v1/shipments/bulk-generate-labels`
+- webhook ingest `/api/v1/webhooks/:channel`
 
 ---
 

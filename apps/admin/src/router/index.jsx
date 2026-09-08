@@ -1,14 +1,49 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import NotFoundPage from '../pages/NotFoundPage';
+import ProtectedRoute from '../components/ui/ProtectedRoute';
+import { TENANT_STAFF_ROLES } from '../constants/roles';
 
 // Lazy load layout components
 const AuthLayout = lazy(() => import('../components/layout/AuthLayout'));
 const AdminLayout = lazy(() => import('../components/layout/AdminLayout'));
 const VendorLayout = lazy(() => import('../components/layout/VendorLayout'));
+const PublicLayout = lazy(() => import('../components/layout/PublicLayout'));
+const PlatformLayout = lazy(() => import('../components/layout/PlatformLayout'));
+const PlatformDashboardPage = lazy(() => import('../pages/platform/PlatformDashboardPage'));
+const PlatformAuthPage = lazy(() => import('../pages/platform/PlatformAuthPage'));
+const TenantMgmtPage = lazy(() => import('../pages/admin/TenantMgmtPage'));
+const PlatformOpsPage = lazy(() => import('../pages/platform/PlatformOpsPage'));
 
 // Route definitions - single source of truth for sidebar and router
 export const ROUTE_DEFS = {
+  public: [
+    {
+      path: '/',
+      label: 'Home',
+      component: lazy(() => import('../pages/public/HomePage')),
+    },
+    {
+      path: '/about',
+      label: 'About',
+      component: lazy(() => import('../pages/public/AboutPage')),
+    },
+    {
+      path: '/features',
+      label: 'Features',
+      component: lazy(() => import('../pages/public/FeaturesPage')),
+    },
+    {
+      path: '/pricing',
+      label: 'Pricing',
+      component: lazy(() => import('../pages/public/PricingPage')),
+    },
+    {
+      path: '/contact',
+      label: 'Contact',
+      component: lazy(() => import('../pages/public/ContactPage')),
+    },
+  ],
   auth: [
     {
       path: '/auth/login',
@@ -16,9 +51,19 @@ export const ROUTE_DEFS = {
       component: lazy(() => import('../pages/auth/LoginPage')),
     },
     {
+      path: '/auth/register',
+      label: 'Register',
+      component: lazy(() => import('../pages/auth/RegisterPage')),
+    },
+    {
       path: '/auth/forgot-password',
       label: 'Forgot Password',
       component: lazy(() => import('../pages/auth/ForgotPasswordPage')),
+    },
+    {
+      path: '/auth/reset-password',
+      label: 'Reset Password',
+      component: lazy(() => import('../pages/auth/ResetPasswordPage')),
     },
   ],
   admin: [
@@ -26,57 +71,78 @@ export const ROUTE_DEFS = {
       path: '/dashboard',
       label: 'Dashboard',
       icon: 'LayoutDashboard',
-      group: 'Core Platform',
+      group: 'Daily',
       component: lazy(() => import('../pages/admin/DashboardPage')),
     },
     {
-      path: '/authentication',
-      label: 'Authentication',
-      icon: 'Shield',
-      group: 'Core Platform',
-      component: lazy(() => import('../pages/admin/AuthPage')),
+      path: '/orders',
+      label: 'Orders',
+      icon: 'ShoppingCart',
+      group: 'Daily',
+      component: lazy(() => import('../pages/admin/OrdersPage')),
     },
     {
-      path: '/tenant-mgmt',
-      label: 'Tenant/Merchant Mgmt',
-      icon: 'Building2',
-      group: 'Core Platform',
-      component: lazy(() => import('../pages/admin/TenantMgmtPage')),
+      path: '/fulfilment',
+      label: 'Fulfilment',
+      icon: 'Truck',
+      group: 'Daily',
+      component: lazy(() => import('../pages/admin/FulfilmentPage')),
     },
     {
-      path: '/users-roles',
-      label: 'Users & Roles',
-      icon: 'Users',
-      group: 'Core Platform',
-      component: lazy(() => import('../pages/admin/UsersRolesPage')),
+      path: '/shipping',
+      label: 'Shipping',
+      icon: 'PackageCheck',
+      group: 'Daily',
+      component: lazy(() => import('../pages/admin/ShippingPage')),
     },
     {
-      path: '/audit-logs',
-      label: 'Audit Logs',
-      icon: 'FileText',
-      group: 'Core Platform',
-      component: lazy(() => import('../pages/admin/AuditLogsPage')),
+      path: '/vendors',
+      label: 'Vendors',
+      icon: 'Store',
+      group: 'Daily',
+      component: lazy(() => import('../pages/admin/VendorsPage')),
     },
     {
-      path: '/notifications',
-      label: 'Notifications',
-      icon: 'Bell',
-      group: 'Core Platform',
-      component: lazy(() => import('../pages/admin/NotificationsPage')),
+      path: '/reports',
+      label: 'Reports',
+      icon: 'BarChart3',
+      group: 'Daily',
+      component: lazy(() => import('../pages/admin/ReportsPage')),
     },
     {
-      path: '/integration-mgmt',
-      label: 'Integration Mgmt',
-      icon: 'Plug',
-      group: 'Core Platform',
-      component: lazy(() => import('../pages/admin/IntegrationManagementPage')),
+      path: '/inventory',
+      label: 'Inventory',
+      icon: 'Warehouse',
+      group: 'Stock',
+      component: lazy(() => import('../pages/admin/InventoryPage')),
     },
     {
-      path: '/settings',
-      label: 'Settings',
-      icon: 'Settings',
-      group: 'Core Platform',
-      component: lazy(() => import('../pages/admin/SettingsPage')),
+      path: '/warehouses',
+      label: 'Warehouses',
+      icon: 'Building',
+      group: 'Stock',
+      component: lazy(() => import('../pages/admin/WarehousesPage')),
+    },
+    {
+      path: '/returns',
+      label: 'Returns',
+      icon: 'RotateCcw',
+      group: 'Returns',
+      component: lazy(() => import('../pages/admin/ReturnsPage')),
+    },
+    {
+      path: '/rto',
+      label: 'RTO',
+      icon: 'ArrowDownLeft',
+      group: 'Returns',
+      component: lazy(() => import('../pages/admin/RtoPage')),
+    },
+    {
+      path: '/ndr',
+      label: 'NDR',
+      icon: 'AlertTriangle',
+      group: 'Returns',
+      component: lazy(() => import('../pages/admin/NdrPage')),
     },
     {
       path: '/products',
@@ -100,67 +166,11 @@ export const ROUTE_DEFS = {
       component: lazy(() => import('../pages/admin/SkuMappingPage')),
     },
     {
-      path: '/inventory',
-      label: 'Inventory',
-      icon: 'Warehouse',
-      group: 'Inventory & Storage',
-      component: lazy(() => import('../pages/admin/InventoryPage')),
-    },
-    {
-      path: '/warehouses',
-      label: 'Warehouses',
-      icon: 'Building',
-      group: 'Inventory & Storage',
-      component: lazy(() => import('../pages/admin/WarehousesPage')),
-    },
-    {
-      path: '/orders',
-      label: 'Orders',
-      icon: 'ShoppingCart',
-      group: 'Orders & Fulfilment',
-      component: lazy(() => import('../pages/admin/OrdersPage')),
-    },
-    {
-      path: '/fulfilment',
-      label: 'Fulfilment',
-      icon: 'Truck',
-      group: 'Orders & Fulfilment',
-      component: lazy(() => import('../pages/admin/FulfilmentPage')),
-    },
-    {
-      path: '/vendors',
-      label: 'Vendors',
-      icon: 'Store',
-      group: 'Orders & Fulfilment',
-      component: lazy(() => import('../pages/admin/VendorsPage')),
-    },
-    {
-      path: '/shipping',
-      label: 'Shipping',
-      icon: 'PackageCheck',
-      group: 'Orders & Fulfilment',
-      component: lazy(() => import('../pages/admin/ShippingPage')),
-    },
-    {
-      path: '/returns',
-      label: 'Returns',
-      icon: 'RotateCcw',
-      group: 'Reverse Logistics',
-      component: lazy(() => import('../pages/admin/ReturnsPage')),
-    },
-    {
-      path: '/rto',
-      label: 'RTO',
-      icon: 'ArrowDownLeft',
-      group: 'Reverse Logistics',
-      component: lazy(() => import('../pages/admin/RtoPage')),
-    },
-    {
-      path: '/ndr',
-      label: 'NDR',
-      icon: 'AlertTriangle',
-      group: 'Reverse Logistics',
-      component: lazy(() => import('../pages/admin/NdrPage')),
+      path: '/import',
+      label: 'Bulk import',
+      icon: 'Upload',
+      group: 'Catalog',
+      component: lazy(() => import('../pages/admin/ProductImportPage')),
     },
     {
       path: '/gst-invoice',
@@ -171,48 +181,87 @@ export const ROUTE_DEFS = {
     },
     {
       path: '/payment-reconciliation',
-      label: 'Payment Reconciliation',
+      label: 'Payments',
       icon: 'CreditCard',
       group: 'Finance',
       component: lazy(() => import('../pages/admin/PaymentReconciliationPage')),
     },
     {
       path: '/returns-refunds-reconciliation',
-      label: 'Returns/Refunds Reconciliation',
+      label: 'Refunds',
       icon: 'RefreshCw',
       group: 'Finance',
       component: lazy(() => import('../pages/admin/ReturnsRefundsReconciliationPage')),
     },
     {
-      path: '/reports',
-      label: 'Reports',
-      icon: 'BarChart3',
-      group: 'Core Platform',
-      component: lazy(() => import('../pages/admin/ReportsPage')),
+      path: '/channels',
+      label: 'Channels',
+      icon: 'Radio',
+      group: 'Setup',
+      component: lazy(() => import('../pages/admin/ChannelsPage')),
+    },
+    {
+      path: '/integrations',
+      label: 'Integrations',
+      icon: 'Plug',
+      group: 'Setup',
+      component: lazy(() => import('../pages/admin/IntegrationManagementPage')),
+    },
+    {
+      path: '/webhooks',
+      label: 'Webhooks',
+      icon: 'Webhook',
+      group: 'Setup',
+      component: lazy(() => import('../pages/admin/WebhooksPage')),
+    },
+    {
+      path: '/notifications',
+      label: 'Notifications',
+      icon: 'Bell',
+      group: 'Setup',
+      component: lazy(() => import('../pages/admin/NotificationsPage')),
+    },
+    {
+      path: '/settings',
+      label: 'Settings',
+      icon: 'Settings',
+      group: 'Admin',
+      component: lazy(() => import('../pages/admin/SettingsPage')),
+    },
+    {
+      path: '/users-roles',
+      label: 'Users & Roles',
+      icon: 'Users',
+      group: 'Admin',
+      component: lazy(() => import('../pages/admin/UsersRolesPage')),
+    },
+    {
+      path: '/audit-logs',
+      label: 'Audit Logs',
+      icon: 'FileText',
+      group: 'Admin',
+      component: lazy(() => import('../pages/admin/AuditLogsPage')),
+    },
+    {
+      path: '/authentication',
+      label: 'Authentication',
+      icon: 'Shield',
+      group: 'Admin',
+      component: lazy(() => import('../pages/admin/AuthPage')),
     },
     {
       path: '/ui/showcase',
       label: 'UI Showcase',
       icon: 'Palette',
-      group: 'Core Platform',
+      group: 'Admin',
       component: lazy(() => import('../pages/admin/UiShowcasePage')),
     },
   ],
   vendor: [
     {
-      path: '/vendor/dashboard',
-      label: 'Dashboard',
-      component: lazy(() => import('../pages/vendor/VendorDashboardPage')),
-    },
-    {
       path: '/vendor/orders',
       label: 'Orders',
       component: lazy(() => import('../pages/vendor/VendorOrdersPage')),
-    },
-    {
-      path: '/vendor/products',
-      label: 'Products',
-      component: lazy(() => import('../pages/vendor/VendorProductsPage')),
     },
     {
       path: '/vendor/shipping',
@@ -223,6 +272,16 @@ export const ROUTE_DEFS = {
       path: '/vendor/returns',
       label: 'Returns',
       component: lazy(() => import('../pages/vendor/VendorReturnsPage')),
+    },
+    {
+      path: '/vendor/products',
+      label: 'Products',
+      component: lazy(() => import('../pages/vendor/VendorProductsPage')),
+    },
+    {
+      path: '/vendor/dashboard',
+      label: 'Dashboard',
+      component: lazy(() => import('../pages/vendor/VendorDashboardPage')),
     },
     {
       path: '/vendor/settings',
@@ -244,11 +303,24 @@ function LoadingFallback() {
 // Create router configuration
 const router = createBrowserRouter([
   {
-    path: '/',
-    element: <Navigate to="/dashboard" replace />,
+    element: (
+      <Suspense fallback={<LoadingFallback />}>
+        <PublicLayout />
+      </Suspense>
+    ),
+    children: ROUTE_DEFS.public.map((route) => ({
+      index: route.path === '/',
+      path: route.path === '/' ? undefined : route.path.replace(/^\//, ''),
+      element: (
+        <Suspense fallback={<LoadingFallback />}>
+          <route.component />
+        </Suspense>
+      ),
+    })),
   },
   // Auth routes with layout wrapper
   {
+    path: '/auth',
     element: (
       <Suspense fallback={<LoadingFallback />}>
         <AuthLayout />
@@ -263,29 +335,122 @@ const router = createBrowserRouter([
       ),
     })),
   },
-  // Admin routes with layout wrapper
+  // SaaS platform control — Platform Admin only
+  {
+    path: '/platform',
+    element: (
+      <ProtectedRoute requiredRoles={['platform_admin']}>
+        <Suspense fallback={<LoadingFallback />}>
+          <PlatformLayout />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+    children: [
+      {
+        index: true,
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformDashboardPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'tenants',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <TenantMgmtPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'auth',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformAuthPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'health',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformOpsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'jobs',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformOpsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'logs',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformOpsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'settings',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformOpsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'plans',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformOpsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'users',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformOpsPage />
+          </Suspense>
+        ),
+      },
+    ],
+  },
+  // Merchant OMS — Super Admin and Admin
   {
     element: (
-      <Suspense fallback={<LoadingFallback />}>
-        <AdminLayout />
-      </Suspense>
-    ),
-    children: ROUTE_DEFS.admin.map((route) => ({
-      path: route.path,
-      element: (
+      <ProtectedRoute requiredRoles={TENANT_STAFF_ROLES}>
         <Suspense fallback={<LoadingFallback />}>
-          <route.component />
+          <AdminLayout />
         </Suspense>
-      ),
-    })),
+      </ProtectedRoute>
+    ),
+    children: [
+      ...ROUTE_DEFS.admin.map((route) => ({
+        path: route.path,
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <route.component />
+          </Suspense>
+        ),
+      })),
+      { path: '/integration-mgmt', element: <Navigate to="/integrations" replace /> },
+      { path: '/tenant-mgmt', element: <Navigate to="/platform/tenants" replace /> },
+    ],
   },
-  // Vendor routes with layout wrapper
+  // Vendor routes with layout wrapper and protection
   {
     path: '/vendor',
     element: (
-      <Suspense fallback={<LoadingFallback />}>
-        <VendorLayout />
-      </Suspense>
+      <ProtectedRoute requiredRole="vendor">
+        <Suspense fallback={<LoadingFallback />}>
+          <VendorLayout />
+        </Suspense>
+      </ProtectedRoute>
     ),
     children: ROUTE_DEFS.vendor.map((route) => ({
       path: route.path.replace('/vendor/', ''),

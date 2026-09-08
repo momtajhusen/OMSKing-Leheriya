@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { products } from '../../mocks';
 import { formatINR, statusBadgeVariant } from '../../utils/format';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
@@ -9,6 +10,7 @@ import KpiCard from '../../components/ui/KpiCard';
 import { Package, Plus, Search, Filter } from 'lucide-react';
 
 export default function ProductsPage() {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredProducts = products.filter(product => {
@@ -30,20 +32,25 @@ export default function ProductsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Products</h1>
-          <p className="text-muted-foreground">Manage your product catalog</p>
+          <p className="text-muted-foreground">Leheriya catalog. Variants hang off Master SKU — not a one-off Amazon title.</p>
         </div>
-        <Button>
-          <Plus className="w-4 h-4 mr-2" />
-          Add Product
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => navigate('/import')}>
+            Bulk import
+          </Button>
+          <Button>
+            <Plus className="w-4 h-4 mr-2" />
+            Add Product
+          </Button>
+        </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <KpiCard label="Total Products" value={kpiData.total} icon={<Package className="w-4 h-4" />} />
-        <KpiCard label="Active" value={kpiData.active} icon={<Package className="w-4 h-4" />} />
-        <KpiCard label="Inactive" value={kpiData.inactive} icon={<Package className="w-4 h-4" />} />
-        <KpiCard label="Low Stock" value={kpiData.lowStock} icon={<Package className="w-4 h-4" />} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard label="Total Products" value={kpiData.total} icon={Package} />
+        <KpiCard label="Active" value={kpiData.active} icon={Package} />
+        <KpiCard label="Inactive" value={kpiData.inactive} icon={Package} />
+        <KpiCard label="Low Stock" value={kpiData.lowStock} icon={Package} />
       </div>
 
       {/* Search and Filters */}
@@ -55,7 +62,11 @@ export default function ProductsPage() {
               <input
                 type="text"
                 placeholder="Search by product name or SKU..."
-                className="w-full pl-10 pr-4 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20 focus:border-[hsl(var(--color-primary-blue))] transition-all"
+                style={{
+                  backgroundColor: 'hsl(var(--color-card-bg))',
+                  color: 'hsl(var(--color-foreground))'
+                }}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -103,7 +114,7 @@ export default function ProductsPage() {
                   </TableCell>
                   <TableCell className="font-medium">{product.sku}</TableCell>
                   <TableCell>{product.hsn}</TableCell>
-                  <TableCell>{product.gstPercent}%</TableCell>
+                  <TableCell>{product.gst}%</TableCell>
                   <TableCell>{formatINR(product.price)}</TableCell>
                   <TableCell>
                     <span className={product.stock < 10 ? 'text-destructive font-medium' : ''}>

@@ -78,7 +78,7 @@ As defined in `02-DATABASE-SCHEMA.md`:
 
 ### Critical: NEVER accept `tenantId` from the request body / query string / URL param.
 
-The only source of `tenantId` is the decoded JWT access token (for normal user calls) OR a trusted internal service context (for background jobs). If an endpoint needs to operate "across tenants" (future SaaS super-admin panel), it uses a special `platform_admin` role flag that bypasses the filter — but for Leheriya launch, NO endpoint does that.
+The only source of `tenantId` is the decoded JWT access token (for normal user calls) OR a trusted internal service context (for background jobs). **A user on Tenant A must never access Tenant B** — this is enforced in `tenantMiddleware` + the Mongoose tenant plugin, not in the React app. Platform Admin subscriber list is the only cross-tenant read; impersonation then binds JWT `tenantId` to that merchant until exit.
 
 ---
 
@@ -141,7 +141,7 @@ Shopify / Amazon / Myntra webhook endpoints:
 
 New merchant signs up → 1 atomic operation:
 1. Insert new row into `tenants` → `tenant._id`
-2. Clone the 3 default `roles` (super_admin, admin, vendor) with this `tenantId`
+2. Clone default `roles` (`super_admin`, `operations`, `warehouse`, `accounts`, `catalog_manager`, `customer_support`, `vendor`) with this `tenantId`
 3. Clone the default 2 `warehouses` (WH-001 Physical + WH-002 Shopify Virtual)
 4. Insert seed `notifications` rows (1 per event × default channels)
 5. Insert seed `settings` defaults (tax=IN/GST 18%, currency=INR, etc.)

@@ -47,7 +47,7 @@ Hosting: Self-hosted MongoDB 7 or MongoDB Atlas depending on Phase 12 deployment
 |-------|--------|-----------|
 | Auth mechanism | **JWT Access Token + Refresh Token** | Stateless backend, refresh token stored in HTTP-only cookie (security), access token short-lived (15 min) in memory/secure storage. Passport/OAuth2 deferred — first-party users only at launch. |
 | Password hashing | **bcryptjs** (cost 12) | No native binding issues, standard NIST recommendation. |
-| AuthZ | **RBAC — Role-based** (hand-rolled middleware, no CASL yet) | Only 2 launch roles: Super Admin + Vendor. A permission matrix + a single `requireRole(...)` middleware keeps the stack lean. CASL/ABAC can be added for Phase 2+ granular permissions if needed. |
+| AuthZ | **RBAC + permission keys** | Roles seed a `permissions[]`. Middleware `requirePermission('orders.view')` — not `if (role === 'operations')`. See `04-RBAC-BLUEPRINT.md`. |
 | Tenancy enforcement | **Mongoose plugin + Express middleware** | Tenant ID extracted from JWT payload, auto-injected into every query & write via a global plugin. See `03-MULTI-TENANCY.md`. |
 
 ## 6. API Style
@@ -75,6 +75,8 @@ Hosting: Self-hosted MongoDB 7 or MongoDB Atlas depending on Phase 12 deployment
 | State management (Redux/Zustand/Context) | Phase 1, after we see real app complexity |
 | Form library (RHF / Formik) | Phase 1 |
 | Notification delivery (Telegram/Email/WhatsApp) | Phase 10 |
-| Queue / background jobs (BullMQ) | Phase 5+ when async order sync is needed |
+| Queue / background jobs (BullMQ) | Phase 5+ (order/inventory/label/webhook jobs; UI must not block) |
+| Redis locks | Phase 4 inventory concurrency if more than one API instance |
+| Realtime (Socket.IO) | Phase 11 dashboard events |
 | Object storage (S3-compatible) | Phase 3 (Products — images, invoice PDFs) |
 | Deployment target / CD | Phase 12 |
