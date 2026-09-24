@@ -30,7 +30,7 @@ export default function ContactPage() {
 
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-sky-50 via-white to-violet-50 py-16">
+      <section className="relative overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-lime-50 py-16">
         <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
           <h1 className="text-4xl font-bold tracking-tight text-slate-900">Contact</h1>
           <p className="mt-3 text-lg text-slate-600">
@@ -120,7 +120,7 @@ export default function ContactPage() {
                 />
               </div>
             </div>
-            <Button type="submit" disabled={sending} className="mt-5 rounded-full !bg-blue-600 !from-blue-600 !to-indigo-600">
+            <Button type="submit" disabled={sending} className="mt-5 rounded-full">
               {sending ? 'Sending…' : 'Send message'}
             </Button>
           </form>

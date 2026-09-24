@@ -7,7 +7,7 @@ const ICON_TONES = {
   emerald: 'from-emerald-400 to-teal-500',
   rose: 'from-rose-400 to-pink-500',
   violet: 'from-violet-500 to-purple-600',
-  blue: 'from-blue-500 to-indigo-600',
+  blue: 'from-emerald-500 to-teal-600',
   orange: 'from-orange-400 to-red-500',
   slate: 'from-slate-500 to-slate-700',
 };

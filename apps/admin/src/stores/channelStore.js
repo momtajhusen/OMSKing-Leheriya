@@ -43,11 +43,34 @@ const useChannelStore = create((set, get) => ({
         [id]: {
           ...(connections[id] || {}),
           credentials,
-          status: 'Connected',
-          lastSync: new Date().toLocaleString('en-IN', { hour12: true }),
+          status: 'saved',
         },
       },
     });
+  },
+
+  hydrateFromServer: (rows) => {
+    const { connections, enabledIds, catalog } = get();
+    const nextConn = { ...connections };
+    const nextEnabled = [...enabledIds];
+    (rows || []).forEach((row) => {
+      if (!row?.channel) return;
+      if (!nextEnabled.includes(row.channel)) nextEnabled.push(row.channel);
+      const channel = catalog.find((c) => c.id === row.channel);
+      nextConn[row.channel] = {
+        status: row.status,
+        lastSync: row.lastTestAt || 'Never',
+        lastTestMessage: row.lastTestMessage,
+        failedJobs: 0,
+        credentials: {
+          ...(channel ? Object.fromEntries(channel.fields.map((f) => [f.key, ''])) : {}),
+          ...(row.credentials || {}),
+          warehouseCode: row.warehouseCode || row.credentials?.warehouseCode || '',
+          importOrdersFrom: row.importOrdersFrom ? String(row.importOrdersFrom).slice(0, 10) : '',
+        },
+      };
+    });
+    set({ connections: nextConn, enabledIds: nextEnabled });
   },
 }));
 

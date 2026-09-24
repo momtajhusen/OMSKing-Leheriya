@@ -1,245 +1,313 @@
-import { useState } from 'react';
-import { skuMappings, masterSkus } from '../../mocks';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import { GitCompare, Plus, Search, Link, Unlink } from 'lucide-react';
+import Select from '../../components/ui/Select';
+import PageLoader from '../../components/ui/PageLoader';
+import EmptyState from '../../components/ui/EmptyState';
+import { GitCompare, Link, Search, Unlink } from 'lucide-react';
+import api, { apiError } from '../../lib/api';
+import { usePermissions } from '../../hooks/usePermissions';
+
+const CHANNELS = ['shopify', 'myntra', 'amazon'];
 
 export default function SkuMappingPage() {
+  const navigate = useNavigate();
+  const { canCatalogEdit } = usePermissions();
   const [activeTab, setActiveTab] = useState('mapped');
+  const [channel, setChannel] = useState('');
+  const [unlistedChannel, setUnlistedChannel] = useState('amazon');
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState([]);
+  const [masters, setMasters] = useState([]);
+  const [counts, setCounts] = useState({ mapped: 0, unmapped: 0, failed: 0, unlisted: 0 });
   const [mappingInput, setMappingInput] = useState({});
+  const [loading, setLoading] = useState(true);
 
-  const handleMapToExisting = (mappingId, masterSku) => {
-    console.log('Mapping', mappingId, 'to existing master SKU:', masterSku);
+  const loadTab = async (tab) => {
+    if (tab === 'unlisted') {
+      const { data } = await api.get('/sku-mappings/unlisted', { params: { channel: unlistedChannel } });
+      return data.data || [];
+    }
+    const { data } = await api.get('/sku-mappings', {
+      params: { tab, channel: channel || undefined, q: q || undefined },
+    });
+    return data.data || [];
   };
 
-  const handleCreateAsNew = (mappingId) => {
-    console.log('Creating new product for mapping:', mappingId);
+  const load = async (tab = activeTab) => {
+    setLoading(true);
+    try {
+      const [current, summary, skuRes] = await Promise.all([
+        loadTab(tab),
+        api.get('/sku-mappings/summary', { params: { channel: unlistedChannel } }),
+        api.get('/master-skus'),
+      ]);
+      setRows(current);
+      setCounts(summary.data.data || counts);
+      setMasters(skuRes.data.data || []);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not load mappings'));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const isMapped = (m) => ['Synced', 'Pending'].includes(m.status);
+  useEffect(() => { load(); }, []);
+
+  const changeTab = (tab) => {
+    setActiveTab(tab);
+    load(tab);
+  };
+
+  const mapExisting = async (id) => {
+    const code = mappingInput[id];
+    if (!code) return;
+    try {
+      await api.post(`/sku-mappings/${id}/map`, { masterSkuCode: code });
+      toast.success(`Mapped to ${code}`);
+      load(activeTab);
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
+
+  const createNew = async (id) => {
+    try {
+      await api.post(`/sku-mappings/${id}/create-as-new`);
+      toast.success('New Master SKU created and mapped');
+      load(activeTab);
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
+
+  const unmap = async (id) => {
+    try {
+      await api.post(`/sku-mappings/${id}/unmap`);
+      toast.success('Listing unmapped');
+      load(activeTab);
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
+
+  const retry = async (id) => {
+    try {
+      const { data } = await api.post(`/sku-mappings/${id}/retry`);
+      toast.success(data.message || 'Retry finished');
+      load(activeTab);
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
 
   const tabs = [
-    { id: 'mapped', label: 'Mapped', count: skuMappings.filter(isMapped).length },
-    { id: 'unmapped', label: 'Unmapped', count: skuMappings.filter((m) => m.status === 'Unmapped').length },
-    { id: 'failed', label: 'Failed', count: skuMappings.filter((m) => m.status === 'Error').length },
-    { id: 'unlisted', label: 'Unlisted', count: skuMappings.filter((m) => m.status === 'Unlisted').length },
+    { id: 'mapped', label: 'Mapped', count: counts.mapped },
+    { id: 'unmapped', label: 'Unmapped', count: counts.unmapped },
+    { id: 'failed', label: 'Failed', count: counts.failed },
+    { id: 'unlisted', label: 'Unlisted', count: counts.unlisted },
   ];
 
-  const filteredMappings = skuMappings.filter((m) => {
-    if (activeTab === 'mapped') return isMapped(m);
-    if (activeTab === 'unmapped') return m.status === 'Unmapped';
-    if (activeTab === 'failed') return m.status === 'Error';
-    if (activeTab === 'unlisted') return m.status === 'Unlisted';
-    return true;
-  });
+  if (loading) return <PageLoader label="Loading SKU mappings..." />;
 
   return (
     <div className="p-6 space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold mb-2">SKU Mapping</h1>
-          <p className="text-muted-foreground">Tie Amazon / Myntra / Shopify listing SKUs to a Master SKU. Unmapped rows sit here until ops maps them.</p>
+          <p className="text-muted-foreground">
+            Shopify / Amazon / Myntra listings attach to one Master SKU. Match is normalized seller SKU, then barcode — never title.
+          </p>
         </div>
-        <Button>
-          <Plus className="w-4 h-4 mr-2" />
-          Create Mapping
-        </Button>
+        <Button variant="outline" onClick={() => navigate('/import')}>Bulk import</Button>
       </div>
 
-      {/* Business Rule Info */}
       <Card className="bg-primary/5 border-primary/20">
         <CardContent className="pt-6">
           <div className="flex items-start gap-3">
             <GitCompare className="w-5 h-5 text-primary mt-0.5" />
             <div>
-              <p className="font-medium">SKU Mapping Decision Flow</p>
+              <p className="font-medium">Mapping engine</p>
               <p className="text-sm text-muted-foreground">
-                For unmapped listings, check if the product exists on another channel. 
-                If yes, auto-map to existing Master SKU. If no, either create as new product 
-                or manually map by entering Master SKU code.
+                Import Shopify first (creates Master SKUs), then Myntra, then Amazon. No match → Unmapped.
+                Type an existing code or Create as new. Failed rows keep the listing; Retry restores a mapped error or re-runs auto-map.
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Tabs */}
-      <div className="flex gap-2">
-        {tabs.map(tab => (
-          <Button
-            key={tab.id}
-            variant={activeTab === tab.id ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label} ({tab.count})
+      <div className="flex flex-wrap gap-2 items-center">
+        {tabs.map((tab) => (
+          <Button key={tab.id} variant={activeTab === tab.id ? 'default' : 'outline'} size="sm" onClick={() => changeTab(tab.id)}>
+            {tab.label} ({tab.count ?? 0})
           </Button>
         ))}
+        {activeTab === 'unlisted' ? (
+          <div className="w-40">
+            <Select
+              value={unlistedChannel}
+              onChange={(e) => {
+                const next = e.target.value;
+                setUnlistedChannel(next);
+                setActiveTab('unlisted');
+                setLoading(true);
+                Promise.all([
+                  api.get('/sku-mappings/unlisted', { params: { channel: next } }),
+                  api.get('/sku-mappings/summary', { params: { channel: next } }),
+                ]).then(([current, summary]) => {
+                  setRows(current.data.data || []);
+                  setCounts(summary.data.data || counts);
+                }).catch((err) => toast.error(apiError(err, 'Could not load mappings'))).finally(() => setLoading(false));
+              }}
+            >
+              {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+          </div>
+        ) : (
+          <div className="w-40">
+            <Select value={channel} onChange={(e) => setChannel(e.target.value)}>
+              <option value="">All channels</option>
+              {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+          </div>
+        )}
+        {activeTab !== 'unlisted' && (
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <input
+              className="h-8 pl-7 pr-2 border rounded-lg text-sm bg-[hsl(var(--color-card-bg))]"
+              placeholder="Search SKU / title"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && load(activeTab)}
+            />
+          </div>
+        )}
+        <Button size="sm" variant="outline" onClick={() => load(activeTab)}>Apply</Button>
       </div>
 
-      {/* Mapped Listings */}
-      {activeTab === 'mapped' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Successfully Mapped Listings</CardTitle>
-            <CardDescription>Channel SKUs mapped to master SKU codes</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {activeTab === 'failed' ? 'Failed sync'
+              : activeTab === 'unlisted' ? `Unlisted on ${unlistedChannel}`
+                : activeTab === 'unmapped' ? 'Unmapped listings'
+                  : 'Mapped listings'}
+          </CardTitle>
+          <CardDescription>
+            {activeTab === 'unlisted'
+              ? `Master SKUs with no ${unlistedChannel} mapping. Import that channel’s CSV to list them.`
+              : 'Channel rows from Mongo'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {rows.length === 0 ? (
+            <EmptyState
+              title="Nothing in this tab"
+              description={activeTab === 'unlisted' ? 'Every Master SKU is listed on this channel, or none exist yet.' : 'Import a CSV or create a product first.'}
+              action={activeTab === 'unlisted' ? <Button variant="outline" onClick={() => navigate('/import')}>Go to import</Button> : null}
+            />
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Channel SKU</TableHead>
                   <TableHead>Channel</TableHead>
                   <TableHead>Master SKU</TableHead>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead>Last Sync</TableHead>
+                  <TableHead>Title</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
+                  {activeTab === 'failed' && <TableHead>Error</TableHead>}
+                  {canCatalogEdit && activeTab !== 'unlisted' && <TableHead>Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredMappings.slice(0, 10).map(mapping => (
-                  <TableRow key={mapping.id}>
-                    <TableCell className="font-medium">{mapping.channelSku}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{mapping.channel}</Badge>
-                    </TableCell>
-                    <TableCell>
+                {rows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        <Link className="w-4 h-4 text-green-600" />
-                        {mapping.masterSku}
+                        {row.masterSku ? <Link className="w-4 h-4 text-green-600" /> : <Unlink className="w-4 h-4 text-destructive" />}
+                        {row.channelSku}
                       </div>
                     </TableCell>
-                    <TableCell>{mapping.productName}</TableCell>
-                    <TableCell>{mapping.lastSync}</TableCell>
+                    <TableCell><Badge variant="outline">{row.channel}</Badge></TableCell>
+                    <TableCell>{row.masterSku || '—'}</TableCell>
+                    <TableCell>{row.productName || row.channelTitle}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{mapping.status}</Badge>
+                      <Badge variant={row.status === 'error' || row.status === 'Error' ? 'destructive' : 'secondary'}>{row.status}</Badge>
                     </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="sm">Edit</Button>
-                    </TableCell>
+                    {activeTab === 'failed' && (
+                      <TableCell className="text-xs text-destructive max-w-xs">{row.error || '—'}</TableCell>
+                    )}
+                    {canCatalogEdit && activeTab === 'mapped' && (
+                      <TableCell>
+                        <Button variant="outline" size="sm" onClick={() => unmap(row.id)}>Unmap</Button>
+                      </TableCell>
+                    )}
+                    {canCatalogEdit && (activeTab === 'unmapped' || activeTab === 'failed') && (
+                      <TableCell>
+                        <div className="flex flex-wrap gap-2">
+                          <input
+                            className="w-36 px-2 py-1 border rounded text-sm"
+                            list="master-codes"
+                            placeholder="Master SKU code"
+                            value={mappingInput[row.id] || ''}
+                            onChange={(e) => setMappingInput((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                          />
+                          <Button variant="outline" size="sm" disabled={!mappingInput[row.id]} onClick={() => mapExisting(row.id)}>Map</Button>
+                          <Button variant="outline" size="sm" onClick={() => createNew(row.id)}>Create as new</Button>
+                          {activeTab === 'failed' && (
+                            <Button variant="outline" size="sm" onClick={() => retry(row.id)}>Retry</Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
-      {/* Unmapped Listings */}
-      {(activeTab === 'unmapped' || activeTab === 'failed' || activeTab === 'unlisted') && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {activeTab === 'failed' ? 'Failed sync' : activeTab === 'unlisted' ? 'Unlisted' : 'Unmapped Listings'}
-            </CardTitle>
-            <CardDescription>Channel SKUs requiring mapping to master SKU</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <datalist id="master-codes">
+        {masters.map((sku) => (
+          <option key={sku.id} value={sku.code}>{sku.name}</option>
+        ))}
+      </datalist>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Master SKU reference</CardTitle>
+          <CardDescription>Type these codes in the Map box, or pick from the suggestion list</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {masters.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No Master SKUs yet.</p>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Channel SKU</TableHead>
-                  <TableHead>Channel</TableHead>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Map to Existing Master SKU</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead>Master SKU</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Barcode</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredMappings.slice(0, 10).map(mapping => (
-                  <TableRow key={mapping.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Unlink className="w-4 h-4 text-destructive" />
-                        {mapping.channelSku}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{mapping.channel}</Badge>
-                    </TableCell>
-                    <TableCell>{mapping.productName}</TableCell>
-                    <TableCell>
-                      <Badge variant={mapping.status === 'Error' ? 'destructive' : 'secondary'}>
-                        {mapping.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Enter Master SKU"
-                          className="w-32 px-2 py-1 border rounded text-sm"
-                          value={mappingInput[mapping.id] || ''}
-                          onChange={(e) => setMappingInput(prev => ({
-                            ...prev,
-                            [mapping.id]: e.target.value
-                          }))}
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleMapToExisting(mapping.id, mappingInput[mapping.id])}
-                          disabled={!mappingInput[mapping.id]}
-                        >
-                          Map
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCreateAsNew(mapping.id)}
-                        >
-                          Create as New
-                        </Button>
-                      </div>
-                    </TableCell>
+                {masters.map((sku) => (
+                  <TableRow key={sku.id}>
+                    <TableCell className="font-medium">{sku.code}</TableCell>
+                    <TableCell>{sku.name}</TableCell>
+                    <TableCell>{sku.barcode || '—'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Master SKU Reference */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Available Master SKUs</CardTitle>
-          <CardDescription>Reference for manual mapping</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Master SKU</TableHead>
-                <TableHead>Product Name</TableHead>
-                <TableHead>Variant</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {masterSkus.slice(0, 10).map(sku => (
-                <TableRow key={sku.id}>
-                  <TableCell className="font-medium">{sku.code}</TableCell>
-                  <TableCell>{sku.name}</TableCell>
-                  <TableCell>
-                    {Object.entries(sku.attributes).map(([key, value]) => (
-                      <span key={key} className="text-sm mr-2">
-                        {key}: {value}
-                      </span>
-                    ))}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          )}
         </CardContent>
       </Card>
     </div>

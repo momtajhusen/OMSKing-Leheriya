@@ -9,7 +9,7 @@ const pillars = [
   {
     icon: Layers,
     tone: 'sky',
-    accent: 'bg-gradient-to-r from-sky-400 to-blue-600',
+    accent: 'bg-gradient-to-r from-teal-400 to-emerald-600',
     title: 'One Master Order',
     text: 'Shopify, Amazon and Myntra sync into a single Leheriya order. If qty is more than 1, that row can split across vendors.',
   },
@@ -23,7 +23,7 @@ const pillars = [
   {
     icon: FileSpreadsheet,
     tone: 'violet',
-    accent: 'bg-gradient-to-r from-violet-400 to-indigo-500',
+    accent: 'bg-gradient-to-r from-lime-400 to-emerald-500',
     title: 'GST on the Order ID',
     text: 'Shopify GST invoice number is the Order ID. Amazon and Myntra payout files match Master Orders. Partially paid stays COD until money lands.',
   },
@@ -35,7 +35,7 @@ const modules = [
   { icon: Truck, tone: 'emerald', accent: 'bg-emerald-400', title: 'Shipping', text: 'AWB, manifests, bulk tracking. Cancel a label and Shopify goes back to unfulfilled.' },
   { icon: RotateCcw, tone: 'rose', accent: 'bg-rose-400', title: 'Returns, RTO & NDR', text: 'Three reverse paths, same pattern as forward orders. Restock destination is chosen at QC.' },
   { icon: FileSpreadsheet, tone: 'violet', accent: 'bg-violet-400', title: 'GST invoicing', text: 'Gapless numbers. On Shopify the GST invoice number is the Order ID accounts already know.' },
-  { icon: CreditCard, tone: 'blue', accent: 'bg-blue-500', title: 'Settlement matching', text: 'Upload Amazon / Myntra settlement files against Master Orders. Short payouts stay visible until closed.' },
+  { icon: CreditCard, tone: 'blue', accent: 'bg-emerald-500', title: 'Settlement matching', text: 'Upload Amazon / Myntra settlement files against Master Orders. Short payouts stay visible until closed.' },
 ];
 
 const checks = [
@@ -47,17 +47,17 @@ const checks = [
 export default function HomePage() {
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-sky-50 via-white to-amber-50 py-16 sm:py-24">
-        <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-blue-400/25 blur-3xl animate-float" />
-        <div className="pointer-events-none absolute -right-16 bottom-0 h-80 w-80 rounded-full bg-fuchsia-300/25 blur-3xl animate-float-slow" />
+      <section className="relative overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-lime-50 py-16 sm:py-24">
+        <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-emerald-400/25 blur-3xl animate-float" />
+        <div className="pointer-events-none absolute -right-16 bottom-0 h-80 w-80 rounded-full bg-lime-300/25 blur-3xl animate-float-slow" />
         <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2">
           <div>
-            <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wider text-blue-700 shadow-sm ring-1 ring-blue-100">
+            <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700 shadow-sm ring-1 ring-emerald-100">
               First tenant · Leheriya Creations
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.12] tracking-tight text-slate-900 sm:text-5xl">
               Shopify, Amazon and Myntra become{' '}
-              <span className="bg-gradient-to-r from-blue-600 to-indigo-500 bg-clip-text text-transparent">one Master Order</span>
+              <span className="bg-gradient-to-r from-emerald-700 to-lime-500 bg-clip-text text-transparent">one Master Order</span>
             </h1>
             <p className="mt-5 max-w-lg text-base leading-7 text-slate-600 sm:text-lg">
               OMSKing is Leheriya’s packing desk as SaaS. Master SKU, two warehouses, GST on the Order ID — each merchant is a locked tenant.
@@ -145,13 +145,13 @@ export default function HomePage() {
           <div>
             <h2 className="text-3xl font-bold text-slate-900">
               Vendors, Shopify store, two warehouses —{' '}
-              <span className="text-blue-700">still one tenant</span>
+              <span className="text-emerald-700">still one tenant</span>
             </h2>
             <ul className="mt-6 space-y-4">
               {checks.map((line) => (
                 <li key={line} className="flex gap-3 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-700 ring-1 ring-slate-100">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-100">
-                    <Check className="h-4 w-4 text-orange-500" strokeWidth={2.5} />
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100">
+                    <Check className="h-4 w-4 text-emerald-600" strokeWidth={2.5} />
                   </span>
                   {line}
                 </li>
@@ -161,7 +161,7 @@ export default function HomePage() {
           <div className="grid grid-cols-2 gap-4">
             {[
               { icon: Handshake, label: 'Vendors', color: 'from-rose-500 to-pink-500' },
-              { icon: Store, label: 'Shopify store', color: 'from-sky-500 to-blue-500' },
+              { icon: Store, label: 'Shopify store', color: 'from-emerald-500 to-teal-500' },
               { icon: Building2, label: 'WH-001 · WH-002', color: 'from-amber-400 to-orange-500' },
               { icon: Users, label: 'Amazon · Myntra', color: 'from-emerald-500 to-teal-500' },
             ].map((node) => (
@@ -179,11 +179,11 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-700 py-16 text-white">
+      <section className="relative overflow-hidden bg-gradient-to-r from-emerald-900 via-emerald-700 to-teal-600 py-16 text-white">
         <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
         <div className="relative mx-auto max-w-4xl px-4 text-center sm:px-6">
           <h2 className="text-3xl font-bold">Leheriya is tenant one. The next brand gets the same walls.</h2>
-          <p className="mt-3 text-blue-100">
+          <p className="mt-3 text-emerald-100">
             Ops inside a tenant never sees another merchant’s orders. The next brand gets the same walls.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
@@ -196,7 +196,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="bg-gradient-to-b from-white to-sky-50 py-16">
+      <section className="bg-gradient-to-b from-white to-emerald-50 py-16">
         <div className="mx-auto flex max-w-3xl flex-col items-center px-4 text-center sm:px-6">
           <h2 className="text-3xl font-bold text-slate-900">Open the Leheriya tenant</h2>
           <p className="mt-3 text-slate-600">Start your own merchant trial, or walk the dummy desk we already built for Leheriya.</p>
@@ -204,7 +204,7 @@ export default function HomePage() {
             <MarketingCta to="/auth/register">Start a merchant trial</MarketingCta>
             <MarketingCta to="/contact" variant="outline">Talk to us</MarketingCta>
           </div>
-          <Link to="/pricing" className="mt-4 text-sm font-medium text-blue-700 hover:underline">
+          <Link to="/pricing" className="mt-4 text-sm font-medium text-emerald-700 hover:underline">
             Tenant plans
           </Link>
         </div>

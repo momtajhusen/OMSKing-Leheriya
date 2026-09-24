@@ -2,6 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { homePathForRole } from '../../constants/roles';
 import { hasPermission, attachPermissions, ROUTE_PERMISSION } from '../../constants/permissions';
+import PageLoader from './PageLoader';
 
 const ProtectedRoute = ({ children, requiredRole = null, requiredRoles = null, requiredPermission = null }) => {
   const { isAuthenticated, loading, effectiveRole, user } = useAuth();
@@ -9,11 +10,7 @@ const ProtectedRoute = ({ children, requiredRole = null, requiredRoles = null, r
   const roles = requiredRoles || (requiredRole ? [requiredRole] : null);
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    );
+    return <PageLoader fullscreen label="Signing you in…" />;
   }
 
   if (!isAuthenticated) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export function useSimulatedLoad(key, ms = 420) {
+export function useSimulatedLoad(key, ms = 260) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

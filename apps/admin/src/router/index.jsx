@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import NotFoundPage from '../pages/NotFoundPage';
 import ProtectedRoute from '../components/ui/ProtectedRoute';
+import PageLoader from '../components/ui/PageLoader';
 import { TENANT_STAFF_ROLES } from '../constants/roles';
 
 // Lazy load layout components
@@ -14,6 +15,7 @@ const PlatformDashboardPage = lazy(() => import('../pages/platform/PlatformDashb
 const PlatformAuthPage = lazy(() => import('../pages/platform/PlatformAuthPage'));
 const TenantMgmtPage = lazy(() => import('../pages/admin/TenantMgmtPage'));
 const PlatformOpsPage = lazy(() => import('../pages/platform/PlatformOpsPage'));
+const PlatformStaffPage = lazy(() => import('../pages/platform/PlatformStaffPage'));
 
 // Route definitions - single source of truth for sidebar and router
 export const ROUTE_DEFS = {
@@ -293,18 +295,18 @@ export const ROUTE_DEFS = {
 
 // Loading component
 function LoadingFallback() {
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="text-muted-foreground">Loading...</div>
-    </div>
-  );
+  return <PageLoader label="Loading…" />;
+}
+
+function ScreenLoader() {
+  return <PageLoader fullscreen label="Loading OMSKing…" />;
 }
 
 // Create router configuration
 const router = createBrowserRouter([
   {
     element: (
-      <Suspense fallback={<LoadingFallback />}>
+      <Suspense fallback={<ScreenLoader />}>
         <PublicLayout />
       </Suspense>
     ),
@@ -322,7 +324,7 @@ const router = createBrowserRouter([
   {
     path: '/auth',
     element: (
-      <Suspense fallback={<LoadingFallback />}>
+      <Suspense fallback={<ScreenLoader />}>
         <AuthLayout />
       </Suspense>
     ),
@@ -340,7 +342,7 @@ const router = createBrowserRouter([
     path: '/platform',
     element: (
       <ProtectedRoute requiredRoles={['platform_admin']}>
-        <Suspense fallback={<LoadingFallback />}>
+        <Suspense fallback={<ScreenLoader />}>
           <PlatformLayout />
         </Suspense>
       </ProtectedRoute>
@@ -414,7 +416,7 @@ const router = createBrowserRouter([
         path: 'users',
         element: (
           <Suspense fallback={<LoadingFallback />}>
-            <PlatformOpsPage />
+            <PlatformStaffPage />
           </Suspense>
         ),
       },
@@ -424,7 +426,7 @@ const router = createBrowserRouter([
   {
     element: (
       <ProtectedRoute requiredRoles={TENANT_STAFF_ROLES}>
-        <Suspense fallback={<LoadingFallback />}>
+        <Suspense fallback={<ScreenLoader />}>
           <AdminLayout />
         </Suspense>
       </ProtectedRoute>
@@ -447,7 +449,7 @@ const router = createBrowserRouter([
     path: '/vendor',
     element: (
       <ProtectedRoute requiredRole="vendor">
-        <Suspense fallback={<LoadingFallback />}>
+        <Suspense fallback={<ScreenLoader />}>
           <VendorLayout />
         </Suspense>
       </ProtectedRoute>

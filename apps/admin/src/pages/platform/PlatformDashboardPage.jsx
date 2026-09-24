@@ -1,8 +1,8 @@
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { PLATFORM_TENANTS } from '../../mocks/platform';
+import api, { apiError } from '../../lib/api';
 import { formatINR } from '../../utils/format';
-import { useSimulatedLoad } from '../../hooks/useSimulatedLoad';
 import { useAuth } from '../../hooks/useAuth';
 import PageLoader from '../../components/ui/PageLoader';
 import { PlatformPage, PlatformSheet } from '../../components/platform/PlatformChrome';
@@ -15,23 +15,36 @@ import { VendorStat } from '../../components/vendor/VendorChrome';
 export default function PlatformDashboardPage() {
   const navigate = useNavigate();
   const { impersonateTenant } = useAuth();
-  const loading = useSimulatedLoad('platform');
-  const active = PLATFORM_TENANTS.filter((t) => t.status === 'Active').length;
-  const trial = PLATFORM_TENANTS.filter((t) => t.status === 'Trial').length;
-  const suspended = PLATFORM_TENANTS.filter((t) => t.status === 'Suspended').length;
-  const mrr = PLATFORM_TENANTS.reduce((sum, t) => sum + (t.status === 'Suspended' ? 0 : t.mrr), 0);
+  const [tenants, setTenants] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/tenants')
+      .then(({ data }) => setTenants(data.data || []))
+      .catch((err) => toast.error(apiError(err)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const active = tenants.filter((t) => t.status === 'Active').length;
+  const trial = tenants.filter((t) => t.status === 'Trial').length;
+  const suspended = tenants.filter((t) => t.status === 'Suspended').length;
+  const mrr = tenants.reduce((sum, t) => sum + (t.status === 'Suspended' ? 0 : t.mrr || 0), 0);
 
   if (loading) return <PageLoader label="Loading platform..." />;
 
-  const openTenant = (tenant) => {
+  const openTenant = async (tenant) => {
     if (tenant.status === 'Suspended') {
       toast.error('Activate this tenant before opening it');
       navigate('/platform/tenants');
       return;
     }
-    impersonateTenant(tenant);
-    toast.success(`Opened ${tenant.name}`);
-    navigate('/dashboard');
+    try {
+      await impersonateTenant(tenant);
+      toast.success(`Opened ${tenant.name}`);
+      navigate('/dashboard');
+    } catch (err) {
+      toast.error(apiError(err));
+    }
   };
 
   return (
@@ -40,7 +53,7 @@ export default function PlatformDashboardPage() {
       subtitle="This login is not a merchant. It owns OMSKing and every subscriber tenant."
       action={<Button onClick={() => navigate('/platform/tenants')}>Manage subscribers</Button>}
     >
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 via-indigo-600 to-blue-600 p-6 text-white shadow-lg">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-800 via-emerald-600 to-teal-600 p-6 text-white shadow-lg">
         <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
         <p className="text-sm font-medium text-white/80">Platform Admin</p>
         <p className="mt-1 max-w-xl text-lg font-semibold">Open a tenant as Super Admin — packing stays inside that merchant.</p>
@@ -75,11 +88,11 @@ export default function PlatformDashboardPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {PLATFORM_TENANTS.map((tenant) => (
+              {tenants.map((tenant) => (
                 <TableRow key={tenant.id}>
                   <TableCell>
                     <div className="font-medium">{tenant.name}</div>
-                    <div className="text-xs text-muted-foreground">{tenant.id}</div>
+                    <div className="text-xs text-muted-foreground">{tenant.slug}</div>
                   </TableCell>
                   <TableCell>{tenant.owner}</TableCell>
                   <TableCell>{tenant.plan}</TableCell>

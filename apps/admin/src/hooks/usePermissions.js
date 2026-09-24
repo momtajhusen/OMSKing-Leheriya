@@ -11,6 +11,10 @@ export function usePermissions() {
     granted,
     can: (key) => hasPermission(granted, key),
     canUsers: hasPermission(granted, PERMISSIONS.USERS_MANAGE),
+    canCatalog: hasPermission(granted, PERMISSIONS.CATALOG_VIEW),
+    canCatalogEdit: hasPermission(granted, PERMISSIONS.CATALOG_EDIT),
+    canInventory: hasPermission(granted, PERMISSIONS.INVENTORY_VIEW),
+    canInventoryAdjust: hasPermission(granted, PERMISSIONS.INVENTORY_ADJUST),
     canOpenPath: (path) => hasPermission(granted, ROUTE_PERMISSION[path] ?? null),
   };
 }

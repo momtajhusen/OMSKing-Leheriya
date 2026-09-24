@@ -7,6 +7,7 @@ import { useAuth } from '../../hooks/useAuth';
 import Button from '../ui/Button';
 import useUIStore from '../../stores/uiStore';
 import { cn } from '../../lib/utils';
+import { usePermissions } from '../../hooks/usePermissions';
 
 const TABS = [
   { to: '/dashboard', label: 'Home', icon: LayoutDashboard },
@@ -19,10 +20,11 @@ function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, exitImpersonation } = useAuth();
+  const { canOpenPath } = usePermissions();
   const setMobileOpen = useUIStore((state) => state.setMobileOpen);
 
-  const leaveTenant = () => {
-    exitImpersonation();
+  const leaveTenant = async () => {
+    await exitImpersonation();
     navigate('/platform');
   };
 
@@ -51,7 +53,7 @@ function AdminLayout() {
       </div>
 
       <nav className="mkt-bottom-nav lg:hidden" aria-label="Admin navigation">
-        {TABS.map((tab) => {
+        {TABS.filter((tab) => canOpenPath(tab.to)).map((tab) => {
           const Icon = tab.icon;
           const active = location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`);
           return (

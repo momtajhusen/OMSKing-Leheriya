@@ -14,6 +14,8 @@ import EmptyState from '../../components/ui/EmptyState';
 import Drawer from '../../components/ui/Drawer';
 import Modal from '../../components/ui/Modal';
 import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, Package } from 'lucide-react';
+import { usePermissions } from '../../hooks/usePermissions';
+import { PERMISSIONS } from '../../constants/permissions';
 
 const STATUS_TABS = [
   { id: 'all', label: 'All Orders' },
@@ -45,6 +47,7 @@ const NEXT_STATUS = {
 };
 
 export default function OrdersPage() {
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState('all');
@@ -253,10 +256,12 @@ export default function OrdersPage() {
                           <Eye className="w-3 h-3 mr-1" />
                           View
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => generateInvoice(order)}>
-                          <FileText className="w-3 h-3 mr-1" />
-                          Invoice
-                        </Button>
+                        {can(PERMISSIONS.FINANCE_VIEW) && (
+                          <Button variant="ghost" size="sm" onClick={() => generateInvoice(order)}>
+                            <FileText className="w-3 h-3 mr-1" />
+                            Invoice
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -344,13 +349,13 @@ export default function OrdersPage() {
               <span>{formatINR(selected.total)}</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {NEXT_STATUS[selected.status] && (
+              {NEXT_STATUS[selected.status] && can(PERMISSIONS.ORDERS_EDIT) && (
                 <Button onClick={() => advanceOrder(selected)}>
                   <Package className="w-4 h-4 mr-2" />
                   Move to {NEXT_STATUS[selected.status]}
                 </Button>
               )}
-              {selected.status === 'Cancelled' && (
+              {selected.status === 'Cancelled' && can(PERMISSIONS.ORDERS_EDIT) && (
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -362,7 +367,9 @@ export default function OrdersPage() {
                   Mark Unfulfilled → New
                 </Button>
               )}
-              <Button variant="outline" onClick={() => generateInvoice(selected)}>Generate invoice</Button>
+              {can(PERMISSIONS.FINANCE_VIEW) && (
+                <Button variant="outline" onClick={() => generateInvoice(selected)}>Generate invoice</Button>
+              )}
             </div>
           </div>
         )}

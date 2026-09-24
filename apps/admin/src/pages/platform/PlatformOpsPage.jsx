@@ -135,10 +135,10 @@ export default function PlatformOpsPage() {
       {mode === 'plans' && (
         <div className="grid gap-4 md:grid-cols-3">
           {SUBSCRIPTION_PLANS.map((plan) => (
-            <div key={plan.id} className={`premium-card p-6 ${plan.id === 'growth' ? 'ring-2 ring-indigo-500/40' : ''}`}>
-              {plan.id === 'growth' && <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-600">Leheriya launch</p>}
+            <div key={plan.id} className={`premium-card p-6 ${plan.id === 'growth' ? 'ring-2 ring-emerald-500/40' : ''}`}>
+              {plan.id === 'growth' && <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">Leheriya launch</p>}
               <h2 className="text-xl font-bold">{plan.name}</h2>
-              <p className="mt-1 text-2xl font-semibold text-indigo-600">{plan.price}</p>
+              <p className="mt-1 text-2xl font-semibold text-emerald-700">{plan.price}</p>
               <p className="mt-3 text-sm text-muted-foreground">
                 Channels: {plan.channelLimit ?? 'Unlimited'}
               </p>

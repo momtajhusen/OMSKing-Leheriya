@@ -17,7 +17,7 @@ export function VendorPage({ title, subtitle, action, children }) {
 
 export function VendorStat({ label, value, icon: Icon, tone = 'blue' }) {
   const tones = {
-    blue: 'from-blue-600 to-indigo-600',
+    blue: 'from-emerald-600 to-teal-600',
     emerald: 'from-emerald-500 to-teal-600',
     amber: 'from-amber-500 to-orange-600',
     rose: 'from-rose-500 to-pink-600',
@@ -48,7 +48,7 @@ export function VendorSheet({ children }) {
 
 export function VendorBulkBar({ children }) {
   return (
-    <div className="sticky top-0 z-10 rounded-2xl border border-blue-200/80 bg-blue-50/95 p-3 shadow-sm dark:border-blue-900/50 dark:bg-blue-950/80">
+    <div className="sticky top-0 z-10 rounded-2xl border border-emerald-200/80 bg-emerald-50/95 p-3 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/80">
       {children}
     </div>
   );

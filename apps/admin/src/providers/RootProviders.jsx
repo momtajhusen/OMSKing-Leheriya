@@ -1,13 +1,16 @@
 import { useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import useThemeStore from '../stores/themeStore';
+import useAuthStore from '../stores/authStore';
 
 export default function RootProviders({ children }) {
   const initializeTheme = useThemeStore((state) => state.initializeTheme);
+  const hydrate = useAuthStore((state) => state.hydrate);
 
   useEffect(() => {
     initializeTheme();
-  }, [initializeTheme]);
+    hydrate();
+  }, [initializeTheme, hydrate]);
 
   return (
     <>

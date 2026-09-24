@@ -1,112 +1,124 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState } from 'react';
 import { toast } from 'react-hot-toast';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Lock, CheckCircle, ArrowLeft } from 'lucide-react';
-
-const resetPasswordSchema = z.object({
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  confirmPassword: z.string().min(8, 'Please confirm your password'),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ["confirmPassword"],
-});
+import { FormBanner, PasswordHints } from '../../components/ui/FormBanner';
+import { ArrowLeft } from 'lucide-react';
+import BrandLogo from '../../components/brand/BrandLogo';
+import api, { apiFormError } from '../../lib/api';
+import { resetPasswordSchema } from '../../lib/validation';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
-  
+  const emailFromQuery = searchParams.get('email') || '';
+  const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
+
   const {
     register,
     handleSubmit,
+    watch,
+    setError,
+    getValues,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(resetPasswordSchema),
+    defaultValues: { email: emailFromQuery, otp: '', password: '', confirmPassword: '' },
   });
 
-  const onSubmit = (data) => {
-    // In real app, you would validate token and update password
-    toast.success('Password reset successfully!');
-    navigate('/auth/login');
+  const password = watch('password', '');
+
+  const onSubmit = async (data) => {
+    setFormError('');
+    setSubmitting(true);
+    try {
+      await api.post('/auth/reset-password', {
+        email: data.email,
+        otp: data.otp,
+        password: data.password,
+      });
+      toast.success('Password updated. Sign in with the new password.');
+      navigate('/auth/login');
+    } catch (err) {
+      const parsed = apiFormError(err, 'Could not reset the password.');
+      ['email', 'otp', 'password'].forEach((field) => {
+        if (parsed.fields[field]) setError(field, { type: 'server', message: parsed.fields[field] });
+      });
+      setFormError(parsed.message === 'Validation failed' ? 'Please fix the highlighted fields.' : parsed.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resendOtp = async () => {
+    const email = getValues('email');
+    if (!email) {
+      setFormError('Enter the account email first.');
+      return;
+    }
+    setFormError('');
+    setResending(true);
+    try {
+      await api.post('/auth/forgot-password', { email });
+      toast.success('A new OTP was sent to Gmail.');
+    } catch (err) {
+      setFormError(apiFormError(err, 'Could not resend OTP.').message);
+    } finally {
+      setResending(false);
+    }
   };
 
   return (
     <div className="w-full">
       <div className="text-center mb-8">
-        <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg">
-          <Lock className="h-8 w-8" />
-        </div>
+        <BrandLogo className="mb-4 h-16 w-16 rounded-2xl shadow-lg shadow-emerald-900/25" />
         <h1 className="text-3xl font-bold mb-2">Reset Password</h1>
-        <p className="text-muted-foreground">Create a new secure password for your account</p>
+        <p className="text-muted-foreground">Enter the OTP from Gmail, then choose a new password</p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>New Password</CardTitle>
-          <CardDescription>Enter your new password below</CardDescription>
+          <CardTitle>OTP + new password</CardTitle>
+          <CardDescription>OTP is 6 digits and expires in 10 minutes</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+            {formError && (
+              <FormBanner tone="error" title="Password not updated">{formError}</FormBanner>
+            )}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium mb-2">
-                New Password
-              </label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                {...register('password')}
-                error={errors.password?.message}
-              />
+              <label htmlFor="email" className="block text-sm font-medium mb-2">Email</label>
+              <Input id="email" type="email" placeholder="you@gmail.com" {...register('email')} error={errors.email?.message} />
             </div>
-
             <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium mb-2">
-                Confirm Password
-              </label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                placeholder="••••••••"
-                {...register('confirmPassword')}
-                error={errors.confirmPassword?.message}
-              />
+              <label htmlFor="otp" className="block text-sm font-medium mb-2">OTP from Gmail</label>
+              <Input id="otp" inputMode="numeric" maxLength={6} placeholder="123456" {...register('otp')} error={errors.otp?.message} />
             </div>
-
-            <div className="bg-muted/50 p-4 rounded-lg space-y-2">
-              <p className="text-sm font-medium">Password requirements:</p>
-              <ul className="text-xs text-muted-foreground space-y-1">
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-3 h-3" />
-                  At least 8 characters
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-3 h-3" />
-                  Contains uppercase and lowercase letters
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-3 h-3" />
-                  Contains at least one number
-                </li>
-              </ul>
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium mb-2">New Password</label>
+              <Input id="password" type="password" placeholder="••••••••" {...register('password')} error={errors.password?.message} />
             </div>
-
-            <Button type="submit" className="w-full">
-              Reset Password
+            <div>
+              <label htmlFor="confirmPassword" className="block text-sm font-medium mb-2">Confirm Password</label>
+              <Input id="confirmPassword" type="password" placeholder="••••••••" {...register('confirmPassword')} error={errors.confirmPassword?.message} />
+            </div>
+            <PasswordHints value={password} />
+            <Button type="submit" disabled={submitting} className="w-full">
+              {submitting ? 'Saving…' : 'Reset Password'}
+            </Button>
+            <Button type="button" variant="outline" disabled={resending} className="w-full" onClick={resendOtp}>
+              {resending ? 'Sending…' : 'Resend OTP'}
             </Button>
           </form>
 
           <div className="mt-6">
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={() => navigate('/auth/login')}
-            >
+            <Button variant="ghost" className="w-full" onClick={() => navigate('/auth/login')}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Login
             </Button>

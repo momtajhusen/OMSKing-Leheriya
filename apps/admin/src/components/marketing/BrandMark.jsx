@@ -1,15 +1,13 @@
-import { Crown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/utils';
+import BrandLogo from '../brand/BrandLogo';
 
-export default function BrandMark({ className, markClassName }) {
+export default function BrandMark({ className, markClassName, wordmarkClassName }) {
   return (
     <Link to="/" className={cn('flex items-center gap-2.5', className)}>
-      <span className={cn('flex h-9 w-9 items-center justify-center rounded-lg bg-blue-700 text-white', markClassName)}>
-        <Crown className="h-5 w-5" strokeWidth={2.2} />
-      </span>
-      <span className="text-[17px] font-bold tracking-tight text-slate-900">
-        OMS<span className="text-blue-700">King</span>
+      <BrandLogo className={cn('h-9 w-9', markClassName)} />
+      <span className={cn('text-[17px] font-bold tracking-tight text-slate-900', wordmarkClassName)}>
+        OMS<span className="text-emerald-600">King</span>
       </span>
     </Link>
   );

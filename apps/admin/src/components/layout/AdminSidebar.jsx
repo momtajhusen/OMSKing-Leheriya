@@ -13,6 +13,7 @@ import {
   ChevronLeft, ChevronRight, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import BrandLogo from '../brand/BrandLogo';
 
 const iconMap = {
   LayoutDashboard, Shield, Building2, Users, FileText, Bell, Plug, Settings,
@@ -83,12 +84,7 @@ function AdminSidebar() {
           >
             {/* Logo Area */}
             <div className="flex h-16 items-center border-b border-[hsl(var(--color-border-premium))] px-4">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] rounded-lg blur-sm opacity-50"></div>
-                <div className="relative bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] rounded-lg p-1.5">
-                  <Box className="h-5 w-5 text-white" />
-                </div>
-              </div>
+              <BrandLogo className="h-9 w-9" />
               <span className="ml-3 font-semibold text-lg tracking-tight">
                 <span className="gradient-text">OMSKing</span>
               </span>
@@ -149,13 +145,8 @@ function AdminSidebar() {
         )}
       >
         {/* Logo Area */}
-        <div className="flex h-16 items-center border-b border-[hsl(var(--color-border-premium))] px-4">
-          <div className="relative">
-            <div className="absolute inset-0 bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] rounded-lg blur-sm opacity-50"></div>
-            <div className="relative bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] rounded-lg p-1.5">
-              <Box className="h-5 w-5 text-white" />
-            </div>
-          </div>
+        <div className={cn('flex h-16 items-center border-b border-[hsl(var(--color-border-premium))]', sidebarCollapsed ? 'justify-center px-2' : 'px-4')}>
+          <BrandLogo className="h-9 w-9" />
           {!sidebarCollapsed && (
             <span className="ml-3 font-semibold text-lg tracking-tight">
               <span className="gradient-text">OMSKing</span>

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ROLES } from '../constants/roles';
 import { attachPermissions } from '../constants/permissions';
 import useUIStore from './uiStore';
+import api from '../lib/api';
 
 const STORAGE_USER = 'user';
 const STORAGE_TOKEN = 'token';
@@ -19,29 +20,18 @@ function readUser() {
   }
 }
 
-function snapshotPlatformUser(user) {
-  if (user?.platformUser) return user.platformUser;
-  return {
-    email: user.email,
-    name: user.name,
-    role: ROLES.PLATFORM_ADMIN,
-    tenantId: null,
-    tenantName: 'OMSKing SaaS',
-  };
-}
-
 const stored = typeof localStorage === 'undefined' ? null : readUser();
 
 const useAuthStore = create((set, get) => ({
   isAuthenticated: Boolean(stored),
   user: stored,
-  loading: false,
+  loading: Boolean(stored),
 
   persist: (token, userData) => {
     const next = attachPermissions(userData);
     localStorage.setItem(STORAGE_TOKEN, token);
     localStorage.setItem(STORAGE_USER, JSON.stringify(next));
-    set({ isAuthenticated: true, user: next });
+    set({ isAuthenticated: true, user: next, loading: false });
     useUIStore.getState().setActiveRole(next.impersonating ? ROLES.SUPER_ADMIN : next.role);
   },
 
@@ -49,32 +39,49 @@ const useAuthStore = create((set, get) => ({
     get().persist(token, userData);
   },
 
-  logout: () => {
+  logoutLocal: () => {
     localStorage.removeItem(STORAGE_TOKEN);
     localStorage.removeItem(STORAGE_USER);
-    set({ isAuthenticated: false, user: null });
+    set({ isAuthenticated: false, user: null, loading: false });
   },
 
-  impersonateTenant: (tenant) => {
-    const { user, persist } = get();
-    const canImpersonate = user?.role === ROLES.PLATFORM_ADMIN || user?.platformUser;
-    if (!user || !canImpersonate) return;
-    const platformUser = snapshotPlatformUser(user);
-    persist(`impersonate-${tenant.id}-${Date.now()}`, {
-      email: platformUser.email,
-      name: platformUser.name,
-      role: ROLES.SUPER_ADMIN,
-      tenantId: tenant.id,
-      tenantName: tenant.name,
-      impersonating: true,
-      platformUser,
-    });
+  logout: async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      /* cookie already gone */
+    }
+    get().logoutLocal();
   },
 
-  exitImpersonation: () => {
-    const { user, persist } = get();
-    if (!user?.platformUser) return;
-    persist(`platform-${Date.now()}`, user.platformUser);
+  hydrate: async () => {
+    const token = localStorage.getItem(STORAGE_TOKEN);
+    if (!token) {
+      set({ loading: false, isAuthenticated: false, user: null });
+      return;
+    }
+    set({ loading: true });
+    try {
+      const { data } = await api.get('/auth/me');
+      get().persist(token, data.data);
+    } catch {
+      try {
+        const { data } = await api.post('/auth/refresh');
+        get().persist(data.data.accessToken, data.data.user);
+      } catch {
+        get().logoutLocal();
+      }
+    }
+  },
+
+  impersonateTenant: async (tenant) => {
+    const { data } = await api.post(`/tenants/${tenant.id}/impersonate`);
+    get().persist(data.data.accessToken, data.data.user);
+  },
+
+  exitImpersonation: async () => {
+    const { data } = await api.post('/auth/exit-impersonation');
+    get().persist(data.data.accessToken, data.data.user);
   },
 }));
 

@@ -8,10 +8,10 @@ import { cn } from '../../lib/utils';
 export function MarketingCta({ to, children, variant = 'solid', className, onClick }) {
   const styles =
     variant === 'solid'
-      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/25 hover:from-blue-700 hover:to-indigo-700'
+      ? 'bg-gradient-to-r from-emerald-700 to-lime-600 text-white shadow-lg shadow-emerald-700/25 hover:from-emerald-800 hover:to-lime-700'
       : variant === 'ghost'
-        ? 'text-slate-600 hover:text-blue-700'
-        : 'border border-slate-200 bg-white/80 text-slate-800 shadow-sm backdrop-blur hover:border-blue-200 hover:text-blue-700';
+        ? 'text-slate-600 hover:text-emerald-700'
+        : 'border border-slate-200 bg-white/80 text-slate-800 shadow-sm backdrop-blur hover:border-emerald-200 hover:text-emerald-700';
 
   return (
     <Link
@@ -31,7 +31,7 @@ export function MarketingCta({ to, children, variant = 'solid', className, onCli
 
 export function IconWell({ icon: Icon, tone = 'blue', className }) {
   const tones = {
-    blue: 'from-blue-500 to-indigo-500',
+    blue: 'from-emerald-500 to-teal-600',
     sky: 'from-sky-400 to-cyan-500',
     amber: 'from-amber-400 to-orange-500',
     emerald: 'from-emerald-400 to-teal-500',
@@ -58,7 +58,7 @@ export function MktCard({ children, className, accent }) {
   return (
     <article
       className={cn(
-        'group relative overflow-hidden rounded-2xl border border-white bg-white p-6 shadow-[0_12px_40px_-16px_rgba(15,23,42,0.18)] transition duration-300 ease-premium hover:-translate-y-1 hover:shadow-[0_24px_50px_-18px_rgba(37,99,235,0.28)]',
+        'group relative overflow-hidden rounded-2xl border border-white bg-white p-6 shadow-[0_12px_40px_-16px_rgba(15,23,42,0.18)] transition duration-300 ease-premium hover:-translate-y-1 hover:shadow-[0_24px_50px_-18px_rgba(13,92,69,0.28)]',
         className
       )}
     >
@@ -110,8 +110,8 @@ export function OpsPreview() {
 
   return (
     <div className="relative">
-      <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-br from-blue-400/20 via-fuchsia-300/20 to-amber-300/30 blur-2xl animate-pulse-soft" />
-      <div className="relative rounded-[1.6rem] border border-white/80 bg-white/90 p-5 shadow-2xl backdrop-blur transition duration-500 hover:-translate-y-1 hover:shadow-[0_28px_60px_-20px_rgba(37,99,235,0.35)]">
+      <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-br from-emerald-400/20 via-lime-300/20 to-amber-300/30 blur-2xl animate-pulse-soft" />
+      <div className="relative rounded-[1.6rem] border border-white/80 bg-white/90 p-5 shadow-2xl backdrop-blur transition duration-500 hover:-translate-y-1 hover:shadow-[0_28px_60px_-20px_rgba(13,92,69,0.35)]">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Today</p>
@@ -135,7 +135,7 @@ export function OpsPreview() {
           {bars.map((height, index) => (
             <div
               key={index}
-              className="origin-bottom flex-1 rounded-t-md bg-gradient-to-t from-blue-600 to-sky-400 animate-bar-rise"
+              className="origin-bottom flex-1 rounded-t-md bg-gradient-to-t from-emerald-700 to-lime-400 animate-bar-rise"
               style={{ height: `${height}%`, animationDelay: `${index * 60}ms` }}
             />
           ))}
@@ -148,11 +148,11 @@ export function OpsPreview() {
 export function OrderFlow() {
   const steps = [
     { icon: Radio, label: 'Channel', hint: 'Shopify · Amazon · Myntra', tone: 'from-pink-500 to-rose-500' },
-    { icon: ShoppingCart, label: 'Master order', hint: 'One ID, split if qty > 1', tone: 'from-sky-500 to-blue-600' },
+    { icon: ShoppingCart, label: 'Master order', hint: 'One ID, split if qty > 1', tone: 'from-teal-500 to-emerald-600' },
     { icon: Warehouse, label: 'Stock', hint: 'WH-001 / WH-002', tone: 'from-amber-400 to-orange-500' },
     { icon: PackageCheck, label: 'Pack', hint: 'New → Packed → RTS', tone: 'from-violet-500 to-purple-500' },
     { icon: Truck, label: 'Ship', hint: 'AWB · label cancel', tone: 'from-emerald-400 to-teal-500' },
-    { icon: CreditCard, label: 'Settle', hint: 'GST ID = Order ID', tone: 'from-blue-600 to-indigo-600' },
+    { icon: CreditCard, label: 'Settle', hint: 'GST ID = Order ID', tone: 'from-emerald-700 to-lime-600' },
   ];
 
   return (

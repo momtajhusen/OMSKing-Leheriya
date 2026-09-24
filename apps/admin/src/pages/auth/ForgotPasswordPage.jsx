@@ -1,46 +1,57 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'react-hot-toast';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Alert, AlertDescription } from '../../components/ui/Alert';
-import { ArrowLeft, Mail, CheckCircle } from 'lucide-react';
-
-const forgotPasswordSchema = z.object({
-  email: z.string().min(1, 'Email is required').email('Invalid email format'),
-});
+import { FormBanner } from '../../components/ui/FormBanner';
+import { ArrowLeft } from 'lucide-react';
+import BrandLogo from '../../components/brand/BrandLogo';
+import api, { apiFormError } from '../../lib/api';
+import { forgotPasswordSchema } from '../../lib/validation';
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();
   const [submitted, setSubmitted] = useState(false);
+  const [emailSentTo, setEmailSentTo] = useState('');
+  const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(forgotPasswordSchema),
+    defaultValues: { email: '' },
   });
 
-  const onSubmit = (data) => {
-    toast.success('Password reset link sent to your email');
-    setSubmitted(true);
+  const onSubmit = async (data) => {
+    setFormError('');
+    setSubmitting(true);
+    try {
+      await api.post('/auth/forgot-password', data);
+      setEmailSentTo(data.email);
+      setSubmitted(true);
+    } catch (err) {
+      const parsed = apiFormError(err, 'Could not send the OTP.');
+      if (parsed.fields.email) setError('email', { type: 'server', message: parsed.fields.email });
+      setFormError(parsed.message === 'Validation failed' ? 'Enter a valid email address.' : parsed.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div className="w-full">
       <div className="text-center mb-8">
-        <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
-          <Mail className="h-8 w-8" />
-        </div>
+        <BrandLogo className="mb-4 h-16 w-16 rounded-2xl shadow-lg shadow-emerald-900/25" />
         <h1 className="text-3xl font-bold mb-2">Forgot Password</h1>
         <p className="text-muted-foreground">
-          {submitted 
-            ? 'Check your email for reset instructions' 
-            : 'Enter your email to receive a password reset link'}
+          {submitted
+            ? 'Check Gmail for a 6-digit OTP'
+            : 'Enter your email. We send a 6-digit OTP to Gmail.'}
         </p>
       </div>
 
@@ -48,46 +59,43 @@ export default function ForgotPasswordPage() {
         <CardHeader>
           <CardTitle>Reset Password</CardTitle>
           <CardDescription>
-            {submitted 
-              ? 'Reset link sent successfully' 
-              : 'We\'ll send you a link to reset your password'}
+            {submitted ? 'OTP expires in 10 minutes' : 'The code is sent to the same Gmail as the account'}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {submitted ? (
-            <Alert className="border-green-200 bg-green-50 dark:bg-green-900/20">
-              <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-              <AlertDescription className="text-green-800 dark:text-green-200">
-                Password reset link has been sent to your email address. Please check your inbox and follow the instructions.
-              </AlertDescription>
-            </Alert>
+            <div className="space-y-4">
+              <FormBanner tone="success" title="OTP sent">
+                If {emailSentTo} is registered, open Gmail and enter the 6-digit code on the next screen.
+              </FormBanner>
+              <Button
+                className="w-full"
+                onClick={() => navigate(`/auth/reset-password?email=${encodeURIComponent(emailSentTo)}`)}
+              >
+                Enter OTP
+              </Button>
+            </div>
           ) : (
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+              {formError && <FormBanner tone="error" title="Could not send OTP">{formError}</FormBanner>}
               <div>
-                <label htmlFor="email" className="block text-sm font-medium mb-2">
-                  Email Address
-                </label>
+                <label htmlFor="email" className="block text-sm font-medium mb-2">Email Address</label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder="you@gmail.com"
                   {...register('email')}
                   error={errors.email?.message}
                 />
               </div>
-
-              <Button type="submit" className="w-full">
-                Send Reset Link
+              <Button type="submit" disabled={submitting} className="w-full">
+                {submitting ? 'Sending…' : 'Send OTP to Gmail'}
               </Button>
             </form>
           )}
 
           <div className="mt-6">
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={() => navigate('/auth/login')}
-            >
+            <Button variant="ghost" className="w-full" onClick={() => navigate('/auth/login')}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Login
             </Button>

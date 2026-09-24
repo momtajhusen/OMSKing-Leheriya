@@ -11,7 +11,7 @@ const values = [
 export default function AboutPage() {
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-amber-50 via-white to-sky-50 py-16 sm:py-20">
+      <section className="relative overflow-hidden bg-gradient-to-br from-lime-50 via-white to-emerald-50 py-16 sm:py-20">
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 sm:px-6 lg:grid-cols-2">
           <div>
             <h1 className="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">About OMSKing</h1>
@@ -60,13 +60,13 @@ export default function AboutPage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <h2 className="mb-8 text-2xl font-bold text-slate-900">Timeline</h2>
           <div className="grid gap-5 md:grid-cols-2">
-            <MktCard accent="bg-blue-500">
-              <p className="text-sm font-semibold text-blue-700">Now</p>
+            <MktCard accent="bg-emerald-500">
+              <p className="text-sm font-semibold text-emerald-700">Now</p>
               <p className="mt-1 font-bold text-slate-900">Leheriya as first tenant</p>
               <p className="mt-2 text-sm text-slate-600">Clickable UI for every module. Super Admin, Admin and Vendor inside one tenant.</p>
             </MktCard>
-            <MktCard accent="bg-violet-500">
-              <p className="text-sm font-semibold text-violet-700">Next</p>
+            <MktCard accent="bg-lime-500">
+              <p className="text-sm font-semibold text-lime-700">Next</p>
               <p className="mt-1 font-bold text-slate-900">Live JWT + inventory ledger</p>
               <p className="mt-2 text-sm text-slate-600">Tenant middleware, then catalog and the stock engine that makes omnichannel safe.</p>
             </MktCard>

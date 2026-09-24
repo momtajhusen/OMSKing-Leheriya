@@ -57,9 +57,27 @@ pm2 logs omsking-backend --lines 40 --nostream
 ss -tlnp | grep 5005
 ```
 
-## Notes
+## CORS (required for live admin)
 
-- Path is `omskingleheriya_backend` — **not** `OMSKing`.
-- Root se `pnpm install` — `apps/backend` mein `npm install` mat chalao.
-- `--prod` skip mat karo pehli baar; full `pnpm install` safer.
-- DNS A = `148.230.67.252`; Hostinger Website/AAAA hatao.
+VPS `.env` (repo root `/home/ubuntu/Momtaj_Projects/omskingleheriya_backend/.env`):
+
+```bash
+CORS_ORIGIN=http://localhost:5173,https://omsking.codersalpha.com
+```
+
+Then `pm2 restart omsking-backend --update-env`.
+
+## Admin panel (Hostinger)
+
+Build with production API URL:
+
+```bash
+cd apps/admin
+pnpm install
+pnpm run build   # uses .env.production → https://omskingapi.codersalpha.com/api/v1
+```
+
+Upload `apps/admin/dist/` to the Hostinger site that serves `https://omsking.codersalpha.com`.
+
+There is **no mobile app** in this monorepo (admin + backend only).
+

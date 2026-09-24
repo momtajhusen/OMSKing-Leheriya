@@ -25,7 +25,10 @@ function wrap({ title, bodyHtml }) {
 }
 
 function loginUrl() {
-  return `${config.corsOrigin}/auth/login`;
+  const web = (config.corsOrigins || []).find((o) => o.startsWith('https://'))
+    || (config.corsOrigins || [])[0]
+    || 'http://localhost:5173';
+  return `${web}/auth/login`;
 }
 
 function accountCreatedEmail({ name, email, password, roleLabel }) {

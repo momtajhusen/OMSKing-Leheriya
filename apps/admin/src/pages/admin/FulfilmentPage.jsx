@@ -209,10 +209,10 @@ export default function FulfilmentPage() {
       )}
 
       {activeTab === 'unavailable' && (
-        <Card className="border-blue-500/50">
+        <Card className="border-emerald-500/50">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Store className="w-5 h-5 text-blue-600" />
+              <Store className="w-5 h-5 text-emerald-600" />
               Routed to Vendor (Virtual Stock)
             </CardTitle>
             <CardDescription>

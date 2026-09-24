@@ -1,11 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { AUTH_SESSIONS } from '../../mocks/platform';
-import { users } from '../../mocks';
+import api, { apiError } from '../../lib/api';
 import { statusBadgeVariant } from '../../utils/format';
 import { useAuth } from '../../hooks/useAuth';
 import { ROLES, ROLE_LABELS } from '../../constants/roles';
-import { useSimulatedLoad } from '../../hooks/useSimulatedLoad';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -21,12 +19,9 @@ export default function AuthPage({ scope = 'tenant' }) {
   const isPlatform = scope === 'platform' || user?.role === ROLES.PLATFORM_ADMIN;
   const [activeTab, setActiveTab] = useState(isPlatform ? 'sessions' : 'users');
   const [query, setQuery] = useState('');
-  const [sessionList, setSessionList] = useState(AUTH_SESSIONS);
-  const [resets, setResets] = useState([
-    { id: 'PWR-001', user: 'Anita Sharma', email: 'ops@leheriya.com', requestedAt: '2026-09-08 08:02', expiresAt: '2026-09-08 09:02', status: 'Pending' },
-    { id: 'PWR-002', user: 'Sandeep Textiles', email: 'vendor@omsking.com', requestedAt: '2026-09-07 16:35', expiresAt: '2026-09-07 17:35', status: 'Completed' },
-    { id: 'PWR-003', user: 'Ravi Patel', email: 'ravi@suratsilks.com', requestedAt: '2026-09-06 11:10', expiresAt: '2026-09-06 12:10', status: 'Expired' },
-  ]);
+  const [sessionList, setSessionList] = useState([]);
+  const [directory, setDirectory] = useState([]);
+  const [resets, setResets] = useState([]);
   const [apiKeys, setApiKeys] = useState([
     { id: 'KEY-001', label: 'Shopify Webhook', prefix: 'shp_live_••••4f2a', scope: 'Orders, Inventory', createdAt: '2026-06-02', lastUsed: '5 min ago', status: 'Active' },
     { id: 'KEY-002', label: 'Amazon SP-API', prefix: 'amz_live_••••91cd', scope: 'Orders, Reports', createdAt: '2026-06-02', lastUsed: '22 min ago', status: 'Active' },
@@ -35,8 +30,32 @@ export default function AuthPage({ scope = 'tenant' }) {
   ]);
   const [keyOpen, setKeyOpen] = useState(false);
   const [keyLabel, setKeyLabel] = useState('');
-  const [twoFa, setTwoFa] = useState(false);
-  const loading = useSimulatedLoad(activeTab);
+  const [twoFa, setTwoFa] = useState(Boolean(user?.twoFactorEnabled));
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const [sess, resetRes, usersRes] = await Promise.all([
+          api.get('/sessions'),
+          api.get('/auth/password-resets'),
+          isPlatform ? Promise.resolve({ data: { data: [] } }) : api.get('/users'),
+        ]);
+        if (cancelled) return;
+        setSessionList(sess.data.data || []);
+        setResets(resetRes.data.data || []);
+        setDirectory(usersRes.data.data || []);
+        setTwoFa(Boolean(user?.twoFactorEnabled));
+      } catch (err) {
+        toast.error(apiError(err, 'Could not load auth data'));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isPlatform, user?.twoFactorEnabled]);
 
   const visibleSessions = useMemo(() => {
     const list = isPlatform ? sessionList : sessionList.filter((s) => s.tenant === (user?.tenantName || 'Leheriya Creations'));
@@ -106,7 +125,7 @@ export default function AuthPage({ scope = 'tenant' }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((row) => (
+                {directory.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.email}</TableCell>
@@ -171,9 +190,14 @@ export default function AuthPage({ scope = 'tenant' }) {
                           variant="ghost"
                           size="sm"
                           className="text-destructive"
-                          onClick={() => {
-                            setSessionList((prev) => prev.map((item) => (item.id === session.id ? { ...item, status: 'Revoked' } : item)));
-                            toast.success(`Session revoked for ${session.user}`);
+                          onClick={async () => {
+                            try {
+                              await api.delete(`/sessions/${session.id}`);
+                              setSessionList((prev) => prev.map((item) => (item.id === session.id ? { ...item, status: 'Revoked' } : item)));
+                              toast.success(`Session revoked for ${session.user}`);
+                            } catch (err) {
+                              toast.error(apiError(err));
+                            }
                           }}
                         >
                           Revoke
@@ -192,7 +216,7 @@ export default function AuthPage({ scope = 'tenant' }) {
         <Card>
           <CardHeader>
             <CardTitle>Password resets</CardTitle>
-            <CardDescription>Single-use links expire in one hour. Completing a reset kills all old sessions.</CardDescription>
+            <CardDescription>Gmail OTP expires in 10 minutes. Completing a reset kills all old sessions.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -211,16 +235,21 @@ export default function AuthPage({ scope = 'tenant' }) {
                   <TableRow key={reset.id}>
                     <TableCell className="font-medium">{reset.user}</TableCell>
                     <TableCell>{reset.email}</TableCell>
-                    <TableCell>{reset.requestedAt}</TableCell>
-                    <TableCell>{reset.expiresAt}</TableCell>
+                    <TableCell>{reset.requestedAt ? new Date(reset.requestedAt).toLocaleString() : '—'}</TableCell>
+                    <TableCell>{reset.expiresAt ? new Date(reset.expiresAt).toLocaleString() : '—'}</TableCell>
                     <TableCell><Badge variant={statusBadgeVariant(reset.status)}>{reset.status}</Badge></TableCell>
                     <TableCell>
                       {reset.status === 'Pending' ? (
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            toast.success(`Reset link resent to ${reset.email}`);
+                          onClick={async () => {
+                            try {
+                              await api.post('/auth/forgot-password', { email: reset.email });
+                              toast.success(`OTP resent to ${reset.email}`);
+                            } catch (err) {
+                              toast.error(apiError(err));
+                            }
                           }}
                         >
                           Resend link
@@ -300,9 +329,15 @@ export default function AuthPage({ scope = 'tenant' }) {
             <p className="text-sm text-muted-foreground">Require authenticator app at login</p>
             <Button
               variant={twoFa ? 'default' : 'outline'}
-              onClick={() => {
-                setTwoFa((v) => !v);
-                toast.success(!twoFa ? '2FA enabled for this tenant (dummy)' : '2FA off');
+              onClick={async () => {
+                try {
+                  const next = !twoFa;
+                  await api.patch('/auth/me', { twoFactorEnabled: next });
+                  setTwoFa(next);
+                  toast.success(next ? '2FA flag on for this user' : '2FA off');
+                } catch (err) {
+                  toast.error(apiError(err));
+                }
               }}
             >
               {twoFa ? 'Enabled' : 'Disabled'}

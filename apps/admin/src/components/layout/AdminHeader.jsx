@@ -28,6 +28,8 @@ import Breadcrumbs from '../ui/Breadcrumbs';
 import Button from '../ui/Button';
 
 import { ROLE_LABELS } from '../../constants/roles';
+import { usePermissions } from '../../hooks/usePermissions';
+import BrandLogo from '../brand/BrandLogo';
 
 const NOTIFICATION_ICONS = {
   shipping: PackageCheck,
@@ -39,7 +41,7 @@ const NOTIFICATION_ICONS = {
 };
 
 const NOTIFICATION_TONES = {
-  shipping: 'bg-blue-500/15 text-blue-400',
+  shipping: 'bg-emerald-500/15 text-emerald-400',
   vendor: 'bg-violet-500/15 text-violet-400',
   inventory: 'bg-amber-500/15 text-amber-400',
   alert: 'bg-rose-500/15 text-rose-400',
@@ -52,6 +54,7 @@ function AdminHeader() {
   const { theme, toggleTheme } = useThemeStore();
   const { toggleSidebar, breadcrumbs, mobileOpen, setMobileOpen, activeRole } = useUIStore();
   const { logout, user, effectiveRole } = useAuth();
+  const { canOpenPath } = usePermissions();
   const [inbox, setInbox] = useState(inboxNotifications);
 
   const displayName = user?.name || 'Momtaj Husen';
@@ -64,8 +67,8 @@ function AdminHeader() {
     .toUpperCase();
   const unreadCount = inbox.filter((item) => item.unread).length;
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/auth/login');
   };
 
@@ -85,6 +88,7 @@ function AdminHeader() {
         >
           <Menu className="h-5 w-5" />
         </Button>
+        <BrandLogo className="h-8 w-8 lg:hidden" />
 
         <Button
           variant="ghost"
@@ -242,27 +246,35 @@ function AdminHeader() {
           </div>
 
           <div className="p-1.5">
-            <DropdownMenuItem onClick={() => navigate('/settings')}>
-              <Settings className="h-4 w-4 text-muted-foreground" />
-              Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate('/notifications')}>
-              <Bell className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1 text-left">Notifications</span>
-              {unreadCount > 0 && (
-                <span className="rounded-full bg-[hsl(var(--color-primary-blue))] px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                  {unreadCount}
-                </span>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate('/users-roles')}>
-              <Users className="h-4 w-4 text-muted-foreground" />
-              Users & Roles
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate('/audit-logs')}>
-              <FileText className="h-4 w-4 text-muted-foreground" />
-              Audit Logs
-            </DropdownMenuItem>
+            {canOpenPath('/settings') && (
+              <DropdownMenuItem onClick={() => navigate('/settings')}>
+                <Settings className="h-4 w-4 text-muted-foreground" />
+                Settings
+              </DropdownMenuItem>
+            )}
+            {canOpenPath('/notifications') && (
+              <DropdownMenuItem onClick={() => navigate('/notifications')}>
+                <Bell className="h-4 w-4 text-muted-foreground" />
+                <span className="flex-1 text-left">Notifications</span>
+                {unreadCount > 0 && (
+                  <span className="rounded-full bg-[hsl(var(--color-primary-blue))] px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    {unreadCount}
+                  </span>
+                )}
+              </DropdownMenuItem>
+            )}
+            {canOpenPath('/users-roles') && (
+              <DropdownMenuItem onClick={() => navigate('/users-roles')}>
+                <Users className="h-4 w-4 text-muted-foreground" />
+                Users & Roles
+              </DropdownMenuItem>
+            )}
+            {canOpenPath('/audit-logs') && (
+              <DropdownMenuItem onClick={() => navigate('/audit-logs')}>
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                Audit Logs
+              </DropdownMenuItem>
+            )}
           </div>
 
           <DropdownMenuSeparator className="mx-0" />

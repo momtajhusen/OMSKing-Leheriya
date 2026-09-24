@@ -3,11 +3,12 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
   LayoutDashboard, Building2, Shield, LogOut, Sun, Moon, Activity, ListTodo,
-  FileWarning, Settings, CreditCard, Users, Crown, Menu, X,
+  FileWarning, Settings, CreditCard, Users, Menu, X,
 } from 'lucide-react';
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
 import PageFade from '../motion/PageFade';
+import BrandLogo from '../brand/BrandLogo';
 
 const GROUPS = [
   {
@@ -102,9 +103,7 @@ export default function PlatformLayout() {
         >
           <div className="flex h-16 items-center justify-between border-b border-[hsl(var(--color-border-premium))] px-4">
             <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-md">
-                <Crown className="h-4 w-4" strokeWidth={2.2} />
-              </span>
+              <BrandLogo className="h-9 w-9" />
               <div>
                 <div className="text-sm font-bold leading-none">OMSKing</div>
                 <div className="mt-0.5 text-[11px] text-muted-foreground">SaaS control</div>
@@ -119,7 +118,7 @@ export default function PlatformLayout() {
           </nav>
           <div className="border-t border-[hsl(var(--color-border-premium))] p-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 text-sm font-bold text-white">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-700 to-lime-600 text-sm font-bold text-white">
                 {initial}
               </div>
               <div className="min-w-0">
@@ -136,6 +135,7 @@ export default function PlatformLayout() {
               <button type="button" className="rounded-lg p-2 hover:bg-muted lg:hidden" onClick={() => setMobileOpen(true)}>
                 <Menu className="h-5 w-5" />
               </button>
+              <BrandLogo className="h-8 w-8 lg:hidden" />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">{current.label === 'Staff' ? 'Platform users' : current.label === 'Health' ? 'Integration health' : current.label}</p>
                 <p className="truncate text-[11px] text-muted-foreground">Not a packing desk — tenants, plans, jobs</p>
@@ -148,7 +148,7 @@ export default function PlatformLayout() {
               <button
                 type="button"
                 className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-destructive"
-                onClick={() => { logout(); navigate('/auth/login'); }}
+                onClick={async () => { await logout(); navigate('/auth/login'); }}
               >
                 <LogOut className="h-4 w-4" />
               </button>

@@ -10,7 +10,11 @@ const config = {
     accessExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
     refreshExpiry: process.env.JWT_REFRESH_EXPIRY || '7d',
   },
-  corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  // Comma-separated list, e.g. http://localhost:5173,https://omsking.codersalpha.com
+  corsOrigins: String(process.env.CORS_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   channelEncryptionKey: process.env.CHANNEL_ENCRYPTION_KEY || '',
   mail: {
     user: process.env.GMAIL_USER || '',

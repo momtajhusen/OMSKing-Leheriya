@@ -42,7 +42,7 @@ function ProductThumb({ name }) {
   const letter = (name || '?').charAt(0).toUpperCase();
   return (
     <div
-      className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-xs font-bold text-white shadow-sm"
+      className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-600 text-xs font-bold text-white shadow-sm"
       aria-label={name}
     >
       {letter}
@@ -168,7 +168,7 @@ export default function VendorOrdersPage() {
       {selectedIds.length > 0 && (
         <VendorBulkBar>
           <div className="flex flex-wrap items-end gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-blue-900 dark:text-blue-100">
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-900 dark:text-emerald-100">
               <Truck className="h-4 w-4" />
               One parcel, one tracking
             </div>

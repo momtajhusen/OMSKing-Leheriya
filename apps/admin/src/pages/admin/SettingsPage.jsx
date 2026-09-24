@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,6 +10,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { Building, Link, Truck, FileText, Save, CheckCircle, Settings as SettingsIcon, Building2, Mail, Phone, MapPin, Globe, Warehouse } from 'lucide-react';
 import ChannelSetup from '../../components/channels/ChannelSetup';
+import api, { apiError } from '../../lib/api';
 
 const companySchema = z.object({
   companyName: z.string().min(1, 'Company name is required'),
@@ -26,6 +27,13 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('company');
   const [saveStatus, setSaveStatus] = useState(null);
   const [inventoryAuthority, setInventoryAuthority] = useState('oms');
+  const [authorityBusy, setAuthorityBusy] = useState(false);
+
+  useEffect(() => {
+    api.get('/warehouses/config').then(({ data }) => {
+      if (data.data?.inventoryAuthority) setInventoryAuthority(data.data.inventoryAuthority);
+    }).catch(() => {});
+  }, []);
 
   const {
     register,
@@ -366,7 +374,20 @@ export default function SettingsPage() {
               </span>
             </label>
           ))}
-          <Button onClick={() => toast.success(inventoryAuthority === 'oms' ? 'OMS will push inventory' : 'Shopify Location A is the source for WH-001')}>
+          <Button
+            disabled={authorityBusy}
+            onClick={async () => {
+              setAuthorityBusy(true);
+              try {
+                await api.patch('/warehouses/config', { inventoryAuthority });
+                toast.success(inventoryAuthority === 'oms' ? 'OMS is inventory master' : 'Shopify is inventory master — OMS stock edits blocked');
+              } catch (err) {
+                toast.error(apiError(err, 'Could not save inventory source'));
+              } finally {
+                setAuthorityBusy(false);
+              }
+            }}
+          >
             Save inventory source
           </Button>
         </div>

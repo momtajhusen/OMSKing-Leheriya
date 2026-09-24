@@ -16,6 +16,7 @@ export const PERMISSIONS = Object.freeze({
   CATALOG_EDIT: 'catalog.edit',
   CUSTOMERS_VIEW: 'customers.view',
   TENANTS_MANAGE: 'tenants.manage',
+  VENDORS_MANAGE: 'vendors.manage',
 });
 
 export const PERMISSION_CATALOG = [
@@ -34,6 +35,7 @@ export const PERMISSION_CATALOG = [
   { key: PERMISSIONS.CATALOG_VIEW, label: 'View catalog / SKUs' },
   { key: PERMISSIONS.CATALOG_EDIT, label: 'Edit catalog / mappings' },
   { key: PERMISSIONS.CUSTOMERS_VIEW, label: 'View customers' },
+  { key: PERMISSIONS.VENDORS_MANAGE, label: 'Manage vendors' },
 ];
 
 const P = PERMISSIONS;
@@ -44,7 +46,7 @@ const OPS_PERMS = [
   P.ORDERS_VIEW, P.ORDERS_EDIT, P.ORDERS_CANCEL,
   P.SHIPPING_GENERATE, P.SHIPPING_CANCEL,
   P.RETURNS_APPROVE, P.CUSTOMERS_VIEW, P.CATALOG_VIEW,
-  P.INVENTORY_VIEW,
+  P.INVENTORY_VIEW, P.VENDORS_MANAGE,
 ];
 
 export const ROLE_PERMISSIONS = Object.freeze({
@@ -72,11 +74,11 @@ export const ROLE_PERMISSIONS = Object.freeze({
 });
 
 export const ROUTE_PERMISSION = Object.freeze({
-  '/dashboard': null,
+  '/dashboard': P.ORDERS_VIEW,
   '/orders': P.ORDERS_VIEW,
   '/fulfilment': P.ORDERS_EDIT,
   '/shipping': P.SHIPPING_GENERATE,
-  '/vendors': P.ORDERS_EDIT,
+  '/vendors': P.VENDORS_MANAGE,
   '/reports': P.FINANCE_VIEW,
   '/inventory': P.INVENTORY_VIEW,
   '/warehouses': P.INVENTORY_VIEW,
@@ -99,6 +101,12 @@ export const ROUTE_PERMISSION = Object.freeze({
   '/webhooks': P.SETTINGS_MANAGE,
   '/authentication': P.USERS_MANAGE,
   '/ui/showcase': P.SETTINGS_MANAGE,
+  '/vendor/dashboard': P.ORDERS_VIEW,
+  '/vendor/orders': P.ORDERS_VIEW,
+  '/vendor/shipping': P.SHIPPING_GENERATE,
+  '/vendor/returns': P.ORDERS_VIEW,
+  '/vendor/products': P.ORDERS_EDIT,
+  '/vendor/settings': null,
 });
 
 export function normalizeRole(role) {
@@ -117,8 +125,10 @@ export function hasPermission(granted, key) {
   return list.includes(key);
 }
 
+/** Trust API/JWT permissions even when the array is empty (Super Admin tightened a role). */
 export function attachPermissions(user) {
   if (!user) return user;
-  if (Array.isArray(user.permissions) && user.permissions.length) return user;
+  if (Array.isArray(user.permissions)) return user;
   return { ...user, permissions: permissionsForRole(user.role) };
 }
+

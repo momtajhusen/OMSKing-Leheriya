@@ -8,7 +8,7 @@ const groups = [
   {
     title: 'SaaS & access',
     items: [
-      { icon: Shield, tone: 'blue', accent: 'bg-blue-500', name: 'Authentication', text: 'JWT-ready session, password reset and API keys per merchant. Super Admin, Admin and Vendor stay in one tenant.' },
+      { icon: Shield, tone: 'blue', accent: 'bg-emerald-500', name: 'Authentication', text: 'JWT-ready session, password reset and API keys per merchant. Super Admin, Admin and Vendor stay in one tenant.' },
       { icon: Building2, tone: 'violet', accent: 'bg-violet-500', name: 'Tenant / merchant', text: 'One company, one wall. Shopify, Amazon and Myntra listings never mix with another brand.' },
       { icon: Users, tone: 'sky', accent: 'bg-sky-400', name: 'Users & roles', text: 'Merchant Super Admin, Operations, Warehouse, Accounts, Catalog, Support, Vendor. Screens check permission keys, not the job title.' },
       { icon: LayoutDashboard, tone: 'slate', accent: 'bg-slate-500', name: 'Dashboard', text: 'Four KPIs Leheriya uses: shipping, new orders, returns, pending invoices. Channel mix and top SKUs beside them.' },
@@ -27,7 +27,7 @@ const groups = [
     title: 'Orders to cash',
     items: [
       { icon: ShoppingCart, tone: 'sky', accent: 'bg-sky-400', name: 'Orders & fulfilment', text: 'Relevant tabs only: Unfulfillable, New, Packed, Ready to ship, Cancelled, All. Vendor split when qty > 1.' },
-      { icon: Truck, tone: 'blue', accent: 'bg-blue-500', name: 'Shipping', text: 'Labels, manifests, AWB. Cancel label reverts Shopify to unfulfilled.' },
+      { icon: Truck, tone: 'blue', accent: 'bg-emerald-500', name: 'Shipping', text: 'Labels, manifests, AWB. Cancel label reverts Shopify to unfulfilled.' },
       { icon: Store, tone: 'amber', accent: 'bg-amber-400', name: 'Vendors', text: 'Accept / reject, dispatch, bulk AWB. Same phone number can exist on more than one vendor.' },
       { icon: RotateCcw, tone: 'rose', accent: 'bg-rose-400', name: 'Returns · RTO · NDR', text: 'Three reverse paths, same pattern as forward orders. Restock destination is chosen at QC — not a ticket pile.' },
       { icon: FileSpreadsheet, tone: 'violet', accent: 'bg-violet-500', name: 'GST invoice', text: 'Sequential numbers. Shopify GST invoice number = Order ID.' },
@@ -46,8 +46,8 @@ const groups = [
 export default function FeaturesPage() {
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-indigo-50 via-white to-sky-50 py-16 sm:py-20">
-        <div className="pointer-events-none absolute -right-20 top-0 h-64 w-64 rounded-full bg-violet-300/30 blur-3xl animate-float" />
+      <section className="relative overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-lime-50 py-16 sm:py-20">
+        <div className="pointer-events-none absolute -right-20 top-0 h-64 w-64 rounded-full bg-lime-300/30 blur-3xl animate-float" />
         <div className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
           <h1 className="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">Features</h1>
           <p className="mt-4 text-lg text-slate-600">
@@ -58,14 +58,14 @@ export default function FeaturesPage() {
 
       <section className="bg-white py-12">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <p className="mb-6 text-center text-sm font-semibold uppercase tracking-wider text-blue-700">Daily path</p>
+          <p className="mb-6 text-center text-sm font-semibold uppercase tracking-wider text-emerald-700">Daily path</p>
           <OrderFlow />
         </div>
       </section>
 
       <section className="bg-gradient-to-b from-slate-50 to-white py-12">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <p className="mb-6 text-center text-sm font-semibold uppercase tracking-wider text-blue-700">Who sees what</p>
+          <p className="mb-6 text-center text-sm font-semibold uppercase tracking-wider text-emerald-700">Who sees what</p>
           <RoleGrid />
         </div>
       </section>
@@ -74,7 +74,7 @@ export default function FeaturesPage() {
         <div className="mx-auto max-w-6xl space-y-14 px-4 sm:px-6">
           {groups.map((group) => (
             <div key={group.title}>
-              <h2 className="mb-6 text-sm font-semibold uppercase tracking-wider text-blue-700">{group.title}</h2>
+              <h2 className="mb-6 text-sm font-semibold uppercase tracking-wider text-emerald-700">{group.title}</h2>
               <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {group.items.map((item) => (
                   <MktCard key={item.name} accent={item.accent}>
@@ -89,12 +89,12 @@ export default function FeaturesPage() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-700 py-16 text-white">
+      <section className="relative overflow-hidden bg-gradient-to-r from-emerald-900 via-emerald-700 to-teal-600 py-16 text-white">
         <div className="pointer-events-none absolute right-0 top-0 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
         <div className="relative mx-auto max-w-xl px-4 text-center">
           <h2 className="text-2xl font-bold">See Leheriya’s desk</h2>
-          <p className="mt-2 text-blue-100">Orders, WH-001 / WH-002 and GST on a sample tenant — not a generic console tour.</p>
-          <MarketingCta to="/contact" variant="outline" className="mt-6 border-white/50 bg-white text-blue-800 hover:border-white hover:text-blue-900">
+          <p className="mt-2 text-emerald-100">Orders, WH-001 / WH-002 and GST on a sample tenant — not a generic console tour.</p>
+          <MarketingCta to="/contact" variant="outline" className="mt-6 border-white/50 bg-white text-emerald-800 hover:border-white hover:text-emerald-900">
             See Leheriya’s desk
           </MarketingCta>
         </div>

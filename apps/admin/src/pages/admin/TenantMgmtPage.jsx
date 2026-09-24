@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { CHANNEL_CATALOG, SUBSCRIPTION_PLANS } from '../../mocks';
-import { PLATFORM_TENANTS } from '../../mocks/platform';
+import api, { apiError, apiFormError } from '../../lib/api';
+import { emailSchema } from '../../lib/validation';
+import { FormBanner } from '../../components/ui/FormBanner';
 import { useAuth } from '../../hooks/useAuth';
-import { useSimulatedLoad } from '../../hooks/useSimulatedLoad';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -20,7 +21,7 @@ export default function TenantMgmtPage() {
   const navigate = useNavigate();
   const { impersonateTenant } = useAuth();
   const [tab, setTab] = useState('tenants');
-  const [tenants, setTenants] = useState(PLATFORM_TENANTS);
+  const [tenants, setTenants] = useState([]);
   const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
   const [merchantName, setMerchantName] = useState('');
@@ -29,7 +30,23 @@ export default function TenantMgmtPage() {
   const [picked, setPicked] = useState([]);
   const [planTenant, setPlanTenant] = useState(null);
   const [nextPlan, setNextPlan] = useState('growth');
-  const loading = useSimulatedLoad(tab);
+  const [loading, setLoading] = useState(true);
+  const [wizardBanner, setWizardBanner] = useState('');
+  const [wizardErrors, setWizardErrors] = useState({});
+
+  const loadTenants = async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get('/tenants');
+      setTenants(data.data || []);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not load tenants'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadTenants(); }, []);
 
   const startWizard = () => {
     setShowWizard(true);
@@ -38,52 +55,67 @@ export default function TenantMgmtPage() {
     setOwnerEmail('');
     setPlanId('growth');
     setPicked([]);
+    setWizardBanner('');
+    setWizardErrors({});
   };
 
-  const completeWizard = () => {
-    const plan = SUBSCRIPTION_PLANS.find((p) => p.id === planId);
+  const completeWizard = async () => {
     const names = CHANNEL_CATALOG.filter((c) => picked.includes(c.id)).map((c) => c.name);
-    const id = `TNT-${String(tenants.length + 1).padStart(3, '0')}`;
-    setTenants((prev) => [
-      {
-        id,
+    try {
+      await api.post('/tenants', {
         name: merchantName,
-        owner: ownerEmail.split('@')[0],
         email: ownerEmail,
-        status: 'Trial',
-        plan: plan?.name || 'Growth',
+        plan: planId,
         channels: names,
-        users: 1,
-        lastSync: 'Never',
-        mrr: 0,
-      },
-      ...prev,
-    ]);
-    toast.success(`${merchantName} onboarded. Invite sent to ${ownerEmail}`);
-    setShowWizard(false);
+      });
+      toast.success(`${merchantName} onboarded. Invite sent to ${ownerEmail}`);
+      setShowWizard(false);
+      await loadTenants();
+    } catch (err) {
+      const parsed = apiFormError(err);
+      setWizardErrors({
+        merchantName: parsed.fields.name,
+        ownerEmail: parsed.fields.email,
+      });
+      setWizardBanner(parsed.message === 'Validation failed' ? 'Please fix the highlighted fields.' : parsed.message);
+      setWizardStep(1);
+    }
   };
 
-  const setStatus = (tenant, status) => {
-    setTenants((prev) => prev.map((item) => (item.id === tenant.id ? { ...item, status } : item)));
-    toast.success(`${tenant.name} marked ${status}`);
+  const setStatus = async (tenant, status) => {
+    try {
+      await api.patch(`/tenants/${tenant.id}`, { status });
+      toast.success(`${tenant.name} marked ${status}`);
+      loadTenants();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
   };
 
-  const openMerchant = (tenant) => {
+  const openMerchant = async (tenant) => {
     if (tenant.status === 'Suspended') {
       toast.error('Activate this tenant before opening it');
       return;
     }
-    impersonateTenant(tenant);
-    toast.success(`Opened ${tenant.name}`);
-    navigate('/dashboard');
+    try {
+      await impersonateTenant(tenant);
+      toast.success(`Opened ${tenant.name}`);
+      navigate('/dashboard');
+    } catch (err) {
+      toast.error(apiError(err));
+    }
   };
 
-  const savePlan = () => {
+  const savePlan = async () => {
     if (!planTenant) return;
-    const plan = SUBSCRIPTION_PLANS.find((p) => p.id === nextPlan);
-    setTenants((prev) => prev.map((item) => (item.id === planTenant.id ? { ...item, plan: plan?.name || item.plan } : item)));
-    toast.success(`${planTenant.name} moved to ${plan?.name}`);
-    setPlanTenant(null);
+    try {
+      await api.patch(`/tenants/${planTenant.id}`, { plan: nextPlan });
+      toast.success(`${planTenant.name} plan updated`);
+      setPlanTenant(null);
+      loadTenants();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
   };
 
   if (loading) return <PageLoader label="Loading subscribers..." />;
@@ -111,7 +143,7 @@ export default function TenantMgmtPage() {
       {tab === 'plans' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {SUBSCRIPTION_PLANS.map((plan) => (
-            <Card key={plan.id} className={`premium-card border-0 ${plan.id === 'enterprise' ? 'ring-2 ring-indigo-500/30' : ''}`}>
+            <Card key={plan.id} className={`premium-card border-0 ${plan.id === 'enterprise' ? 'ring-2 ring-emerald-500/30' : ''}`}>
               <CardHeader>
                 <CardTitle>{plan.name}</CardTitle>
                 <CardDescription>{plan.price}</CardDescription>
@@ -132,21 +164,22 @@ export default function TenantMgmtPage() {
       )}
 
       {tab === 'tenants' && showWizard && (
-        <Card className="premium-card border-0 ring-2 ring-indigo-500/25">
+        <Card className="premium-card border-0 ring-2 ring-emerald-500/25">
           <CardHeader>
             <CardTitle>New tenant</CardTitle>
             <CardDescription>Step {wizardStep} of 4 — merchant, channels, Super Admin, then bulk catalog import.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {wizardBanner && <FormBanner tone="error" title="Cannot continue">{wizardBanner}</FormBanner>}
             {wizardStep === 1 && (
               <div className="space-y-3">
                 <div>
                   <label className="text-sm font-medium">Merchant name</label>
-                  <Input value={merchantName} onChange={(e) => setMerchantName(e.target.value)} placeholder="e.g. Leheriya Creations" />
+                  <Input value={merchantName} onChange={(e) => setMerchantName(e.target.value)} placeholder="e.g. Leheriya Creations" error={wizardErrors.merchantName} />
                 </div>
                 <div>
                   <label className="text-sm font-medium">Owner email</label>
-                  <Input value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} placeholder="owner@merchant.com" />
+                  <Input value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} placeholder="owner@merchant.com" error={wizardErrors.ownerEmail} />
                 </div>
                 <div>
                   <label className="text-sm font-medium">Subscription plan</label>
@@ -175,6 +208,7 @@ export default function TenantMgmtPage() {
                     ))}
                   </Select>
                 </div>
+                {wizardErrors.channels && <p className="mb-2 text-xs font-medium text-destructive">{wizardErrors.channels}</p>}
                 {picked.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {picked.map((id) => (
@@ -204,19 +238,26 @@ export default function TenantMgmtPage() {
               </Button>
               <Button
                 onClick={() => {
-                  if (wizardStep === 1 && (!merchantName.trim() || !ownerEmail.includes('@'))) {
-                    toast.error('Enter merchant name and owner email');
-                    return;
+                  setWizardBanner('');
+                  if (wizardStep === 1) {
+                    const next = {};
+                    if (merchantName.trim().length < 2) next.merchantName = 'Merchant name must be at least 2 characters';
+                    const emailCheck = emailSchema.safeParse(ownerEmail);
+                    if (!emailCheck.success) next.ownerEmail = emailCheck.error.issues[0]?.message || 'Enter a valid email';
+                    setWizardErrors(next);
+                    if (Object.keys(next).length) {
+                      setWizardBanner('Please fix the highlighted fields.');
+                      return;
+                    }
                   }
                   if (wizardStep === 2 && picked.length === 0) {
-                    toast.error('Select at least one channel');
+                    setWizardErrors({ channels: 'Select at least one channel' });
+                    setWizardBanner('Select at least one launch channel.');
                     return;
                   }
+                  setWizardErrors({});
                   if (wizardStep < 4) setWizardStep(wizardStep + 1);
-                  else {
-                    completeWizard();
-                    toast.success('Tenant created. Open merchant, then Catalog → Bulk import (Shopify → Myntra → Amazon).');
-                  }
+                  else completeWizard();
                 }}
               >
                 {wizardStep === 4 ? 'Create & open import' : 'Next'}
@@ -228,9 +269,9 @@ export default function TenantMgmtPage() {
 
       {tab === 'tenants' && (
         <>
-          <div className="premium-card bg-indigo-50/80 p-4 dark:bg-indigo-950/30">
+          <div className="premium-card bg-emerald-50/80 p-4 dark:bg-emerald-950/30">
             <div className="flex items-start gap-3">
-              <Building2 className="mt-0.5 h-5 w-5 text-indigo-600" />
+              <Building2 className="mt-0.5 h-5 w-5 text-emerald-600" />
               <div>
                 <p className="font-medium">SaaS isolation</p>
                 <p className="text-sm text-muted-foreground">

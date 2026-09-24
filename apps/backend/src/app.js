@@ -12,7 +12,12 @@ const v1Routes = require('./routes/v1');
 const app = express();
 
 app.use(cors({
-  origin: config.corsOrigin,
+  origin(origin, cb) {
+    const allowed = config.corsOrigins || [];
+    // Non-browser clients (curl, server-to-server) send no Origin
+    if (!origin || allowed.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  },
   credentials: true,
 }));
 

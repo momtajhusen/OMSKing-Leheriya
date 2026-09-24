@@ -1,11 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { users as userSeed } from '../../mocks';
-import { useAuth } from '../../hooks/useAuth';
+import api, { apiError, apiFormError } from '../../lib/api';
 import { ROLES, ROLE_LABELS, MERCHANT_ASSIGNABLE_ROLES } from '../../constants/roles';
-import { PERMISSION_CATALOG, ROLE_PERMISSIONS, hasPermission } from '../../constants/permissions';
+import { PERMISSION_CATALOG, hasPermission } from '../../constants/permissions';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useSimulatedLoad } from '../../hooks/useSimulatedLoad';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -15,21 +13,44 @@ import Select from '../../components/ui/Select';
 import Modal from '../../components/ui/Modal';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
-import { Users, Shield, Plus, Search, Check, X } from 'lucide-react';
+import { inviteUserSchema } from '../../lib/validation';
+import { FormBanner } from '../../components/ui/FormBanner';
+import { Users, Shield, Plus, Search, Check, X, Copy } from 'lucide-react';
 
 const emptyUser = { name: '', email: '', role: ROLES.OPERATIONS };
 const MATRIX_ROLES = MERCHANT_ASSIGNABLE_ROLES.filter((role) => role !== ROLES.ADMIN);
 
 export default function UsersRolesPage() {
-  const { user: currentUser } = useAuth();
   const { canUsers } = usePermissions();
   const [activeTab, setActiveTab] = useState('users');
-  const [userList, setUserList] = useState(userSeed.map((u) => ({ ...u, tenant: currentUser?.tenantName || 'Leheriya Creations' })));
+  const [userList, setUserList] = useState([]);
+  const [roles, setRoles] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyUser);
-  const loading = useSimulatedLoad(activeTab);
+  const [formErrors, setFormErrors] = useState({});
+  const [formBanner, setFormBanner] = useState('');
+  const [inviteSecret, setInviteSecret] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [usersRes, rolesRes] = await Promise.all([
+        api.get('/users'),
+        api.get('/roles'),
+      ]);
+      setUserList(usersRes.data.data || []);
+      setRoles(rolesRes.data.data || []);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not load users'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
 
   const filtered = useMemo(() => userList.filter((item) => {
     const q = searchQuery.toLowerCase();
@@ -37,36 +58,68 @@ export default function UsersRolesPage() {
     return !q || item.name.toLowerCase().includes(q) || item.email.toLowerCase().includes(q) || label.toLowerCase().includes(q);
   }), [userList, searchQuery]);
 
-  const saveUser = () => {
-    if (!form.name.trim() || !form.email.includes('@')) {
-      toast.error('Name and email are required');
+  const saveUser = async () => {
+    setFormBanner('');
+    const parsed = inviteUserSchema.safeParse(form);
+    if (!parsed.success) {
+      const next = {};
+      parsed.error.issues.forEach((issue) => {
+        const key = issue.path[0];
+        if (key && !next[key]) next[key] = issue.message;
+      });
+      setFormErrors(next);
+      setFormBanner('Please fix the highlighted fields.');
       return;
     }
-    if (editing) {
-      setUserList((prev) => prev.map((item) => (item.id === editing.id ? { ...item, ...form } : item)));
-      toast.success(`${form.name} updated`);
-    } else {
-      setUserList((prev) => [
-        {
-          id: `USR-${String(prev.length + 1).padStart(3, '0')}`,
-          ...form,
-          status: 'Active',
-          lastLogin: 'Never',
-          createdAt: '2026-09-08',
-          tenant: currentUser?.tenantName,
-        },
-        ...prev,
-      ]);
-      toast.success(`Invite sent to ${form.email}`);
+    setFormErrors({});
+    try {
+      if (editing) {
+        await api.patch(`/users/${editing.id}`, parsed.data);
+        toast.success(`${parsed.data.name} updated`);
+      } else {
+        const { data } = await api.post('/users', parsed.data);
+        const temp = data.data?.temporaryPassword;
+        setInviteSecret({
+          email: parsed.data.email,
+          temporaryPassword: temp || null,
+          emailSent: Boolean(data.data?.emailSent),
+        });
+        toast.success(`Invite created for ${parsed.data.email}`);
+        load();
+        return;
+      }
+      setOpen(false);
+      setEditing(null);
+      load();
+    } catch (err) {
+      const apiParsed = apiFormError(err);
+      setFormErrors(apiParsed.fields);
+      setFormBanner(apiParsed.message === 'Validation failed' ? 'Please fix the highlighted fields.' : apiParsed.message);
     }
-    setOpen(false);
-    setEditing(null);
   };
 
-  const toggleStatus = (row) => {
-    const next = row.status === 'Active' ? 'Inactive' : 'Active';
-    setUserList((prev) => prev.map((item) => (item.id === row.id ? { ...item, status: next } : item)));
-    toast.success(`${row.name} marked ${next}`);
+  const toggleStatus = async (row) => {
+    const next = row.status === 'Active' ? 'disabled' : 'active';
+    try {
+      await api.patch(`/users/${row.id}/status`, { status: next });
+      toast.success(`${row.name} updated`);
+      load();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
+
+  const togglePerm = async (role, key) => {
+    if (role.code === 'super_admin') return;
+    const next = role.permissions.includes(key)
+      ? role.permissions.filter((p) => p !== key)
+      : [...role.permissions, key];
+    try {
+      await api.patch(`/roles/${role.id}`, { permissions: next });
+      setRoles((prev) => prev.map((r) => (r.id === role.id ? { ...r, permissions: next } : r)));
+    } catch (err) {
+      toast.error(apiError(err));
+    }
   };
 
   if (loading) return <PageLoader label="Loading users & roles..." />;
@@ -81,7 +134,7 @@ export default function UsersRolesPage() {
           </p>
         </div>
         {canUsers && (
-          <Button onClick={() => { setEditing(null); setForm(emptyUser); setOpen(true); }}>
+          <Button onClick={() => { setEditing(null); setInviteSecret(null); setForm(emptyUser); setFormErrors({}); setFormBanner(''); setOpen(true); }}>
             <Plus className="w-4 h-4 mr-2" />
             Add User
           </Button>
@@ -148,7 +201,7 @@ export default function UsersRolesPage() {
                       <TableCell>
                         {canUsers ? (
                           <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => { setEditing(row); setForm({ name: row.name, email: row.email, role: row.role }); setOpen(true); }}>Edit</Button>
+                            <Button variant="ghost" size="sm" onClick={() => { setEditing(row); setInviteSecret(null); setForm({ name: row.name, email: row.email, role: row.role }); setFormErrors({}); setFormBanner(''); setOpen(true); }}>Edit</Button>
                             <Button variant="ghost" size="sm" onClick={() => toggleStatus(row)}>
                               {row.status === 'Active' ? 'Disable' : 'Enable'}
                             </Button>
@@ -190,13 +243,24 @@ export default function UsersRolesPage() {
                         <div className="font-medium">{perm.label}</div>
                         <code className="text-[11px] text-muted-foreground">{perm.key}</code>
                       </TableCell>
-                      {MATRIX_ROLES.map((role) => (
-                        <TableCell key={role} className="text-center">
-                          {hasPermission(ROLE_PERMISSIONS[role], perm.key)
-                            ? <Check className="w-5 h-5 mx-auto text-green-600" />
-                            : <X className="w-5 h-5 mx-auto text-muted-foreground/40" />}
+                    {MATRIX_ROLES.map((code) => {
+                      const role = roles.find((r) => r.code === code);
+                      const granted = role?.permissions || [];
+                      return (
+                        <TableCell key={code} className="text-center">
+                          <button
+                            type="button"
+                            className="mx-auto block"
+                            disabled={!canUsers || code === ROLES.SUPER_ADMIN}
+                            onClick={() => role && togglePerm(role, perm.key)}
+                          >
+                            {hasPermission(granted, perm.key)
+                              ? <Check className="w-5 h-5 mx-auto text-green-600" />
+                              : <X className="w-5 h-5 mx-auto text-muted-foreground/40" />}
+                          </button>
                         </TableCell>
-                      ))}
+                      );
+                    })}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -221,33 +285,71 @@ export default function UsersRolesPage() {
 
       <Modal
         open={open}
-        onOpenChange={(isOpen) => { setOpen(isOpen); if (!isOpen) setEditing(null); }}
-        title={editing ? 'Edit user' : 'Invite user'}
+        onOpenChange={(isOpen) => { setOpen(isOpen); if (!isOpen) { setEditing(null); setInviteSecret(null); } }}
+        title={inviteSecret ? 'Share login details' : editing ? 'Edit user' : 'Invite user'}
         footer={
-          <>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={saveUser}>{editing ? 'Save' : 'Send invite'}</Button>
-          </>
+          inviteSecret ? (
+            <Button onClick={() => { setOpen(false); setInviteSecret(null); }}>Done</Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button onClick={saveUser}>{editing ? 'Save' : 'Create user'}</Button>
+            </>
+          )
         }
       >
-        <div className="space-y-3">
-          <div>
-            <label className="text-sm font-medium">Name</label>
-            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        {inviteSecret ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {inviteSecret.emailSent
+                ? <>Password was emailed to <strong>{inviteSecret.email}</strong>. Keep a copy below as backup.</>
+                : <>Copy this password and share it with <strong>{inviteSecret.email}</strong>.</>}
+              {' '}They can later use Forgot password — OTP goes to Gmail.
+            </p>
+            {inviteSecret.temporaryPassword ? (
+              <div className="flex items-center gap-2">
+                <Input readOnly value={inviteSecret.temporaryPassword} className="font-mono" />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(inviteSecret.temporaryPassword);
+                    toast.success('Password copied');
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm">Account created. Ask them to use Forgot password on the login page.</p>
+            )}
           </div>
-          <div>
-            <label className="text-sm font-medium">Email</label>
-            <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        ) : (
+          <div className="space-y-3">
+            {formBanner && <FormBanner tone="error" title="Could not save user">{formBanner}</FormBanner>}
+            {!editing && (
+              <p className="text-sm text-muted-foreground">
+                Password is generated and sent to the user&apos;s Gmail. You will also see it once, as backup.
+              </p>
+            )}
+            <div>
+              <label className="text-sm font-medium">Name</label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} error={formErrors.name} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Email</label>
+              <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} error={formErrors.email} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Role</label>
+              <Select value={form.role} error={formErrors.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+                {MATRIX_ROLES.map((role) => (
+                  <option key={role} value={role}>{ROLE_LABELS[role]}</option>
+                ))}
+              </Select>
+            </div>
           </div>
-          <div>
-            <label className="text-sm font-medium">Role</label>
-            <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-              {MATRIX_ROLES.map((role) => (
-                <option key={role} value={role}>{ROLE_LABELS[role]}</option>
-              ))}
-            </Select>
-          </div>
-        </div>
+        )}
       </Modal>
     </div>
   );

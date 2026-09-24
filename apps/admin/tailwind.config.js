@@ -49,10 +49,10 @@ export default {
           foreground: 'hsl(var(--color-card-foreground) / <alpha-value>)',
         },
         brand: {
-          DEFAULT: '#0F172A',
-          accent: '#D97706',
-          50: '#F8FAFC',
-          900: '#0F172A',
+          DEFAULT: '#0D5C45',
+          accent: '#5EDB4A',
+          50: '#F3F8F5',
+          900: '#06281F',
         },
       },
       borderRadius: {

@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
-  Package, ShoppingCart, Truck, RotateCcw, Settings, LayoutDashboard, LogOut, Sun, Moon, Menu, X, Crown,
+  Package, ShoppingCart, Truck, RotateCcw, Settings, LayoutDashboard, LogOut, Sun, Moon, Menu, X,
 } from 'lucide-react';
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
 import PageFade from '../motion/PageFade';
+import { usePermissions } from '../../hooks/usePermissions';
+import BrandLogo from '../brand/BrandLogo';
 
 const vendorRoutes = [
   { path: '/vendor/dashboard', label: 'Home', icon: LayoutDashboard },
@@ -24,18 +26,19 @@ function VendorLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { logout, user } = useAuth();
+  const { canOpenPath } = usePermissions();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const current = vendorRoutes.find((r) => location.pathname === r.path) || vendorRoutes[1];
   const initial = (user?.name || 'V').charAt(0).toUpperCase();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/auth/login');
   };
 
   const NavLinks = ({ onClick }) =>
-    vendorRoutes.map((route) => {
+    vendorRoutes.filter((route) => canOpenPath(route.path)).map((route) => {
       const Icon = route.icon;
       const isActive = location.pathname === route.path;
       return (
@@ -67,9 +70,7 @@ function VendorLayout() {
         >
           <div className="flex h-16 items-center justify-between border-b border-[hsl(var(--color-border-premium))] px-4">
             <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md">
-                <Crown className="h-4 w-4" strokeWidth={2.2} />
-              </span>
+              <BrandLogo className="h-9 w-9" />
               <div>
                 <div className="text-sm font-bold leading-none">Vendor</div>
                 <div className="mt-0.5 text-[11px] text-muted-foreground">OMSKing sheet</div>
@@ -85,7 +86,7 @@ function VendorLayout() {
           </nav>
           <div className="border-t border-[hsl(var(--color-border-premium))] p-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-sm font-bold text-white">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-teal-600 text-sm font-bold text-white">
                 {initial}
               </div>
               <div className="min-w-0">
@@ -102,6 +103,7 @@ function VendorLayout() {
               <button type="button" className="rounded-lg p-2 hover:bg-muted lg:hidden" onClick={() => setMobileOpen(true)}>
                 <Menu className="h-5 w-5" />
               </button>
+              <BrandLogo className="h-8 w-8 lg:hidden" />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">{current.label === 'Home' ? 'Dashboard' : current.label === 'Ship' ? 'Shipping' : current.label === 'Stock' ? 'Products' : current.label}</p>
                 <p className="truncate text-[11px] text-muted-foreground">Fill the sheet. One Master Order per line.</p>
@@ -125,7 +127,7 @@ function VendorLayout() {
       </div>
 
       <nav className="mkt-bottom-nav lg:hidden" aria-label="Vendor navigation">
-        {TABS.map((tab) => {
+        {TABS.filter((tab) => canOpenPath(tab.path)).map((tab) => {
           const Icon = tab.icon;
           const active = location.pathname === tab.path;
           return (

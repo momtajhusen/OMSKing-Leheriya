@@ -6,79 +6,79 @@
   :root {
     --radius: 0.75rem;
 
-    --color-background: 210 40% 98%;
-    --color-foreground: 222 47% 11%;
+    --color-background: 150 22% 97.5%;
+    --color-foreground: 160 28% 10%;
 
     --color-card: 0 0% 100%;
-    --color-card-foreground: 222 47% 11%;
+    --color-card-foreground: 160 28% 10%;
 
     --color-popover: 0 0% 100%;
-    --color-popover-foreground: 222 47% 11%;
+    --color-popover-foreground: 160 28% 10%;
 
-    --color-primary: 221 83% 23%;
-    --color-primary-foreground: 210 40% 98%;
+    --color-primary: 158 72% 22%;
+    --color-primary-foreground: 48 30% 97%;
 
-    --color-secondary: 210 40% 96%;
-    --color-secondary-foreground: 222 47% 11%;
+    --color-secondary: 150 18% 95%;
+    --color-secondary-foreground: 160 28% 10%;
 
-    --color-muted: 210 40% 96%;
-    --color-muted-foreground: 215 16% 47%;
+    --color-muted: 150 18% 95%;
+    --color-muted-foreground: 160 10% 38%;
 
-    --color-accent: 38 92% 50%;
-    --color-accent-foreground: 26 83% 14%;
+    --color-accent: 95 62% 45%;
+    --color-accent-foreground: 160 30% 10%;
 
     --color-destructive: 0 72% 51%;
-    --color-destructive-foreground: 210 40% 98%;
+    --color-destructive-foreground: 48 30% 97%;
 
-    --color-border: 214 32% 91%;
-    --color-input: 214 32% 91%;
-    --color-ring: 221 83% 23%;
+    --color-border: 150 16% 88%;
+    --color-input: 150 16% 88%;
+    --color-ring: 158 72% 22%;
 
-    /* Premium theme colors - light mode */
-    --color-navy-bg: 210 40% 98%;
-    --color-sidebar-bg: 210 40% 96%;
+    /* Premium theme colors - light mode (forest → lime, matching the mark) */
+    --color-navy-bg: 150 22% 97.5%;
+    --color-sidebar-bg: 150 18% 95%;
     --color-card-bg: 0 0% 100%;
-    --color-border-premium: 214 32% 91%;
-    --color-primary-blue: 262 83% 58%;
-    --color-indigo-accent: 280 65% 60%;
+    --color-border-premium: 150 16% 88%;
+    --color-primary-blue: 158 64% 28%;
+    --color-indigo-accent: 125 58% 42%;
   }
 
   .dark {
-    --color-background: 224 71% 4%;
-    --color-foreground: 210 40% 98%;
+    --color-background: 160 28% 6%;
+    --color-foreground: 48 25% 96%;
 
-    --color-card: 226 30% 10%;
-    --color-card-foreground: 210 40% 98%;
+    --color-card: 158 22% 9%;
+    --color-card-foreground: 48 25% 96%;
 
-    --color-popover: 226 30% 10%;
-    --color-popover-foreground: 210 40% 98%;
+    --color-popover: 158 22% 9%;
+    --color-popover-foreground: 48 25% 96%;
 
-    --color-primary: 262 83% 58%;
-    --color-primary-foreground: 210 40% 98%;
+    --color-primary: 142 52% 46%;
+    --color-primary-foreground: 160 30% 8%;
 
-    --color-secondary: 217 33% 17%;
-    --color-secondary-foreground: 210 40% 98%;
+    --color-secondary: 158 18% 14%;
+    --color-secondary-foreground: 48 25% 96%;
 
-    --color-muted: 217 33% 17%;
-    --color-muted-foreground: 215 20% 65%;
+    --color-muted: 158 18% 14%;
+    --color-muted-foreground: 150 12% 68%;
 
-    --color-accent: 280 65% 60%;
-    --color-accent-foreground: 210 40% 98%;
+    --color-accent: 95 58% 52%;
+    --color-accent-foreground: 160 30% 8%;
 
     --color-destructive: 0 63% 45%;
-    --color-destructive-foreground: 210 40% 98%;
+    --color-destructive-foreground: 48 25% 96%;
 
-    --color-border: 217 33% 15%;
-    --color-input: 217 33% 15%;
-    --color-ring: 262 83% 58%;
+    --color-border: 158 16% 16%;
+    --color-input: 158 16% 16%;
+    --color-ring: 142 52% 46%;
 
     /* Premium theme colors - dark mode */
-    --color-navy-bg: 224 71% 4%;
-    --color-sidebar-bg: 226 30% 10%;
-    --color-card-bg: 226 30% 10%;
-    --color-border-premium: 217 33% 15%;
-    --color-primary-blue: 262 83% 58%;
-    --color-indigo-accent: 280 65% 60%;
+    --color-navy-bg: 160 28% 6%;
+    --color-sidebar-bg: 158 22% 9%;
+    --color-card-bg: 158 22% 9%;
+    --color-border-premium: 158 16% 16%;
+    --color-primary-blue: 142 50% 42%;
+    --color-indigo-accent: 95 55% 50%;
   }
 
   * {
@@ -102,7 +102,7 @@
   }
 
   .dark body {
-    background: linear-gradient(135deg, hsl(222 47% 4%) 0%, hsl(222 47% 6%) 100%);
+    background: linear-gradient(135deg, hsl(160 28% 5%) 0%, hsl(158 24% 8%) 100%);
   }
 
   ::selection {
@@ -145,7 +145,7 @@
 
 @layer components {
   .page-container {
-    @apply mx-auto w-full px-4 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8;
+    @apply mx-auto w-full min-h-full px-4 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8;
   }
 
   .responsive-overflow-x {
@@ -197,7 +197,7 @@
   }
 
   .premium-card:hover {
-    box-shadow: 0 10px 24px -8px rgba(37, 99, 235, 0.18), 0 4px 8px -4px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 10px 24px -8px rgba(13, 92, 69, 0.22), 0 4px 8px -4px rgba(11, 36, 28, 0.08);
     transform: translateY(-2px);
   }
 
@@ -230,7 +230,7 @@
   }
 
   .glow-effect {
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.15), 0 0 40px rgba(99, 102, 241, 0.1);
+    box-shadow: 0 0 20px rgba(13, 92, 69, 0.18), 0 0 40px rgba(76, 175, 80, 0.12);
   }
 
   .glass-effect {
@@ -247,11 +247,11 @@
     @apply inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20;
     background: linear-gradient(135deg, hsl(var(--color-primary-blue)), hsl(var(--color-indigo-accent)));
     color: white;
-    box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.2), 0 2px 4px -1px rgba(99, 102, 241, 0.1);
+    box-shadow: 0 4px 6px -1px rgba(13, 92, 69, 0.22), 0 2px 4px -1px rgba(76, 175, 80, 0.12);
   }
 
   .premium-button:hover {
-    box-shadow: 0 6px 8px -1px rgba(59, 130, 246, 0.3), 0 4px 6px -1px rgba(99, 102, 241, 0.2);
+    box-shadow: 0 6px 8px -1px rgba(13, 92, 69, 0.32), 0 4px 6px -1px rgba(76, 175, 80, 0.2);
     transform: translateY(-1px);
   }
 
@@ -319,6 +319,98 @@
   @keyframes shine {
     from { transform: translateX(-120%); }
     to { transform: translateX(120%); }
+  }
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.06); }
+  }
+  @keyframes page-loader-fill {
+    0% { stroke-dashoffset: 264; opacity: 1; }
+    72% { stroke-dashoffset: 36; opacity: 1; }
+    100% { stroke-dashoffset: 0; opacity: 0.35; }
+  }
+  @keyframes page-loader-bar {
+    0% { transform: scaleX(0.08); opacity: 1; }
+    68% { transform: scaleX(0.82); opacity: 1; }
+    100% { transform: scaleX(1); opacity: 0.45; }
+  }
+
+  .page-loader-mark {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 6.5rem;
+    height: 6.5rem;
+  }
+
+  .page-loader-mark::before {
+    content: '';
+    position: absolute;
+    inset: -1.15rem;
+    border-radius: 999px;
+    background: radial-gradient(circle, hsl(var(--color-primary-blue) / 0.28), transparent 68%);
+    animation: pulse-soft 2.4s ease-in-out infinite;
+  }
+
+  .page-loader-ring {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+
+  .page-loader-ring-track,
+  .page-loader-ring-fill {
+    fill: none;
+    stroke-width: 4;
+  }
+
+  .page-loader-ring-track {
+    stroke: hsl(var(--color-primary) / 0.12);
+  }
+
+  .page-loader-ring-fill {
+    stroke: hsl(var(--color-primary-blue));
+    stroke-linecap: round;
+    stroke-dasharray: 264;
+    stroke-dashoffset: 264;
+    animation: page-loader-fill 1.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+
+  .page-loader-bar {
+    margin-top: 1.35rem;
+    height: 4px;
+    width: 10rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: hsl(var(--color-primary) / 0.12);
+  }
+
+  .page-loader-bar span {
+    display: block;
+    height: 100%;
+    width: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, hsl(var(--color-primary-blue)), hsl(var(--color-indigo-accent)));
+    transform: scaleX(0.08);
+    transform-origin: left center;
+    animation: page-loader-bar 1.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .page-loader-ring-fill,
+    .page-loader-bar span,
+    .page-loader-mark::before {
+      animation: none !important;
+    }
+    .page-loader-ring-fill {
+      stroke-dashoffset: 70;
+      opacity: 1;
+    }
+    .page-loader-bar span {
+      transform: scaleX(0.55);
+    }
   }
 
   .shimmer {
@@ -400,7 +492,7 @@ html.marketing {
   bottom: -6px;
   height: 2px;
   border-radius: 999px;
-  background: #2563eb;
+  background: #0d5c45;
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -468,7 +560,7 @@ html.marketing {
 }
 
 .contact-fab--call {
-  background: linear-gradient(180deg, #1e3a8a 0%, #0f172a 100%);
+  background: linear-gradient(180deg, #0d5c45 0%, #06281f 100%);
 }
 
 .contact-fab--wa {
@@ -517,10 +609,17 @@ html.marketing {
   z-index: 60;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
   padding: 6px 6px calc(8px + env(safe-area-inset-bottom));
-  background: rgb(255 255 255 / 0.92);
-  border-top: 1px solid rgb(226 232 240);
-  backdrop-filter: blur(16px);
+  background: hsl(var(--color-card-bg) / 0.9);
+  border-top: 1px solid hsl(var(--color-border-premium));
+  backdrop-filter: blur(18px) saturate(1.15);
+  box-shadow: 0 -10px 28px -18px hsl(var(--color-foreground) / 0.2);
+}
+
+.dark .mkt-bottom-nav {
+  background: hsl(var(--color-sidebar-bg) / 0.94);
+  box-shadow: 0 -14px 32px -14px rgb(0 0 0 / 0.55);
 }
 
 .mkt-bottom-nav a,
@@ -532,16 +631,39 @@ html.marketing {
   gap: 2px;
   min-height: 48px;
   border: 0;
+  border-radius: 14px;
   background: transparent;
-  color: #64748b;
+  color: hsl(var(--color-muted-foreground));
   font-size: 10px;
   font-weight: 600;
   text-decoration: none;
+  transition:
+    color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mkt-bottom-nav a:hover,
+.mkt-bottom-nav button:hover {
+  color: hsl(var(--color-foreground));
+  background: hsl(var(--color-muted) / 0.7);
+}
+
+.mkt-bottom-nav a:focus-visible,
+.mkt-bottom-nav button:focus-visible {
+  outline: 2px solid hsl(var(--color-ring));
+  outline-offset: 1px;
 }
 
 .mkt-bottom-nav a.is-active,
 .mkt-bottom-nav button.is-active {
-  color: #1d4ed8;
+  color: hsl(var(--color-primary));
+  background: hsl(var(--color-primary) / 0.12);
+}
+
+.dark .mkt-bottom-nav a.is-active,
+.dark .mkt-bottom-nav button.is-active {
+  color: hsl(var(--color-indigo-accent));
+  background: hsl(var(--color-primary-blue) / 0.18);
 }
 
 @media (max-width: 1023px) {

@@ -9,7 +9,7 @@ const floaters = [
   { icon: Store, label: 'Shopify', hint: 'Storefront', pos: 'hidden lg:flex -left-44 top-10', well: 'from-emerald-400 to-teal-500' },
   { icon: ShoppingBag, label: 'Amazon', hint: 'SP-API', pos: 'hidden lg:flex -right-44 top-24', well: 'from-amber-400 to-orange-500' },
   { icon: Shirt, label: 'Myntra', hint: 'Partner API', pos: 'hidden lg:flex -right-40 bottom-16', well: 'from-pink-400 to-rose-500' },
-  { icon: Warehouse, label: 'WH-001', hint: 'Offline stock', pos: 'hidden lg:flex -left-40 bottom-10', well: 'from-blue-500 to-indigo-600' },
+  { icon: Warehouse, label: 'WH-001', hint: 'Offline stock', pos: 'hidden lg:flex -left-40 bottom-10', well: 'from-emerald-600 to-teal-700' },
 ];
 
 export default function AuthLayout() {
@@ -28,7 +28,7 @@ export default function AuthLayout() {
   }, []);
 
   return (
-    <div className="relative min-h-dvh overflow-x-hidden bg-[#f4f7fb] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="relative min-h-dvh overflow-x-hidden bg-[#f3f8f5] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.45]"
         style={{
@@ -37,14 +37,14 @@ export default function AuthLayout() {
           backgroundSize: '28px 28px',
         }}
       />
-      <div className="pointer-events-none absolute -left-28 -top-20 h-[28rem] w-[28rem] rounded-full bg-blue-400/25 blur-3xl animate-float" />
-      <div className="pointer-events-none absolute -right-24 -bottom-24 h-[30rem] w-[30rem] rounded-full bg-violet-400/20 blur-3xl animate-float-slow" />
+      <div className="pointer-events-none absolute -left-28 -top-20 h-[28rem] w-[28rem] rounded-full bg-emerald-400/25 blur-3xl animate-float" />
+      <div className="pointer-events-none absolute -right-24 -bottom-24 h-[30rem] w-[30rem] rounded-full bg-lime-400/20 blur-3xl animate-float-slow" />
 
       <header className="relative z-20 mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
         <BrandMark />
         <Link
           to="/"
-          className="rounded-full border border-slate-200/80 bg-white/80 px-4 py-1.5 text-sm font-medium text-slate-600 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:text-blue-700"
+          className="rounded-full border border-slate-200/80 bg-white/80 px-4 py-1.5 text-sm font-medium text-slate-600 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:text-emerald-700"
         >
           Back to home
         </Link>

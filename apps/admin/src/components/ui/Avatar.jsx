@@ -14,7 +14,7 @@ const Avatar = forwardRef(({ className, src, alt, fallback, ...props }, ref) => 
 
   const getGradient = (initials) => {
     const colors = [
-      'from-blue-500 to-blue-600',
+      'from-emerald-500 to-teal-600',
       'from-green-500 to-green-600',
       'from-purple-500 to-purple-600',
       'from-pink-500 to-pink-600',

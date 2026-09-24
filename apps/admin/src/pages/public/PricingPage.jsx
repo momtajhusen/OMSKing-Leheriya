@@ -15,8 +15,8 @@ const faqs = [
 
 const planMeta = {
   starter: { icon: Sparkles, accent: 'bg-sky-400', popular: false },
-  growth: { icon: Rocket, accent: 'bg-blue-600', popular: true },
-  enterprise: { icon: Building2, accent: 'bg-violet-500', popular: false },
+  growth: { icon: Rocket, accent: 'bg-emerald-600', popular: true },
+  enterprise: { icon: Building2, accent: 'bg-lime-500', popular: false },
 };
 
 export default function PricingPage() {
@@ -46,12 +46,12 @@ export default function PricingPage() {
 
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 px-4 py-10 text-center text-white sm:px-6 sm:py-16">
-        <div className="pointer-events-none absolute -left-10 top-0 h-48 w-48 rounded-full bg-sky-300/30 blur-3xl animate-float" />
-        <div className="pointer-events-none absolute -right-10 bottom-0 h-48 w-48 rounded-full bg-fuchsia-300/30 blur-3xl animate-float-slow" />
+      <section className="relative overflow-hidden bg-gradient-to-br from-emerald-800 via-emerald-600 to-teal-600 px-4 py-10 text-center text-white sm:px-6 sm:py-16">
+        <div className="pointer-events-none absolute -left-10 top-0 h-48 w-48 rounded-full bg-lime-300/30 blur-3xl animate-float" />
+        <div className="pointer-events-none absolute -right-10 bottom-0 h-48 w-48 rounded-full bg-emerald-300/30 blur-3xl animate-float-slow" />
         <div className="relative mx-auto max-w-2xl">
           <h1 className="text-3xl font-bold tracking-tight sm:text-5xl">Pricing</h1>
-          <p className="mt-3 text-sm leading-6 text-blue-100 sm:text-base">
+          <p className="mt-3 text-sm leading-6 text-emerald-100 sm:text-base">
             Per tenant. Priced on Shopify / Amazon / Myntra and monthly Master Orders — not a credit pack.
           </p>
         </div>
@@ -66,8 +66,8 @@ export default function PricingPage() {
               { n: '1', l: 'Tenant per merchant', icon: Building2 },
             ].map((stat) => (
               <div key={stat.l} className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg ring-1 ring-slate-100">
-                <stat.icon className="mx-auto mb-2 h-5 w-5 text-blue-600" />
-                <div className="text-3xl font-bold text-blue-700">{stat.n}</div>
+                <stat.icon className="mx-auto mb-2 h-5 w-5 text-emerald-600" />
+                <div className="text-3xl font-bold text-emerald-700">{stat.n}</div>
                 <div className="text-sm text-slate-600">{stat.l}</div>
               </div>
             ))}
@@ -85,14 +85,14 @@ export default function PricingPage() {
                 <MktCard
                   key={plan.id}
                   accent={meta.accent}
-                  className={meta.popular ? 'md:-mt-3 md:mb-3 ring-2 ring-blue-500/30' : ''}
+                  className={meta.popular ? 'md:-mt-3 md:mb-3 ring-2 ring-emerald-500/30' : ''}
                 >
                   {meta.popular && (
-                    <p className="mb-3 inline-flex rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                    <p className="mb-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
                       Most teams start here
                     </p>
                   )}
-                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-slate-50 text-blue-700">
+                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-slate-50 text-emerald-700">
                     <Icon className="h-5 w-5" />
                   </div>
                   <h2 className="text-xl font-bold text-slate-900">{plan.name}</h2>
@@ -100,7 +100,7 @@ export default function PricingPage() {
                   <ul className="mt-5 space-y-2">
                     {plan.features.map((feature) => (
                       <li key={feature} className="flex gap-2 text-sm text-slate-700">
-                        <Check className="h-4 w-4 shrink-0 text-blue-600" />
+                        <Check className="h-4 w-4 shrink-0 text-emerald-600" />
                         {feature}
                       </li>
                     ))}
@@ -143,7 +143,7 @@ export default function PricingPage() {
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <Button type="submit" className="rounded-full !bg-blue-600 !from-blue-600 !to-indigo-600">
+                  <Button type="submit" className="rounded-full">
                     Send pricing request
                   </Button>
                 </div>
@@ -159,7 +159,7 @@ export default function PricingPage() {
               ))}
               <p className="px-1 text-sm text-slate-600">
                 Prefer a tenant walkthrough?{' '}
-                <Link to="/contact" className="font-medium text-blue-700 hover:underline">Open contact</Link>
+                <Link to="/contact" className="font-medium text-emerald-700 hover:underline">Open contact</Link>
               </p>
             </div>
           </div>

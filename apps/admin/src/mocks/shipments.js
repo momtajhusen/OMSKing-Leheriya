@@ -1,6 +1,4 @@
-// Shipments fixture.
-// Shopify orders ship on Leheriya's own courier accounts; Amazon/Myntra orders
-// carry the marketplace's own courier, so their AWB arrives from the channel.
+// Shipments fixture
 export const shipments = [
   {
     id: 'SHP-001',
@@ -9,11 +7,11 @@ export const shipments = [
     awb: 'DLV1234567890',
     manifestId: 'MF-001',
     status: 'In Transit',
-    shippedDate: '2026-08-25T10:30:00',
-    estimatedDelivery: '2026-08-28T10:30:00',
+    shippedDate: '2024-01-15T10:30:00',
+    estimatedDelivery: '2024-01-18T10:30:00',
     trackingEvents: [
-      { status: 'Picked Up', date: '2026-08-25T10:30:00', location: 'Jaipur' },
-      { status: 'In Transit', date: '2026-08-26T08:00:00', location: 'Mumbai' },
+      { status: 'Picked Up', date: '2024-01-15T10:30:00', location: 'Jaipur' },
+      { status: 'In Transit', date: '2024-01-16T08:00:00', location: 'Mumbai' },
     ],
   },
   {
@@ -23,85 +21,11 @@ export const shipments = [
     awb: 'BLD9876543210',
     manifestId: 'MF-002',
     status: 'Delivered',
-    shippedDate: '2026-08-25T11:45:00',
-    estimatedDelivery: '2026-08-28T11:45:00',
+    shippedDate: '2024-01-15T11:45:00',
+    estimatedDelivery: '2024-01-18T11:45:00',
     trackingEvents: [
-      { status: 'Picked Up', date: '2026-08-25T11:45:00', location: 'Mumbai' },
-      { status: 'Delivered', date: '2026-08-27T14:00:00', location: 'Bengaluru' },
+      { status: 'Picked Up', date: '2024-01-15T11:45:00', location: 'Mumbai' },
+      { status: 'Delivered', date: '2024-01-17T14:00:00', location: 'Bengaluru' },
     ],
-  },
-  {
-    id: 'SHP-003',
-    orderId: '65209-LEH',
-    courier: 'Ecom Express',
-    awb: 'ECO4567890123',
-    manifestId: 'MF-002',
-    status: 'In Transit',
-    shippedDate: '2026-08-24T09:15:00',
-    estimatedDelivery: '2026-08-27T09:15:00',
-    trackingEvents: [
-      { status: 'Picked Up', date: '2026-08-24T09:15:00', location: 'Jaipur' },
-    ],
-  },
-  {
-    id: 'SHP-004',
-    orderId: '65210-LEH',
-    courier: 'Xpressbees',
-    awb: 'XPB7890123456',
-    manifestId: 'MF-003',
-    status: 'Delivered',
-    shippedDate: '2026-08-23T14:20:00',
-    estimatedDelivery: '2026-08-26T14:20:00',
-    trackingEvents: [
-      { status: 'Delivered', date: '2026-08-26T11:05:00', location: 'Delhi' },
-    ],
-  },
-  {
-    id: 'SHP-005',
-    orderId: '65213-LEH',
-    courier: 'Ecom Express',
-    awb: 'ECO5678901234',
-    manifestId: 'MF-003',
-    status: 'Exception',
-    shippedDate: '2026-08-20T12:45:00',
-    estimatedDelivery: '2026-08-23T12:45:00',
-    trackingEvents: [
-      { status: 'Delivery Failed', date: '2026-08-23T10:00:00', location: 'Chennai' },
-    ],
-  },
-  {
-    id: 'SHP-006',
-    orderId: '65212-LEH',
-    courier: 'Bluedart',
-    awb: 'BLD3456789012',
-    manifestId: 'MF-004',
-    status: 'RTO In Transit',
-    shippedDate: '2026-08-21T08:30:00',
-    estimatedDelivery: '2026-08-24T08:30:00',
-    trackingEvents: [
-      { status: 'RTO Initiated', date: '2026-08-24T09:00:00', location: 'Kolkata' },
-    ],
-  },
-  {
-    id: 'SHP-007',
-    orderId: '65217-LEH',
-    courier: 'Delhivery',
-    awb: '',
-    manifestId: '',
-    status: 'Label Pending',
-    shippedDate: null,
-    estimatedDelivery: null,
-    trackingEvents: [],
-  },
-  {
-    id: 'SHP-008',
-    orderId: '65221-LEH',
-    courier: 'Xpressbees',
-    awb: '',
-    manifestId: '',
-    status: 'Label Pending',
-    shippedDate: null,
-    estimatedDelivery: null,
-    trackingEvents: [],
   },
 ];

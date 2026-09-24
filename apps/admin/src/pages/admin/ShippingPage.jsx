@@ -13,6 +13,8 @@ import EmptyState from '../../components/ui/EmptyState';
 import Drawer from '../../components/ui/Drawer';
 import Modal from '../../components/ui/Modal';
 import { Truck, Package, Download, RefreshCw, CheckCircle, Clock, AlertTriangle, MapPin } from 'lucide-react';
+import { usePermissions } from '../../hooks/usePermissions';
+import { PERMISSIONS } from '../../constants/permissions';
 
 const TABS = [
   { id: 'all', label: 'All' },
@@ -31,6 +33,7 @@ const COURIERS = [
 ];
 
 export default function ShippingPage() {
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('all');
   const [shipmentList, setShipmentList] = useState(shipmentSeed);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -187,9 +190,11 @@ export default function ShippingPage() {
                     <div className="text-2xl font-bold mb-1">{formatINR(courier.price)}</div>
                     <p className="text-sm text-muted-foreground mb-3">ETA: {courier.eta}</p>
                     {courier.recommended && <Badge className="mb-3">Recommended</Badge>}
+                    {can(PERMISSIONS.SHIPPING_GENERATE) && (
                     <Button className="w-full" size="sm" onClick={() => generateLabel(courier.id)}>
                       Ship with {courier.name}
                     </Button>
+                    )}
                   </CardContent>
                 </Card>
               ))}
@@ -280,7 +285,7 @@ export default function ShippingPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          {!shipment.awb && order?.channel === 'Shopify' && (
+                          {!shipment.awb && order?.channel === 'Shopify' && can(PERMISSIONS.SHIPPING_GENERATE) && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -295,9 +300,11 @@ export default function ShippingPage() {
                           {shipment.awb && (
                             <>
                               <Button variant="ghost" size="sm" onClick={() => setTrackItem(shipment)}>Track</Button>
+                              {can(PERMISSIONS.SHIPPING_CANCEL) && (
                               <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setCancelItem(shipment)}>
                                 Cancel Label
                               </Button>
+                              )}
                             </>
                           )}
                         </div>
