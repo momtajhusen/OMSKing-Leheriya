@@ -48,6 +48,7 @@ Catalog / support extras (same pattern):
 catalog.view
 catalog.edit
 customers.view
+vendors.manage
 ```
 
 SaaS-only:
@@ -70,6 +71,7 @@ Default grants (seed). Super Admin has every **tenant** key. Platform Admin has 
 | returns.approve | ✓ | ✓ | — | — | — | ✓ | — |
 | finance.view | ✓ | — | — | ✓ | — | — | — |
 | finance.reconcile | ✓ | — | — | ✓ | — | — | — |
+| vendors.manage | ✓ | ✓ | — | — | — | — | — |
 | users.manage | ✓ | — | — | — | — | — | — |
 | settings.manage | ✓ | — | — | — | — | — | — |
 | catalog.view | ✓ | ✓ | — | — | ✓ | — | — |

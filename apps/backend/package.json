@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "nodemon src/server.js",
+    "seed": "node src/seeds/phase2.js",
     "build": "node -e \"console.log('Backend build placeholder — deploy src/ directly')\"",
     "start": "node src/server.js",
     "lint": "node -e \"console.log('Lint placeholder')\"",
@@ -19,7 +20,8 @@
     "express-validator": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.4.0",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "nodemailer": "^10.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

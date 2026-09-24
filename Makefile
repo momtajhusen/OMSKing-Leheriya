@@ -5,7 +5,7 @@
 # ============================================================
 
 .PHONY: help install install-ci mongo-start mongo-stop mongo-status ensure-mongo \
-	run dev all backend admin build stop clean status test
+	run dev all backend admin build stop clean status test seed
 
 SHELL := /bin/bash
 
@@ -75,6 +75,7 @@ ensure-mongo: ## Auto-start MongoDB if not running
 	  echo "✅ MongoDB already running on tcp://localhost:27017"; \
 	else \
 	  echo "🚀 Starting MongoDB..."; \
+	  brew services start mongodb-community@7.0 2>/dev/null || \
 	  brew services start mongodb-community 2>/dev/null || \
 	   (mongod --config /opt/homebrew/etc/mongod.conf --fork && echo "Started via --fork"); \
 	  echo "⏳ Waiting for MongoDB to be ready..."; \
@@ -86,6 +87,7 @@ ensure-mongo: ## Auto-start MongoDB if not running
 	    sleep 1; \
 	  done; \
 	  echo "❌ MongoDB failed to start within 30 seconds"; \
+	  echo "   If disk is full, free space then retry. Data files are Mongo 7.0."; \
 	  exit 1; \
 	fi
 
@@ -98,7 +100,7 @@ all: ensure-mongo ## Start backend + admin together (concurrently, color-coded).
 	@echo ""
 	@echo "╔═══════════════════════════════════════════════════╗"
 	@echo "║  OMSKing — Starting all services                  ║"
-	@echo "║  Backend     → http://localhost:5001  (magenta)    ║"
+	@echo "║  Backend     → http://localhost:5002  (magenta)    ║"
 	@echo "║  App         → http://localhost:5173  (cyan)      ║"
 	@echo "║    Public    → /  /about  /features  /pricing     ║"
 	@echo "║    Login     → /auth/login                         ║"
@@ -111,7 +113,7 @@ all: ensure-mongo ## Start backend + admin together (concurrently, color-coded).
 	@echo ""
 	@pnpm run dev:all
 
-backend: ensure-mongo ## Only run backend (port 5001)
+backend: ensure-mongo ## Only run backend (port 5002)
 	@pnpm run dev:backend
 
 admin: ensure-mongo ## Only run frontend (port 5173) — public + admin, waits for backend
@@ -123,9 +125,9 @@ admin: ensure-mongo ## Only run frontend (port 5173) — public + admin, waits f
 build: ## Production build admin + backend check
 	@pnpm run build
 
-stop: ## Kill backend (5001) + frontend (5173) dev servers
-	@-lsof -ti:5001,5173 | xargs kill -9 2>/dev/null || true
-	@echo "✅ Stopped processes on ports 5001 and 5173."
+stop: ## Kill backend (5002) + frontend (5173) dev servers
+	@-lsof -ti:5002,5173 | xargs kill -9 2>/dev/null || true
+	@echo "✅ Stopped processes on ports 5002 and 5173."
 
 clean: ## Remove node_modules + dist + build artifacts
 	@pnpm run clean
@@ -133,8 +135,11 @@ clean: ## Remove node_modules + dist + build artifacts
 
 status: ## Quick status — mongo, ports
 	@$(MAKE) --no-print-directory mongo-status
-	@if nc -z localhost 5001 2>/dev/null; then echo "✅ Backend : running on http://localhost:5001"; else echo "◻️  Backend : not running on :5001"; fi
+	@if nc -z localhost 5002 2>/dev/null; then echo "✅ Backend : running on http://localhost:5002"; else echo "◻️  Backend : not running on :5002"; fi
 	@if nc -z localhost 5173 2>/dev/null; then echo "✅ App     : running on http://localhost:5173"; else echo "◻️  App     : not running on :5173"; fi
 
 test: build ## Placeholder test: just ensures build passes
 	@echo "✅ Build OK — real tests added Phase 2+."
+
+seed: ensure-mongo ## Seed Phase 2 auth users/tenants/roles
+	@pnpm --filter @omsking/backend run seed

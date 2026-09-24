@@ -4,22 +4,17 @@
 
 ---
 
-## ⚠️ Current Phase: 2 — Authentication + RBAC + Multi-Tenant (Next)
+## Current Phase: 4 — Warehouses + Inventory Engine
 
-Phase 0 and Phase 1 are complete. Dummy UI only — no live Shopify / Amazon / Myntra APIs yet.
+Phase 0–4 live. Catalog identity and inventory engine are on Mongo. Live channel APIs and orders (Phase 5) still later.
 
-- ✅ Phase 0 — Architecture & Foundation (docs, monorepo skeleton, health endpoint, GitHub)
+- ✅ Phase 0 — Architecture & Foundation
 - ✅ Phase 1 — UI Foundation & Design System
-  - Tailwind CSS 3 + semantic tokens + Light/Dark mode
-  - 18+ UI primitives (Button, Input, Table, Tabs, Modal, Drawer, KpiCard, etc.)
-  - Admin shell: sidebar, header, 23-module routes
-  - Vendor shell: Excel-style compact density
-  - 23 Admin pages + 6 Vendor pages + auth pages + Reports + `/ui/showcase`
-  - Dashboard KPIs/charts + mock fixtures (dummy data only)
-  - Demo role-switch login (Super Admin / Vendor)
-- ⏭️ **Next: Phase 2 backend** — live JWT APIs, tenant middleware, Mongo users. The **UI design** for Authentication, Platform vs Merchant, Users & Roles is in the admin app (dummy login).
+- ✅ Phase 2 — JWT login/refresh/logout, password reset, Mongo tenants/users/roles, permission middleware, tenant isolation
+- ✅ Phase 3 — Product CRUD, Master SKU, channel mapping, CSV import (Shopify → Myntra → Amazon)
+- ✅ **Phase 4** — Warehouses WH-001/WH-002, ATS by channel, stock in/out, reservation, immutable ledger, oversell lock (concurrent stress: 1 held / 9 rejected)
 
-Demo accounts (password `password123`) — listed in [docs/DEMO-LOGINS.md](./docs/DEMO-LOGINS.md), not on the login screen:
+Demo accounts (password `password123`) — [docs/DEMO-LOGINS.md](./docs/DEMO-LOGINS.md), not shown on the login screen:
 
 | Account | Email | Lands on |
 |---|---|---|
@@ -103,7 +98,7 @@ cp apps/backend/.env.example apps/backend/.env
 # edit MONGODB_URI, JWT secrets, ports...
 ```
 
-Admin (optional — Vite API proxy defaults to localhost:5000):
+Admin (optional — Vite API proxy defaults to localhost:5002):
 ```bash
 cp apps/admin/.env.example apps/admin/.env
 ```
@@ -115,7 +110,7 @@ pnpm dev
 ```
 
 This starts (via Turborepo, parallel):
-- **Backend** on `http://localhost:5000` — health check: `GET http://localhost:5000/api/v1`
+- **Backend** on `http://localhost:5002` — health: `GET http://localhost:5002/health` or `GET http://localhost:5002/api/v1`
 - **Admin** on `http://localhost:5173` — Vite + React dev server
 
 ### 4. Build for production
