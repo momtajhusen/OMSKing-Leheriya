@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../Institute"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"java.configuration.updateBuildConfiguration": "disabled"
+	}
+}
