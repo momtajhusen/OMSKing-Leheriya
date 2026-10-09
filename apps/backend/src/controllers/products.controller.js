@@ -5,6 +5,7 @@ const Inventory = require('../models/Inventory');
 const InventoryReservation = require('../models/InventoryReservation');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
+const { pageOf } = require('../utils/page');
 const { sessionTenantId } = require('../lib/tenantAccess');
 const { generateMasterCode, assertHsnCode } = require('../services/skuIdentity.service');
 const { mapProduct, mapMaster } = require('../services/catalogMapping.service');
@@ -48,7 +49,11 @@ async function listProducts(req, res) {
       || (p.brand || '').toLowerCase().includes(q)
     );
   }
-  return paginatedResponse(res, data, 1, data.length || 50, data.length, 'Products');
+  const paged = pageOf(data, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Products', {
+    active: data.filter((row) => row.status === 'active').length,
+    variants: data.reduce((sum, row) => sum + (Number(row.variantCount) || 0), 0),
+  });
 }
 
 async function createProduct(req, res) {

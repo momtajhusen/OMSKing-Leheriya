@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
@@ -18,7 +18,10 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import { isChannelManaged, packetIdOf, openMyntraDocument, pullMyntraOrders } from '../../lib/channelOrders';
 import { downloadCsv } from '../../lib/orderMetrics';
-import { apiError } from '../../lib/api';
+import api, { apiError } from '../../lib/api';
+import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
+import { CHANNEL_CATALOG, orderChannelLabel } from '../../constants/channelCatalog';
+import { withSubOrders } from '../../lib/orderSubOrders';
 
 const STATUS_TABS = [
   { id: 'Unfulfillable', label: 'Unfulfillable' },
@@ -31,9 +34,7 @@ const STATUS_TABS = [
 
 const CHANNEL_TABS = [
   { id: 'all', label: 'All channels' },
-  { id: 'Shopify', label: 'Shopify' },
-  { id: 'Amazon', label: 'Amazon' },
-  { id: 'Myntra', label: 'Myntra' },
+  ...CHANNEL_CATALOG.map((channel) => ({ id: orderChannelLabel(channel), label: orderChannelLabel(channel) })),
 ];
 
 const IN_TRANSIT = ['Dispatched', 'In transit'];
@@ -41,8 +42,10 @@ const IN_TRANSIT = ['Dispatched', 'In transit'];
 export default function OrdersPage() {
   const navigate = useNavigate();
   const { can } = usePermissions();
-  const orderList = useOrderStore((s) => s.orders);
-  const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+  const [orderList, setOrderList] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({ total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0 });
   const generateInvoice = useOrderStore((s) => s.generateInvoice);
   const markDelivered = useOrderStore((s) => s.markDelivered);
   const bookReversePickup = useOrderStore((s) => s.bookReversePickup);
@@ -56,33 +59,55 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const loading = !useOrderStore((s) => s.loaded);
-  const loadError = useOrderStore((s) => s.error);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
-    hydrateFromApi();
-  }, [hydrateFromApi]);
+    const timer = setTimeout(() => {
+      setQuery(searchQuery.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-  const filteredOrders = useMemo(() => orderList.filter((order) => {
-    const matchesTab = activeTab === 'all' || order.status === activeTab;
-    const matchesChannel = channelFilter === 'all' || order.channel === channelFilter;
-    const matchesPayment = paymentFilter === 'all'
-      || (paymentFilter === 'Partially Paid' ? order.paymentDetail === 'Partially paid' : order.paymentMode === paymentFilter);
-    const matchesSource = sourceFilter === 'all' || order.fulfilmentSource === sourceFilter;
-    const q = searchQuery.toLowerCase();
-    const matchesSearch = !q ||
-      order.id.toLowerCase().includes(q) ||
-      (order.subOrders || []).some((sub) => sub.id.toLowerCase().includes(q)) ||
-      order.customer.toLowerCase().includes(q);
-    return matchesTab && matchesChannel && matchesPayment && matchesSource && matchesSearch;
-  }), [orderList, activeTab, channelFilter, paymentFilter, sourceFilter, searchQuery]);
+  const loadOrders = async (nextPage = page) => {
+    setLoading(true);
+    try {
+      const { data } = await api.get('/orders', {
+        params: {
+          page: nextPage,
+          limit: PAGE_SIZE,
+          status: activeTab,
+          channel: channelFilter,
+          payment: paymentFilter,
+          source: sourceFilter,
+          q: query || undefined,
+        },
+      });
+      setOrderList((data.data || []).map((order) => withSubOrders(order)));
+      setTotal(data.meta?.total || 0);
+      if (data.meta?.counts) setCounts(data.meta.counts);
+      setLoadError('');
+    } catch (err) {
+      setLoadError(apiError(err, 'Could not load orders'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadOrders(page);
+  }, [page, activeTab, channelFilter, paymentFilter, sourceFilter, query]);
+
+  const filteredOrders = orderList;
 
   const kpiData = {
-    total: orderList.length,
-    newOrders: orderList.filter((o) => o.status === 'New').length,
-    packed: orderList.filter((o) => o.status === 'Packed').length,
-    readyToShip: orderList.filter((o) => o.status === 'Ready to Ship').length,
-    unfulfillable: orderList.filter((o) => o.status === 'Unfulfillable').length,
+    total: counts.total || 0,
+    newOrders: counts.New || 0,
+    packed: counts.Packed || 0,
+    readyToShip: counts['Ready to Ship'] || 0,
+    unfulfillable: counts.Unfulfillable || 0,
   };
 
   const syncOrders = async () => {
@@ -97,7 +122,7 @@ export default function OrdersPage() {
     } catch (err) {
       if (err?.response?.status !== 400) toast.error(apiError(err, 'Myntra order pull failed'));
     } finally {
-      await hydrateFromApi();
+      await loadOrders(page);
       setSyncing(false);
     }
   };
@@ -112,24 +137,38 @@ export default function OrdersPage() {
 
   const openOrder = (order) => navigate(`/orders/${encodeURIComponent(order.id)}`);
 
-  const exportOrders = () => {
-    if (!filteredOrders.length) {
-      toast.error('No orders in this view to export');
-      return;
+  const exportOrders = async () => {
+    try {
+      const { data } = await api.get('/orders', {
+        params: {
+          status: activeTab,
+          channel: channelFilter,
+          payment: paymentFilter,
+          source: sourceFilter,
+          q: query || undefined,
+        },
+      });
+      const rows = data.data || [];
+      if (!rows.length) {
+        toast.error('No orders in this view to export');
+        return;
+      }
+      downloadCsv(`orders-${new Date().toISOString().slice(0, 10)}.csv`,
+        ['Order', 'Channel', 'Status', 'Payment', 'Fulfil from', 'Items', 'Value', 'Date'],
+        rows.map((order) => [
+          order.id,
+          order.channel,
+          order.status,
+          order.paymentDetail ? `${order.paymentMode} (${order.paymentDetail})` : order.paymentMode,
+          order.fulfilmentSource,
+          (order.items || []).length,
+          order.total,
+          order.createdAt ? String(order.createdAt).slice(0, 10) : '',
+        ]));
+      toast.success(`Exported ${rows.length} orders`);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not export orders'));
     }
-    downloadCsv(`orders-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Order', 'Channel', 'Status', 'Payment', 'Fulfil from', 'Items', 'Value', 'Date'],
-      filteredOrders.map((order) => [
-        order.id,
-        order.channel,
-        order.status,
-        order.paymentDetail ? `${order.paymentMode} (${order.paymentDetail})` : order.paymentMode,
-        order.fulfilmentSource,
-        (order.items || []).length,
-        order.total,
-        order.createdAt ? String(order.createdAt).slice(0, 10) : '',
-      ]));
-    toast.success(`Exported ${filteredOrders.length} orders`);
   };
 
   if (loading) return <PageLoader label="Loading orders..." />;
@@ -158,11 +197,11 @@ export default function OrdersPage() {
       )}
 
       <div className="kpi-grid">
-        <KpiCard label="Total Orders" value={kpiData.total} icon={ShoppingCart} tone="blue" onClick={() => setActiveTab('all')} />
-        <KpiCard label="Unfulfillable" value={kpiData.unfulfillable} icon={Filter} tone="rose" onClick={() => setActiveTab('Unfulfillable')} />
-        <KpiCard label="New" value={kpiData.newOrders} icon={Filter} tone="emerald" onClick={() => setActiveTab('New')} />
-        <KpiCard label="Packed" value={kpiData.packed} icon={Filter} tone="sky" onClick={() => setActiveTab('Packed')} />
-        <KpiCard label="Ready To Ship" value={kpiData.readyToShip} icon={Filter} tone="amber" onClick={() => setActiveTab('Ready to Ship')} />
+        <KpiCard label="Total Orders" value={kpiData.total} icon={ShoppingCart} tone="blue" onClick={() => { setActiveTab('all'); setPage(1); }} />
+        <KpiCard label="Unfulfillable" value={kpiData.unfulfillable} icon={Filter} tone="rose" onClick={() => { setActiveTab('Unfulfillable'); setPage(1); }} />
+        <KpiCard label="New" value={kpiData.newOrders} icon={Filter} tone="emerald" onClick={() => { setActiveTab('New'); setPage(1); }} />
+        <KpiCard label="Packed" value={kpiData.packed} icon={Filter} tone="sky" onClick={() => { setActiveTab('Packed'); setPage(1); }} />
+        <KpiCard label="Ready To Ship" value={kpiData.readyToShip} icon={Filter} tone="amber" onClick={() => { setActiveTab('Ready to Ship'); setPage(1); }} />
       </div>
 
       <div className="flex items-center gap-2 flex-wrap overflow-x-auto pb-1">
@@ -171,7 +210,7 @@ export default function OrdersPage() {
             key={tab.id}
             variant={channelFilter === tab.id ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setChannelFilter(tab.id)}
+            onClick={() => { setChannelFilter(tab.id); setPage(1); }}
             className="text-xs whitespace-nowrap"
           >
             {tab.label}
@@ -185,7 +224,7 @@ export default function OrdersPage() {
             key={tab.id}
             variant={activeTab === tab.id ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => { setActiveTab(tab.id); setPage(1); }}
             className="text-xs whitespace-nowrap"
           >
             {tab.label}
@@ -206,11 +245,9 @@ export default function OrdersPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <Select className="w-full sm:w-44" value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)}>
+            <Select className="w-full sm:w-44" value={channelFilter} onChange={(e) => { setChannelFilter(e.target.value); setPage(1); }}>
               <option value="all">All Channels</option>
-              <option value="Shopify">Shopify</option>
-              <option value="Amazon">Amazon</option>
-              <option value="Myntra">Myntra</option>
+              {CHANNEL_CATALOG.map((channel) => <option key={channel.id} value={orderChannelLabel(channel)}>{orderChannelLabel(channel)}</option>)}
             </Select>
             <Button variant="outline" className="w-full sm:w-auto" onClick={() => setFiltersOpen(true)}>
               <Filter className="w-4 h-4 mr-2" />
@@ -222,7 +259,7 @@ export default function OrdersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Orders ({filteredOrders.length})</CardTitle>
+          <CardTitle>Orders ({total})</CardTitle>
         </CardHeader>
         <CardContent>
           {filteredOrders.length === 0 ? (
@@ -230,7 +267,7 @@ export default function OrdersPage() {
               icon={<ShoppingCart className="h-7 w-7 text-muted-foreground" />}
               title="No orders found"
               description="Change the tab, search, or filters to see orders."
-              action={<Button variant="outline" onClick={() => { setActiveTab('all'); setSearchQuery(''); setChannelFilter('all'); }}>Reset</Button>}
+              action={<Button variant="outline" onClick={() => { setActiveTab('all'); setSearchQuery(''); setChannelFilter('all'); setPage(1); }}>Reset</Button>}
             />
           ) : (
             <Table>
@@ -351,6 +388,7 @@ export default function OrdersPage() {
               </TableBody>
             </Table>
           )}
+          <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
         </CardContent>
       </Card>
 
@@ -369,7 +407,7 @@ export default function OrdersPage() {
         <div className="space-y-3">
           <div>
             <label className="text-sm font-medium">Payment mode</label>
-            <Select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+            <Select value={paymentFilter} onChange={(e) => { setPaymentFilter(e.target.value); setPage(1); }}>
               <option value="all">All</option>
               <option value="COD">COD</option>
               <option value="Prepaid">Prepaid</option>
@@ -378,7 +416,7 @@ export default function OrdersPage() {
           </div>
           <div>
             <label className="text-sm font-medium">Fulfil from</label>
-            <Select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+            <Select value={sourceFilter} onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}>
               <option value="all">All</option>
               <option value="Offline">Offline</option>
               <option value="Virtual">Virtual</option>

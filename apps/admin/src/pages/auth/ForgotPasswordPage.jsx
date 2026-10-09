@@ -10,6 +10,7 @@ import { ArrowLeft } from 'lucide-react';
 import BrandLogo from '../../components/brand/BrandLogo';
 import api, { apiFormError } from '../../lib/api';
 import { forgotPasswordSchema } from '../../lib/validation';
+import CompanyChoice, { companiesFromError } from '../../components/auth/CompanyChoice';
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ export default function ForgotPasswordPage() {
   const [emailSentTo, setEmailSentTo] = useState('');
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [companies, setCompanies] = useState([]);
   const {
     register,
     handleSubmit,
@@ -24,7 +26,7 @@ export default function ForgotPasswordPage() {
     formState: { errors },
   } = useForm({
     resolver: zodResolver(forgotPasswordSchema),
-    defaultValues: { email: '' },
+    defaultValues: { email: '', workspace: '' },
   });
 
   const onSubmit = async (data) => {
@@ -36,6 +38,12 @@ export default function ForgotPasswordPage() {
       setSubmitted(true);
     } catch (err) {
       const parsed = apiFormError(err, 'Could not send the OTP.');
+      const choices = companiesFromError(err);
+      if (parsed.status === 409 && choices.length) {
+        setCompanies(choices);
+        setFormError('This email is on more than one company. Choose which one.');
+        return;
+      }
       if (parsed.fields.email) setError('email', { type: 'server', message: parsed.fields.email });
       setFormError(parsed.message === 'Validation failed' ? 'Enter a valid email address.' : parsed.message);
     } finally {
@@ -88,6 +96,7 @@ export default function ForgotPasswordPage() {
                   error={errors.email?.message}
                 />
               </div>
+              <CompanyChoice companies={companies} register={register} error={errors.workspace?.message} />
               <Button type="submit" disabled={submitting} className="w-full">
                 {submitting ? 'Sending…' : 'Send OTP to Gmail'}
               </Button>

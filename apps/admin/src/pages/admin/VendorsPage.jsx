@@ -34,11 +34,11 @@ function passwordProblem(password, confirm) {
 
 export default function VendorsPage() {
   const navigate = useNavigate();
-  const { effectiveRole } = useAuth();
+  const { effectiveRole, user } = useAuth();
   const canSetPassword = effectiveRole === ROLES.SUPER_ADMIN;
   const [activeTab, setActiveTab] = useState('all');
   const allVendors = useVendorStore((s) => s.vendors);
-  const autoAssign = useVendorStore((s) => s.autoAssign);
+  const autoAssign = useVendorStore((s) => Boolean(user?.tenantId && s.autoAssignByTenant?.[user.tenantId]));
   const setAutoAssign = useVendorStore((s) => s.setAutoAssign);
   const saveVendorRecord = useVendorStore((s) => s.saveVendor);
   const setVendorStatus = useVendorStore((s) => s.setStatus);
@@ -543,8 +543,9 @@ export default function VendorsPage() {
             <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           </div>
           <div>
-            <label className="text-sm font-medium">Telegram group</label>
-            <Input value={form.telegramGroup} onChange={(e) => setForm({ ...form, telegramGroup: e.target.value })} placeholder="@vendor_group" />
+            <label className="text-sm font-medium">Telegram group chat id</label>
+            <Input value={form.telegramGroup} onChange={(e) => setForm({ ...form, telegramGroup: e.target.value })} placeholder="-1001234567890 or @vendor_group" />
+            <p className="text-xs text-muted-foreground">The bot must already be in this group. Vendor assign sends the order id, SKU, qty, and ship-by date here.</p>
           </div>
           {canSetPassword && !confirmDelete && (
             <div className="space-y-3 rounded-xl border border-[hsl(var(--color-border-premium))] p-3">

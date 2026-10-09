@@ -1,7 +1,9 @@
 const mongoose = require('mongoose');
 const { tenantPlugin } = require('../plugins/tenantPlugin');
 
-const CHANNELS = ['shopify', 'amazon', 'myntra'];
+const { channelIds } = require('../channels/registry');
+
+const CHANNELS = channelIds();
 
 const webhookEventSchema = new mongoose.Schema({
   tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },

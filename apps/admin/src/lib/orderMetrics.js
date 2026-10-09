@@ -1,4 +1,6 @@
-export const CHANNELS = ['Shopify', 'Amazon', 'Myntra'];
+import { CHANNEL_CATALOG, orderChannelLabel } from '../constants/channelCatalog';
+
+export const CHANNELS = CHANNEL_CATALOG.map((row) => orderChannelLabel(row));
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -44,14 +46,15 @@ export function ordersTrend(orders, days = 14) {
   const index = {};
   for (let i = days - 1; i >= 0; i -= 1) {
     const key = dayKey(today.getTime() - i * DAY);
-    const row = { date: key.slice(5), shopify: 0, amazon: 0, myntra: 0 };
+    const row = { date: key.slice(5) };
+    CHANNEL_CATALOG.forEach((channel) => { row[channel.id] = 0; });
     index[key] = row;
     rows.push(row);
   }
   orders.forEach((order) => {
     const row = index[dayKey(order.createdAt)];
     const field = String(order.channel || '').toLowerCase();
-    if (row && field in row) row[field] += 1;
+    if (row && Object.prototype.hasOwnProperty.call(row, field)) row[field] += 1;
   });
   return rows;
 }

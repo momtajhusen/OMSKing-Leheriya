@@ -11,6 +11,7 @@ import { formatINR, statusBadgeVariant } from '../../utils/format';
 import {
   netSales, salesByChannel, statusCounts, ordersTrend, topSkus, isCancelled, relativeTime,
 } from '../../lib/orderMetrics';
+import { CHANNEL_CATALOG } from '../../constants/channelCatalog';
 import KpiCard from '../../components/ui/KpiCard';
 import Button from '../../components/ui/Button';
 import PageLoader from '../../components/ui/PageLoader';
@@ -52,8 +53,6 @@ export default function DashboardPage() {
       returns: orders.filter((order) => order.reversePickup?.returnId).length,
       missingInvoice: live.filter((order) => ['Dispatched', 'Delivered'].includes(order.status) && !order.invoiceNo).length,
       revenue: netSales(orders),
-      amazon: channels.find((row) => row.channel === 'Amazon').revenue,
-      myntra: channels.find((row) => row.channel === 'Myntra').revenue,
       channels,
       statuses: statusCounts(orders),
       trend: ordersTrend(orders, 14),
@@ -117,8 +116,9 @@ export default function DashboardPage() {
         <KpiCard label="Returns" value={stats.returns} icon={RotateCcw} tone="rose" onClick={() => navigate('/returns')} />
         <KpiCard label="Shipped, no invoice" value={stats.missingInvoice} icon={AlertTriangle} tone="orange" onClick={() => navigate('/gst-invoice')} />
         <KpiCard label="Net Sales" value={formatINR(stats.revenue)} icon={TrendingUp} tone="violet" onClick={() => navigate('/reports')} />
-        <KpiCard label="Amazon" value={formatINR(stats.amazon)} icon={Package} tone="amber" onClick={() => navigate('/reports')} />
-        <KpiCard label="Myntra" value={formatINR(stats.myntra)} icon={Package} tone="rose" onClick={() => navigate('/reports')} />
+        {stats.channels.map((row) => (
+          <KpiCard key={row.channel} label={row.channel} value={formatINR(row.revenue)} icon={Package} onClick={() => navigate('/orders')} />
+        ))}
         <KpiCard label="Low Stock" value={lowStock.length} icon={Clock} tone="slate" onClick={() => navigate('/inventory')} />
       </div>
 
@@ -139,9 +139,15 @@ export default function DashboardPage() {
                     <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                     <Tooltip />
                     <Legend />
-                    <Line type="monotone" dataKey="shopify" stroke="#7C3AED" name="Shopify" />
-                    <Line type="monotone" dataKey="amazon" stroke="#D97706" name="Amazon" />
-                    <Line type="monotone" dataKey="myntra" stroke="#2563EB" name="Myntra" />
+                    {CHANNEL_CATALOG.map((channel, index) => (
+                      <Line
+                        key={channel.id}
+                        type="monotone"
+                        dataKey={channel.id}
+                        name={channel.name}
+                        stroke={['#7C3AED', '#D97706', '#2563EB', '#059669', '#DB2777', '#0891B2', '#CA8A04'][index % 7]}
+                      />
+                    ))}
                   </LineChart>
                 </ResponsiveContainer>
               </CardContent>

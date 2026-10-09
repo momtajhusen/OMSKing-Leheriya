@@ -7,6 +7,9 @@ const { ensureDefaultWarehouses } = require('./warehouse.service');
 const shopify = require('../adapters/shopify');
 const amazon = require('../adapters/amazon');
 const myntra = require('../adapters/myntra');
+const { adapterFor } = require('../adapters');
+const { channelById } = require('../channels/registry');
+const partner = require('../adapters/partner');
 
 const MYNTRA_CATALOG_MESSAGE = 'Myntra catalog was not pulled. Merchant Id and Secret Key are missing, so the product list API was not called.';
 
@@ -18,6 +21,11 @@ function blockMessage(channel, creds = {}) {
     return 'Amazon catalog was not pulled. Seller ID, refresh token, and LWA client id + secret are required before the listings API is called.';
   }
   if (channel === 'myntra' && !(creds.merchantId && creds.secretKey)) return MYNTRA_CATALOG_MESSAGE;
+  const meta = channelById(channel);
+  if (meta?.kind === 'partner' && !(partner.baseOf(creds) && partner.tokenOf(creds))) {
+    return `${meta.name} catalog was not pulled. API host and token are required before the products API is called.`;
+  }
+  if (!meta) return 'Unknown channel';
   return '';
 }
 
@@ -93,6 +101,11 @@ async function pullChannel(tenantId, userId, channel, deps = {}) {
   }
   if (name === 'amazon') {
     const fetched = await (deps.amazonPull || amazon.pullCatalog)(creds);
+    return ingestPulledCatalog(tenantId, userId, name, fetched);
+  }
+  if (channelById(name)?.kind === 'partner') {
+    const adapter = adapterFor(name);
+    const fetched = await (deps.partnerPull || adapter.pullCatalog)(creds);
     return ingestPulledCatalog(tenantId, userId, name, fetched);
   }
   try {

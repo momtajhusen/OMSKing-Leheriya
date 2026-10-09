@@ -16,6 +16,8 @@ const PlatformAuthPage = lazy(() => import('../pages/platform/PlatformAuthPage')
 const TenantMgmtPage = lazy(() => import('../pages/admin/TenantMgmtPage'));
 const PlatformOpsPage = lazy(() => import('../pages/platform/PlatformOpsPage'));
 const PlatformStaffPage = lazy(() => import('../pages/platform/PlatformStaffPage'));
+const DemoRequestsPage = lazy(() => import('../pages/platform/DemoRequestsPage'));
+const PlatformPlansPage = lazy(() => import('../pages/platform/PlatformPlansPage'));
 const OrderDetailPage = lazy(() => import('../pages/admin/OrderDetailPage'));
 
 // Route definitions - single source of truth for sidebar and router
@@ -45,6 +47,11 @@ export const ROUTE_DEFS = {
       path: '/contact',
       label: 'Contact',
       component: lazy(() => import('../pages/public/ContactPage')),
+    },
+    {
+      path: '/demo',
+      label: 'Request a demo',
+      component: lazy(() => import('../pages/public/DemoRequestPage')),
     },
   ],
   auth: [
@@ -401,10 +408,18 @@ const router = createBrowserRouter([
         ),
       },
       {
+        path: 'demo-requests',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <DemoRequestsPage />
+          </Suspense>
+        ),
+      },
+      {
         path: 'plans',
         element: (
           <Suspense fallback={<LoadingFallback />}>
-            <PlatformOpsPage />
+            <PlatformPlansPage />
           </Suspense>
         ),
       },

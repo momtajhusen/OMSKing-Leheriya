@@ -321,6 +321,10 @@ function createMyntraClient(creds, { saveTokens, request = rawRequest, retryDela
     return results;
   }
 
+  async function readyToDispatch(body) {
+    return call('PUT', '/partner/v4/order/readyToDispatch', { body });
+  }
+
   async function shippingLabel(packetId) {
     return call('GET', `/partner/v4/packet/${encodeURIComponent(packetId)}/shippingLabel/`, { binary: true });
   }
@@ -336,6 +340,7 @@ function createMyntraClient(creds, { saveTokens, request = rawRequest, retryDela
     getOrder,
     searchInventory,
     updateInventory,
+    readyToDispatch,
     shippingLabel,
     invoice,
   };

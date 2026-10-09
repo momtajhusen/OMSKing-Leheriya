@@ -8,8 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '.
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import { Plug, RefreshCw, Settings } from 'lucide-react';
-
-const LIVE = new Set(['shopify', 'amazon', 'myntra']);
+import Pagination, { useClientPage } from '../../components/ui/Pagination';
 
 function when(value) {
   if (!value) return 'Never';
@@ -27,6 +26,8 @@ export default function IntegrationManagementPage() {
   const [queueEngine, setQueueEngine] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyChannel, setBusyChannel] = useState('');
+  const [retrying, setRetrying] = useState('');
+  const jobPage = useClientPage(jobs);
 
   const load = async () => {
     const [channelRes, jobRes] = await Promise.all([
@@ -57,11 +58,20 @@ export default function IntegrationManagementPage() {
       };
     });
 
-  const syncNow = async (integration) => {
-    if (!LIVE.has(integration.id)) {
-      toast.error('Sync queue is available for Shopify, Amazon, and Myntra');
-      return;
+  const retryJob = async (job) => {
+    setRetrying(job.id);
+    try {
+      await api.post(`/integrations/jobs/${job.id}/retry`);
+      toast.success('Same job queued again');
+      await load();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not retry the job'));
+    } finally {
+      setRetrying('');
     }
+  };
+
+  const syncNow = async (integration) => {
     setBusyChannel(integration.id);
     try {
       await api.post('/integrations/jobs', { channel: integration.id, jobType: 'orders_pull' });
@@ -151,7 +161,7 @@ export default function IntegrationManagementPage() {
         <CardHeader>
           <CardTitle>Job queue</CardTitle>
           <CardDescription>
-            orders_pull, inventory_push, and webhook_dispatch on {queueEngine === 'bullmq' ? 'Redis / BullMQ' : 'the Mongo poller'}. A restarted worker retries a job once. The side effect still runs once.
+            orders_pull, inventory_push, and webhook_dispatch on {queueEngine === 'bullmq' ? 'Redis / BullMQ' : 'the Mongo poller'}. Retry uses the same job. A second stock reserve is not created.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -166,10 +176,11 @@ export default function IntegrationManagementPage() {
                   <TableHead>Status</TableHead>
                   <TableHead>Retries</TableHead>
                   <TableHead>Summary</TableHead>
+                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {jobs.map((job) => (
+                {jobPage.rows.map((job) => (
                   <TableRow key={job.id}>
                     <TableCell className="font-medium">{job.channel}</TableCell>
                     <TableCell className="font-mono text-xs">{job.jobType}</TableCell>
@@ -180,11 +191,19 @@ export default function IntegrationManagementPage() {
                     </TableCell>
                     <TableCell>{job.retriesCount}</TableCell>
                     <TableCell className="text-sm">{job.lastError || job.shortSummary || '—'}</TableCell>
+                    <TableCell>
+                      {job.status === 'failed' && (
+                        <Button size="sm" variant="outline" disabled={retrying === job.id} onClick={() => retryJob(job)}>
+                          {retrying === job.id ? 'Retrying…' : 'Retry'}
+                        </Button>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           )}
+          <Pagination page={jobPage.page} total={jobPage.total} limit={jobPage.limit} onPage={jobPage.setPage} />
         </CardContent>
       </Card>
     </div>

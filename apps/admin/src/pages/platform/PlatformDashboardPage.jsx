@@ -70,7 +70,7 @@ export default function PlatformDashboardPage() {
         <VendorStat label="Active tenants" value={active} icon={Building2} tone="emerald" />
         <VendorStat label="Trials" value={trial} icon={Users} tone="blue" />
         <VendorStat label="Suspended" value={suspended} icon={Ban} tone="rose" />
-        <VendorStat label="MRR" value={formatINR(mrr)} icon={CreditCard} tone="amber" />
+        <VendorStat label="Est. this month" value={formatINR(mrr)} icon={CreditCard} tone="amber" />
       </div>
 
       <div>

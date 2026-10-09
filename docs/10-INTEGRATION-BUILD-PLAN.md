@@ -328,7 +328,7 @@ Leheriya tenant, replica set, `/channels` par real keys.
 **Hafte**
 
 | Week | Phase |
-|---|---|
+|---|---|           
 | 1 | Phase 1 |
 | 2 | Phase 2 |
 | 3 | Phase 3 Shopify + teen tests |

@@ -246,6 +246,80 @@ async function pullOrders(creds, { request = httpsCall } = {}) {
   return orderRows(body.payload?.Orders || body.Orders || []);
 }
 
+async function pushInventory(creds, { sku, quantity, request = httpsCall } = {}) {
+  assertAmazonCreds(creds);
+  const sellerSku = String(sku || '').trim();
+  if (!sellerSku) {
+    const err = new Error('Amazon stock was not pushed. The seller SKU is missing.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const token = await accessToken(creds, request);
+  const marketplaceId = apiModeOf(creds) === 'sandbox'
+    ? 'ATVPDKIKX0DER'
+    : String(creds.marketplaceId || 'A21TJRUUN4KGV').trim();
+  const qty = Math.max(0, Math.floor(Number(quantity) || 0));
+  const res = await request(
+    'PATCH',
+    `${amazonHost(creds)}/listings/2021-08-01/items/${encodeURIComponent(String(creds.sellerId).trim())}/${encodeURIComponent(sellerSku)}?marketplaceIds=${encodeURIComponent(marketplaceId)}`,
+    {
+      headers: {
+        'x-amz-access-token': token,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: {
+        productType: 'PRODUCT',
+        patches: [{
+          op: 'replace',
+          path: '/attributes/fulfillment_availability',
+          value: [{ fulfillment_channel_code: 'DEFAULT', quantity: qty }],
+        }],
+      },
+    },
+  );
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Amazon inventory update returned ${res.status}. ${lwaDetail(res.text) || 'Quantity was not pushed.'}`);
+    err.statusCode = res.status === 400 || res.status === 401 || res.status === 403 ? 400 : 502;
+    err.terminal = err.statusCode === 400;
+    throw err;
+  }
+  return { sku: sellerSku, quantity: qty };
+}
+
+async function confirmShipment(creds, { amazonOrderId, request = httpsCall } = {}) {
+  assertAmazonCreds(creds);
+  const token = await accessToken(creds, request);
+  const marketplaceId = apiModeOf(creds) === 'sandbox'
+    ? 'ATVPDKIKX0DER'
+    : String(creds.marketplaceId || 'A21TJRUUN4KGV').trim();
+  const res = await request(
+    'POST',
+    `${amazonHost(creds)}/easyShip/2022-03-23/package`,
+    {
+      headers: {
+        'x-amz-access-token': token,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: {
+        amazonOrderId: String(amazonOrderId || ''),
+        marketplaceId,
+      },
+    },
+  );
+  const body = (() => { try { return JSON.parse(res.text || '{}'); } catch { return {}; } })();
+  const trackingNumber = String(body.trackingDetails?.trackingId || body.trackingId || '').trim();
+  if (res.status < 200 || res.status >= 300 || !trackingNumber) {
+    const err = new Error(`Amazon ship API returned ${res.status}. ${lwaDetail(res.text) || 'No marketplace tracking id was returned.'}`);
+    err.statusCode = res.status === 400 || res.status === 401 || res.status === 403 ? 400 : 502;
+    err.terminal = err.statusCode === 400;
+    throw err;
+  }
+  return { trackingNumber, courier: 'amazon' };
+}
+
 async function probeConnection(creds, { request = httpsCall } = {}) {
   assertAmazonCreds(creds);
   const mode = apiModeOf(creds);
@@ -284,5 +358,6 @@ module.exports = {
   pullProducts: (creds, opts) => pullCatalog(creds, opts).then((result) => result.rows),
   pullOrders,
   probeConnection,
-  pushInventory: async () => { throw later('Amazon inventory push starts in Phase 4'); },
+  pushInventory,
+  confirmShipment,
 };

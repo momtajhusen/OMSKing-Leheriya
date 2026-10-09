@@ -1,4 +1,5 @@
 const { successResponse, paginatedResponse } = require('../utils/response');
+const { pageOf } = require('../utils/page');
 const { HttpError } = require('../utils/httpError');
 const { merchantTenant } = require('./products.controller');
 const {
@@ -27,7 +28,15 @@ async function list(req, res) {
     return acc;
   }, { totalStock: 0, reserved: 0, available: 0, stockValue: 0, low: 0 });
   const inventoryAuthority = await getInventoryAuthority(tenantId);
-  return successResponse(res, { rows, kpis, inventoryAuthority }, 'Inventory');
+  const paged = pageOf(rows, req.query);
+  return successResponse(res, { rows: paged.rows, kpis, inventoryAuthority }, 'Inventory', 200, {
+    page: paged.page,
+    limit: paged.limit,
+    total: paged.total,
+    totalPages: Math.ceil(paged.total / paged.limit) || 1,
+    hasNext: paged.page * paged.limit < paged.total,
+    hasPrev: paged.page > 1,
+  });
 }
 
 async function ats(req, res) {
@@ -42,9 +51,10 @@ async function ledger(req, res) {
   const data = await listLedger(tenantId, {
     masterSkuId: req.query.masterSkuId,
     warehouseId: req.query.warehouseId,
-    limit: req.query.limit,
+    limit: 300,
   });
-  return paginatedResponse(res, data, 1, data.length || 50, data.length, 'Inventory ledger');
+  const paged = pageOf(data, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Inventory ledger');
 }
 
 async function alerts(req, res) {

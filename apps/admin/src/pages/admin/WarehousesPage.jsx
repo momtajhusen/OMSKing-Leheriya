@@ -81,7 +81,7 @@ export default function WarehousesPage() {
         <div>
           <h1 className="text-3xl font-bold mb-2">Warehouses</h1>
           <p className="text-muted-foreground">
-            WH-001 is physical (Shopify + Amazon + Myntra). WH-002 is virtual (Shopify only). Inventory authority: {authority === 'oms' ? 'OMS is master' : 'Shopify is master'}.
+            WH-001 is physical and sells on every channel. WH-002 is virtual and sells on Shopify only. Inventory authority: {authority === 'oms' ? 'OMS is master' : 'Shopify is master'}.
           </p>
         </div>
         <div className="flex gap-2">
@@ -99,7 +99,7 @@ export default function WarehousesPage() {
             <div>
               <p className="font-medium">Channel visibility</p>
               <p className="text-sm text-muted-foreground">
-                Offline stock is sellable on all three channels. Virtual stock is Shopify only — Amazon and Myntra never see WH-002.
+                Offline stock is sellable on every channel. Virtual stock is Shopify only. Flipkart, Meesho, AJIO, Nykaa, Amazon and Myntra never see WH-002.
               </p>
             </div>
           </div>

@@ -35,6 +35,20 @@ const tenantSchema = new mongoose.Schema({
         gstRate: { type: Number, default: null },
       }],
     },
+    notifications: {
+      botTokenEnc: { type: String, default: '' },
+      ownerChatId: { type: String, default: '' },
+      events: { type: mongoose.Schema.Types.Mixed, default: undefined },
+      whatsapp: {
+        phoneNumberId: { type: String, default: '' },
+        tokenEnc: { type: String, default: '' },
+        to: { type: String, default: '' },
+      },
+    },
+    mail: {
+      gmailUser: { type: String, default: '' },
+      gmailAppPasswordEnc: { type: String, default: '' },
+    },
   },
   onboardedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });

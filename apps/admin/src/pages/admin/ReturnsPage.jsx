@@ -10,6 +10,8 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import { RotateCcw, Package, CheckCircle, XCircle, RefreshCw, AlertTriangle } from 'lucide-react';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
+import { CHANNEL_CATALOG, orderChannelLabel } from '../../constants/channelCatalog';
+import Pagination, { useClientPage } from '../../components/ui/Pagination';
 
 export default function ReturnsPage() {
   const [activeTab, setActiveTab] = useState('all');
@@ -23,12 +25,14 @@ export default function ReturnsPage() {
   const markReceived = useReturnsStore((s) => s.markReceived);
   const printReverseLabel = useReturnsStore((s) => s.printReverseLabel);
   const syncFromOrders = useReturnsStore((s) => s.syncFromOrders);
+  const loadReturns = useReturnsStore((s) => s.loadReturns);
   const orders = useOrderStore((s) => s.orders);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
 
   useEffect(() => {
     hydrateFromApi();
-  }, [hydrateFromApi]);
+    loadReturns();
+  }, [hydrateFromApi, loadReturns]);
 
   useEffect(() => {
     syncFromOrders(orders);
@@ -48,20 +52,21 @@ export default function ReturnsPage() {
       toast.error(next.error);
       return;
     }
-    toast.success(
-      dest === 'None'
-        ? `Return ${returnId} approved — no restock`
-        : `Return ${returnId} approved. Qty added to Offline WH-001.`
-    );
+    toast.success(`Return ${returnId} approved. Print the label. Stock updates when the parcel is received.`);
   };
 
-  const confirmReceived = () => {
+  const confirmReceived = async () => {
     if (!receiveFor) return;
-    markReceived(receiveFor.id, { warehouse: receiveWarehouse, action: receiveAction });
+    const destination = receiveAction === 'restock' ? (selectedReturns[receiveFor.id] || receiveFor.restockDestination || 'All') : 'None';
+    const next = await markReceived(receiveFor.id, { warehouse: receiveWarehouse, action: receiveAction, destination });
+    if (next?.error) {
+      toast.error(next.error);
+      return;
+    }
     toast.success(
-      receiveAction === 'none'
-        ? `${receiveFor.id} received — no restock (hold/dispose)`
-        : `${receiveFor.id} received — inventory ledger +${receiveAction === 'restock' ? 'qty' : 'QC hold'} at ${receiveWarehouse}`
+      receiveAction === 'restock' && destination !== 'None'
+        ? `${receiveFor.id} received. WH-001 stock and ${destination} ATS updated.`
+        : `${receiveFor.id} received. Stock was not added.`
     );
     setReceiveFor(null);
   };
@@ -76,6 +81,7 @@ export default function ReturnsPage() {
   const filteredReturns = useMemo(() => returns.filter((ret) => (
     activeTab === 'all' || ret.status.toLowerCase() === activeTab
   )), [returns, activeTab]);
+  const paged = useClientPage(filteredReturns);
 
   const kpiData = {
     total: returns.length,
@@ -92,7 +98,7 @@ export default function ReturnsPage() {
           <h1 className="text-3xl font-bold mb-2">Returns</h1>
           <p className="text-muted-foreground">Customer returns and reverse pickups. Approve adds qty to Offline WH-001 and the same ATS goes to Amazon and Myntra.</p>
         </div>
-        <Button variant="outline" onClick={async () => { await hydrateFromApi(); toast.success('Returns refreshed from orders'); }}>
+        <Button variant="outline" onClick={async () => { await hydrateFromApi(); await loadReturns(); toast.success('Returns refreshed'); }}>
           <RefreshCw className="w-4 h-4 mr-2" />
           Sync Returns
         </Button>
@@ -168,8 +174,8 @@ export default function ReturnsPage() {
             <div>
               <p className="font-medium">Restock Destination Configuration</p>
               <p className="text-sm text-muted-foreground">
-                Configure where returned items should be restocked. Options include all warehouses, 
-                specific channels (Shopify Offline, Amazon, Myntra), or no restock.
+                Returned units go back to Offline WH-001. All channels raises Shopify, Amazon and Myntra.
+                Shopify, Amazon or Myntra raises only that channel. None leaves stock unchanged.
               </p>
             </div>
           </div>
@@ -205,7 +211,7 @@ export default function ReturnsPage() {
                   </TableCell>
                 </TableRow>
               )}
-              {filteredReturns.map((ret) => {
+              {paged.rows.map((ret) => {
                 return (
                   <TableRow key={ret.id}>
                     <TableCell className="font-medium">
@@ -226,7 +232,7 @@ export default function ReturnsPage() {
                     <TableCell>
                       {ret.status === 'Pending' ? (
                         <div className="space-y-1">
-                          {['All', 'Shopify (Offline)', 'Amazon', 'Myntra', 'None'].map((dest) => (
+                          {['All', ...CHANNEL_CATALOG.map((channel) => (channel.id === 'shopify' ? 'Shopify (Offline)' : orderChannelLabel(channel))), 'None'].map((dest) => (
                             <label key={dest} className="flex items-center gap-2 text-sm">
                               <input
                                 type="radio"
@@ -304,6 +310,7 @@ export default function ReturnsPage() {
               })}
             </TableBody>
           </Table>
+          <Pagination page={paged.page} total={paged.total} limit={paged.limit} onPage={paged.setPage} />
         </CardContent>
       </Card>
 
@@ -316,21 +323,21 @@ export default function ReturnsPage() {
               <CheckCircle className="w-4 h-4 text-green-600 mt-0.5" />
               <div>
                 <p className="font-medium">All</p>
-                <p className="text-muted-foreground">Add qty to Offline WH-001. Amazon and Myntra ATS use the same warehouse, so both marketplaces get the stock.</p>
+                <p className="text-muted-foreground">Add the unit to shared offline stock. Shopify, Amazon and Myntra ATS all rise.</p>
               </div>
             </div>
             <div className="flex items-start gap-2">
               <CheckCircle className="w-4 h-4 text-green-600 mt-0.5" />
               <div>
                 <p className="font-medium">Shopify (Offline)</p>
-                <p className="text-muted-foreground">Restock to Shopify offline warehouse only</p>
+                <p className="text-muted-foreground">Add the unit to Offline WH-001 for Shopify only. Amazon and Myntra stay the same.</p>
               </div>
             </div>
             <div className="flex items-start gap-2">
               <CheckCircle className="w-4 h-4 text-green-600 mt-0.5" />
               <div>
                 <p className="font-medium">Amazon/Myntra</p>
-                <p className="text-muted-foreground">Restock to marketplace warehouses</p>
+                <p className="text-muted-foreground">Add the unit for that marketplace only. The other channels do not receive it.</p>
               </div>
             </div>
             <div className="flex items-start gap-2">
@@ -348,7 +355,7 @@ export default function ReturnsPage() {
         open={Boolean(receiveFor)}
         onOpenChange={(open) => { if (!open) setReceiveFor(null); }}
         title="Received — inventory"
-        description="Spec: on Received, choose restock destination so ATS updates. Dummy write for now."
+        description="Received stock goes to Offline WH-001. A single channel raises only that channel's ATS."
         footer={
           <>
             <Button variant="outline" onClick={() => setReceiveFor(null)}>Cancel</Button>
@@ -359,17 +366,7 @@ export default function ReturnsPage() {
         {receiveFor && (
           <div className="space-y-3 text-sm">
             <p><span className="text-muted-foreground">Return</span> {receiveFor.id} · order {receiveFor.orderId}</p>
-            <label className="block">
-              <span className="text-muted-foreground">Warehouse</span>
-              <select
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2"
-                value={receiveWarehouse}
-                onChange={(e) => setReceiveWarehouse(e.target.value)}
-              >
-                <option value="WH-001">WH-001 physical (Shopify A + Amazon + Myntra)</option>
-                <option value="WH-002">WH-002 virtual (Shopify B only)</option>
-              </select>
-            </label>
+            <p className="text-muted-foreground">Warehouse: Offline WH-001. Virtual WH-002 is not a restock destination.</p>
             <label className="block">
               <span className="text-muted-foreground">Action</span>
               <select

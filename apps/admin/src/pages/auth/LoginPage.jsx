@@ -12,12 +12,14 @@ import { useAuth } from '../../hooks/useAuth';
 import { homePathForRole } from '../../constants/roles';
 import api, { apiFormError } from '../../lib/api';
 import { loginSchema } from '../../lib/validation';
+import CompanyChoice, { companiesFromError } from '../../components/auth/CompanyChoice';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login, isAuthenticated, homePath } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [companies, setCompanies] = useState([]);
 
   useEffect(() => {
     if (isAuthenticated) navigate(homePath, { replace: true });
@@ -30,7 +32,7 @@ export default function LoginPage() {
     formState: { errors },
   } = useForm({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: '', password: '' },
+    defaultValues: { email: '', password: '', workspace: '' },
   });
 
   const onSubmit = async (values) => {
@@ -43,14 +45,18 @@ export default function LoginPage() {
       navigate(homePathForRole(data.data.user.role));
     } catch (err) {
       const parsed = apiFormError(err, 'Invalid email or password.');
+      const choices = companiesFromError(err);
+      if (parsed.status === 409 && choices.length) {
+        setCompanies(choices);
+        setFormError('This email is on more than one company. Choose which one.');
+        return;
+      }
       Object.entries(parsed.fields).forEach(([field, message]) => {
         if (field === 'email' || field === 'password') setError(field, { type: 'server', message });
       });
       const friendly = parsed.status === 401
         ? 'Email or password is incorrect.'
-        : parsed.status === 403
-          ? parsed.message
-          : parsed.message;
+        : parsed.message;
       setFormError(friendly);
     } finally {
       setSubmitting(false);
@@ -67,7 +73,7 @@ export default function LoginPage() {
           <div className="relative mb-7 text-center">
             <BrandLogo className="mx-auto mb-4 h-16 w-16 rounded-2xl shadow-lg shadow-emerald-900/25" />
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-[1.7rem]">Welcome back</h1>
-            <p className="mt-1.5 text-sm text-slate-500">Sign in to Leheriya’s OMSKing tenant</p>
+            <p className="mt-1.5 text-sm text-slate-500">Sign in to the company you already have.</p>
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} className="relative space-y-4" noValidate>
@@ -89,6 +95,7 @@ export default function LoginPage() {
                 error={errors.email?.message}
               />
             </div>
+            <CompanyChoice companies={companies} register={register} error={errors.workspace?.message} />
             <div>
               <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
               <Input
@@ -116,19 +123,24 @@ export default function LoginPage() {
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
           </form>
+
         </div>
       </div>
 
-      <p className="mt-6 text-center text-sm text-slate-500">
-        New merchant?{' '}
-        <button
-          type="button"
-          className="font-semibold text-emerald-700 hover:underline"
-          onClick={() => navigate('/auth/register')}
-        >
-          Create an account
-        </button>
-      </p>
+      <div className="mt-6 grid gap-2 text-center text-sm text-slate-500 sm:grid-cols-2">
+        <p>
+          New company?{' '}
+          <button type="button" className="font-semibold text-emerald-700 hover:underline" onClick={() => navigate('/auth/register')}>
+            Start a trial
+          </button>
+        </p>
+        <p>
+          Want a walkthrough?{' '}
+          <button type="button" className="font-semibold text-emerald-700 hover:underline" onClick={() => navigate('/demo')}>
+            Request a demo
+          </button>
+        </p>
+      </div>
     </div>
   );
 }

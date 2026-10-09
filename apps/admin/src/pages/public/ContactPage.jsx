@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Mail, Phone, MapPin, PlayCircle, BadgeIndianRupee, LifeBuoy } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Button from '../../components/ui/Button';
@@ -11,7 +12,7 @@ export default function ContactPage() {
     email: '',
     company: '',
     phone: '',
-    interest: 'demo',
+    interest: 'tenant',
     message: '',
   });
   const [sending, setSending] = useState(false);
@@ -24,7 +25,7 @@ export default function ContactPage() {
     setTimeout(() => {
       setSending(false);
       toast.success('Message sent. We will reply within one working day.');
-      setForm({ name: '', email: '', company: '', phone: '', interest: 'demo', message: '' });
+      setForm({ name: '', email: '', company: '', phone: '', interest: 'tenant', message: '' });
     }, 600);
   };
 
@@ -34,7 +35,9 @@ export default function ContactPage() {
         <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
           <h1 className="text-4xl font-bold tracking-tight text-slate-900">Contact</h1>
           <p className="mt-3 text-lg text-slate-600">
-            Tell us if you want a Leheriya demo, a price for your order volume, or help on a tenant you already have. Someone on our team reads every message.
+            This page is for a question about a company you already run, or a price.{' '}
+            <Link to="/demo" className="font-semibold text-emerald-800 underline">Request a demo</Link>
+            {' '}is a separate form and does not create a login.
           </p>
         </div>
       </section>
@@ -101,7 +104,6 @@ export default function ContactPage() {
                   onChange={onChange}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
                 >
-                  <option value="demo">A Leheriya demo</option>
                   <option value="pricing">A price for my monthly orders</option>
                   <option value="tenant">Help with my existing account</option>
                   <option value="other">Something else</option>

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import api, { apiError } from '../lib/api';
 import { withSubOrders, findOrderMatch } from '../lib/orderSubOrders';
-import { openPrintHtml } from '../lib/orderPrint';
+import { openPrintHtml, openPdfBase64 } from '../lib/orderPrint';
 import useReturnsStore from './returnsStore';
 
 function hydrate(list) {
@@ -9,7 +9,7 @@ function hydrate(list) {
 }
 
 function stripHtml(data) {
-  const { labelHtml: _label, invoiceHtml: _invoice, reverseLabelHtml: _reverse, ...rest } = data || {};
+  const { labelHtml: _label, invoiceHtml: _invoice, reverseLabelHtml: _reverse, invoicePdf: _pdf, invoiceEmail: _mail, ...rest } = data || {};
   return rest;
 }
 
@@ -21,6 +21,8 @@ const useOrderStore = create((set, get) => ({
   error: '',
 
   getById: (id) => findOrderMatch(get().orders, id),
+
+  orderId: (id) => findOrderMatch(get().orders, id)?.id || id,
 
   /** Replace one order with the server copy. */
   putOrder: (dto) => {
@@ -35,10 +37,10 @@ const useOrderStore = create((set, get) => ({
   },
 
   setStatus: async (id, status) => {
-    const current = findOrderMatch(get().orders, id);
-    if (!current) return { error: 'Order not found' };
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
     try {
-      const { data } = await api.patch(`/orders/${encodeURIComponent(current.id)}/status`, { status });
+      const { data } = await api.patch(`/orders/${encodeURIComponent(orderId)}/status`, { status });
       return get().putOrder(data.data);
     } catch (err) {
       return { error: apiError(err, 'Could not update status') };
@@ -51,7 +53,7 @@ const useOrderStore = create((set, get) => ({
         `/orders/${encodeURIComponent(masterId)}/sub-orders/${encodeURIComponent(subOrderId)}`,
         { assignedVendor: payload.assignedVendor, price: payload.price },
       );
-      return get().putOrder(data.data);
+      return { ...get().putOrder(data.data), telegram: data.meta?.telegram || '' };
     } catch (err) {
       return { error: apiError(err, 'Could not assign vendor') };
     }
@@ -70,21 +72,50 @@ const useOrderStore = create((set, get) => ({
   },
 
   cancelLabel: async (id) => {
-    const current = findOrderMatch(get().orders, id);
-    if (!current) return { error: 'Order not found' };
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
     try {
-      const { data } = await api.post(`/orders/${encodeURIComponent(current.id)}/label/cancel`);
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/label/cancel`);
       return get().putOrder(data.data);
     } catch (err) {
       return { error: apiError(err, 'Could not cancel the label') };
     }
   },
 
-  generateLabel: async (id, subOrderId, extra = {}) => {
-    const current = findOrderMatch(get().orders, id);
-    if (!current) return { error: 'Order not found' };
+  shipOnMarketplace: async (id) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
     try {
-      const { data } = await api.post(`/orders/${encodeURIComponent(current.id)}/label`, { ...extra, ...(subOrderId ? { subOrderId } : {}) });
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/ship`);
+      return get().putOrder(data.data);
+    } catch (err) {
+      return { error: apiError(err, 'Could not ship on the marketplace') };
+    }
+  },
+
+  queueLabelJob: async (orderIds) => {
+    try {
+      const { data } = await api.post('/orders/labels/bulk', { orderIds });
+      return data.data;
+    } catch (err) {
+      return { error: apiError(err, 'Could not queue the label job') };
+    }
+  },
+
+  closeManifest: async () => {
+    try {
+      const { data } = await api.post('/orders/manifest');
+      return data.data;
+    } catch (err) {
+      return { error: apiError(err, 'Could not request today\'s pickup') };
+    }
+  },
+
+  generateLabel: async (id, subOrderId, extra = {}) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/label`, { ...extra, ...(subOrderId ? { subOrderId } : {}) });
       openPrintHtml(data.data.labelHtml);
       return get().putOrder(data.data);
     } catch (err) {
@@ -92,13 +123,18 @@ const useOrderStore = create((set, get) => ({
     }
   },
 
-  generateInvoice: async (id) => {
-    const current = findOrderMatch(get().orders, id);
-    if (!current) return { error: 'Order not found' };
+  generateInvoice: async (id, { kind = 'invoice', email = true, preview = true } = {}) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
     try {
-      const { data } = await api.post(`/orders/${encodeURIComponent(current.id)}/invoice`);
-      openPrintHtml(data.data.invoiceHtml);
-      return get().putOrder(data.data);
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/invoice`, { kind, email });
+      const pdf = data.data?.invoicePdf;
+      const number = kind === 'credit'
+        ? `CN-${data.data?.invoiceNo || orderId}`
+        : (data.data?.invoiceNo || orderId);
+      if (preview && pdf) openPdfBase64(pdf, `${number}.pdf`);
+      else if (preview && data.data?.invoiceHtml) openPrintHtml(data.data.invoiceHtml);
+      return { ...get().putOrder(data.data), invoicePdf: pdf, invoiceEmail: data.data?.invoiceEmail };
     } catch (err) {
       return { error: apiError(err, 'Could not generate invoice') };
     }
@@ -107,10 +143,10 @@ const useOrderStore = create((set, get) => ({
   markDelivered: (id) => get().setStatus(id, 'Delivered'),
 
   bookReversePickup: async (id, { reason, courier, awb } = {}) => {
-    const current = findOrderMatch(get().orders, id);
-    if (!current) return { error: 'Order not found' };
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
     try {
-      const { data } = await api.post(`/orders/${encodeURIComponent(current.id)}/reverse`, { reason, courier, awb });
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/reverse`, { reason, courier, awb });
       openPrintHtml(data.data.reverseLabelHtml);
       const next = get().putOrder(data.data);
       useReturnsStore.getState().syncFromOrders(get().orders);
@@ -118,6 +154,10 @@ const useOrderStore = create((set, get) => ({
     } catch (err) {
       return { error: apiError(err, 'Could not book reverse pickup') };
     }
+  },
+
+  clearCompany() {
+    set({ orders: [], loaded: false, error: '' });
   },
 
   hydrateFromApi: async () => {

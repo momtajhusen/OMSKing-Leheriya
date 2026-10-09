@@ -49,10 +49,14 @@ const useChannelStore = create((set, get) => ({
     });
   },
 
+  clearCompany() {
+    set({ enabledIds: [], connections: {} });
+  },
+
   hydrateFromServer: (rows) => {
-    const { connections, enabledIds, catalog } = get();
-    const nextConn = { ...connections };
-    const nextEnabled = [...enabledIds];
+    const { catalog } = get();
+    const nextConn = {};
+    const nextEnabled = [];
     (rows || []).forEach((row) => {
       if (!row?.channel) return;
       if (!nextEnabled.includes(row.channel)) nextEnabled.push(row.channel);

@@ -7,7 +7,7 @@ const notFoundHandler = (req, res) => {
 
 const globalErrorHandler = (err, req, res, next) => {
   if (err instanceof HttpError) {
-    return errorResponse(res, err.message, err.statusCode, err.errors);
+    return errorResponse(res, err.message, err.statusCode, err.errors, err.data);
   }
   console.error('[ERROR]', err);
   const statusCode = err.statusCode || 500;

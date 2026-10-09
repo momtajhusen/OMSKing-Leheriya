@@ -3,13 +3,19 @@ const Warehouse = require('../models/Warehouse');
 const WarehouseLocationMap = require('../models/WarehouseLocationMap');
 const Tenant = require('../models/Tenant');
 const { HttpError } = require('../utils/httpError');
+const { channelIds, channelById } = require('../channels/registry');
+
+function sellsOn(warehouse, channel) {
+  if (!warehouse || warehouse.status === 'inactive') return false;
+  if (warehouse.type === 'virtual') return channel === 'shopify' && warehouse.sellOnShopify !== false;
+  if (channel === 'shopify') return warehouse.sellOnShopify !== false;
+  if (channel === 'amazon') return Boolean(warehouse.sellOnAmazon);
+  if (channel === 'myntra') return Boolean(warehouse.sellOnMyntra);
+  return warehouse.type === 'physical';
+}
 
 function channelsOf(warehouse) {
-  const list = [];
-  if (warehouse.sellOnShopify) list.push('shopify');
-  if (warehouse.sellOnAmazon) list.push('amazon');
-  if (warehouse.sellOnMyntra) list.push('myntra');
-  return list;
+  return channelIds().filter((id) => sellsOn(warehouse, id));
 }
 
 function mapWarehouse(row, locations = []) {
@@ -85,13 +91,45 @@ async function ensureDefaultWarehouses(tenantId) {
     },
   );
 
+  await Warehouse.updateOne(
+    { _id: physical._id, tenantId },
+    { $set: { type: 'physical', sellOnShopify: true, sellOnAmazon: true, sellOnMyntra: true, isPickup: true, status: 'active' } },
+  ).setOptions({ skipTenantFilter: true });
+  await Warehouse.updateOne(
+    { _id: virtual._id, tenantId },
+    { $set: { type: 'virtual', sellOnShopify: true, sellOnAmazon: false, sellOnMyntra: false, isPickup: false, status: 'active' } },
+  ).setOptions({ skipTenantFilter: true });
+  physical.sellOnShopify = true;
+  physical.sellOnAmazon = true;
+  physical.sellOnMyntra = true;
+  virtual.sellOnShopify = true;
+  virtual.sellOnAmazon = false;
+  virtual.sellOnMyntra = false;
+
   const defaults = [
     { warehouseId: physical._id, channel: 'shopify', externalLocationId: 'shopify-location-a', label: 'Shopify Location A (Offline)', isPrimaryForChannel: true },
     { warehouseId: virtual._id, channel: 'shopify', externalLocationId: 'shopify-location-b', label: 'Shopify Location B (Virtual)', isPrimaryForChannel: false },
     { warehouseId: physical._id, channel: 'amazon', externalLocationId: 'amazon-wh-001', label: 'Amazon inventory', isPrimaryForChannel: true },
     { warehouseId: physical._id, channel: 'myntra', externalLocationId: 'myntra-wh-001', label: 'Myntra inventory', isPrimaryForChannel: true },
   ];
+  channelIds().forEach((id) => {
+    if (id === 'shopify' || defaults.some((row) => row.channel === id)) return;
+    const meta = channelById(id);
+    defaults.push({
+      warehouseId: physical._id,
+      channel: id,
+      externalLocationId: `${id}-wh-001`,
+      label: `${meta.name} inventory`,
+      isPrimaryForChannel: true,
+    });
+  });
   for (const row of defaults) {
+    const bound = await WarehouseLocationMap.findOne({
+      tenantId,
+      channel: row.channel,
+      warehouseId: row.warehouseId,
+    }).setOptions({ skipTenantFilter: true });
+    if (bound) continue;
     await findOrCreate(
       WarehouseLocationMap,
       { tenantId, channel: row.channel, externalLocationId: row.externalLocationId },
@@ -162,9 +200,8 @@ async function updateWarehouse(tenantId, id, body) {
 
 async function warehousesForChannel(tenantId, channel) {
   await ensureDefaultWarehouses(tenantId);
-  const flag = channel === 'amazon' ? 'sellOnAmazon' : channel === 'myntra' ? 'sellOnMyntra' : 'sellOnShopify';
-  const rows = await Warehouse.find({ tenantId, status: 'active', [flag]: true }).sort({ isDefault: -1, code: 1 }).setOptions({ skipTenantFilter: true });
-  return rows;
+  const rows = await Warehouse.find({ tenantId, status: 'active' }).sort({ isDefault: -1, code: 1 }).setOptions({ skipTenantFilter: true });
+  return rows.filter((row) => sellsOn(row, channel));
 }
 
 async function getInventoryAuthority(tenantId) {
@@ -188,6 +225,7 @@ function newTransactionId() {
 
 module.exports = {
   channelsOf,
+  sellsOn,
   mapWarehouse,
   ensureDefaultWarehouses,
   listWarehouses,

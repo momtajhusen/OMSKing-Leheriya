@@ -13,14 +13,32 @@ function withDefaults(row) {
 }
 
 const WORKFLOW_KEYS = ['status', 'restockDestination', 'restockedTo', 'receivedWarehouse', 'receiveAction'];
+export const EMPTY_WORKFLOW = {};
+
+function tenantKey() {
+  try {
+    return JSON.parse(localStorage.getItem('user') || '{}').tenantId || 'none';
+  } catch {
+    return 'none';
+  }
+}
 
 const useReturnsStore = create(persist((set, get) => ({
   returns: [],
-  workflow: {},
+  workflowByTenant: {},
+
+  workflowNow() {
+    return get().workflowByTenant[tenantKey()] || {};
+  },
+
+  clearCompany() {
+    set({ returns: [] });
+  },
 
   /** Returns are the reverse pickups on orders; only workflow fields (approve / receive) are kept locally. */
   syncFromOrders: (orders) => {
-    const { workflow } = get();
+    const workflow = get().workflowNow();
+    const apiRows = get().returns.filter((row) => row.source === 'api');
     const rows = [];
     (orders || []).forEach((order) => {
       const pickup = order.reversePickup;
@@ -44,7 +62,20 @@ const useReturnsStore = create(persist((set, get) => ({
       }));
     });
     rows.sort((x, y) => String(y.requestDate).localeCompare(String(x.requestDate)));
-    set({ returns: rows });
+    const localIds = new Set(rows.map((row) => row.id));
+    set({ returns: [...apiRows.filter((row) => !localIds.has(row.id)), ...rows] });
+  },
+
+  loadReturns: async () => {
+    try {
+      const { data } = await api.get('/returns');
+      const apiRows = (data.data || []).map((row) => withDefaults({ ...row, source: 'api', type: 'customer_return' }));
+      const local = get().returns.filter((row) => row.source !== 'api');
+      set({ returns: [...apiRows, ...local] });
+    } catch (err) {
+      return { error: apiError(err, 'Could not load returns') };
+    }
+    return get().returns;
   },
 
   printReverseLabel: (row, order) => {
@@ -60,39 +91,39 @@ const useReturnsStore = create(persist((set, get) => ({
 
   patchReturn: (id, patch) => {
     const saved = Object.fromEntries(WORKFLOW_KEYS.filter((key) => key in patch).map((key) => [key, patch[key]]));
+    const key = tenantKey();
+    const bucket = get().workflowByTenant[key] || {};
     set({
       returns: get().returns.map((row) => (row.id === id ? withDefaults({ ...row, ...patch }) : row)),
-      workflow: { ...get().workflow, [id]: { ...get().workflow[id], ...saved } },
+      workflowByTenant: { ...get().workflowByTenant, [key]: { ...bucket, [id]: { ...bucket[id], ...saved } } },
     });
   },
 
   /** Local workflow state for rows that are not reverse pickups (e.g. RTO QC). */
   setWorkflow: (id, patch) => {
-    set({ workflow: { ...get().workflow, [id]: { ...get().workflow[id], ...patch } } });
+    const key = tenantKey();
+    const bucket = get().workflowByTenant[key] || {};
+    set({ workflowByTenant: { ...get().workflowByTenant, [key]: { ...bucket, [id]: { ...bucket[id], ...patch } } } });
   },
 
   approveReturn: async (id, destination = 'All') => {
     const row = get().returns.find((item) => item.id === id);
     if (!row) return null;
-    let restockedTo = null;
-    if (destination !== 'None') {
+    let awb = row.awb;
+    if (row.source === 'api') {
       try {
-        const { data } = await api.post('/returns/approve-restock', {
-          returnId: id,
-          referenceId: id,
-          items: (row.items || []).map((item) => ({ sku: item.sku, qty: item.qty || 1 })),
-          reason: `Return ${id} approved`,
-        });
-        restockedTo = data.data || null;
+        const { data } = await api.post(`/returns/${encodeURIComponent(id)}/approve`);
+        awb = data.data?.awb || awb;
       } catch (err) {
-        return { error: apiError(err, 'Restock failed') };
+        return { error: apiError(err, 'Could not approve the return') };
       }
     }
     const next = {
       ...row,
       status: 'Approved',
       restockDestination: destination,
-      restockedTo,
+      awb,
+      labelGeneratedAt: row.labelGeneratedAt || new Date().toISOString(),
     };
     get().patchReturn(id, next);
     return next;
@@ -102,18 +133,42 @@ const useReturnsStore = create(persist((set, get) => ({
     get().patchReturn(id, { status: 'Rejected' });
   },
 
-  markReceived: (id, { warehouse, action } = {}) => {
+  markReceived: async (id, { warehouse, action, destination } = {}) => {
+    const row = get().returns.find((item) => item.id === id);
+    if (!row) return null;
+    const dest = destination || row.restockDestination || 'All';
+    if (action === 'restock' && dest !== 'None') {
+      try {
+        if (row.source === 'api') {
+          await api.post(`/returns/${encodeURIComponent(id)}/receive`, { destination: dest, action: 'restock' });
+        } else {
+          await api.post('/returns/approve-restock', {
+            returnId: id,
+            referenceId: id,
+            destination: dest,
+            movementType: 'return_restock',
+            warehouseCode: warehouse || 'WH-001',
+            items: (row.items || []).map((item) => ({ sku: item.sku, qty: item.qty || 1 })),
+            reason: `Return ${id} received`,
+          });
+        }
+      } catch (err) {
+        return { error: apiError(err, 'Restock failed') };
+      }
+    }
     get().patchReturn(id, {
       status: 'Completed',
       receivedWarehouse: warehouse,
       receiveAction: action,
+      restockDestination: dest,
     });
+    return get().returns.find((item) => item.id === id);
   },
 }), {
   name: 'omsking-returns-desk',
-  version: 2,
-  partialize: (state) => ({ workflow: state.workflow }),
-  migrate: () => ({ workflow: {} }),
+  version: 3,
+  partialize: (state) => ({ workflowByTenant: state.workflowByTenant }),
+  migrate: () => ({ workflowByTenant: {} }),
 }));
 
 export default useReturnsStore;

@@ -18,20 +18,20 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
-import useOrderStore from '../../stores/orderStore';
 import { relativeTime } from '../../lib/orderMetrics';
 import { cn } from '../../lib/utils';
 import useThemeStore from '../../stores/themeStore';
 import useUIStore from '../../stores/uiStore';
 import { useAuth } from '../../hooks/useAuth';
 import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator } from '../ui/DropdownMenu';
-import Avatar from '../ui/Avatar';
 import Breadcrumbs from '../ui/Breadcrumbs';
 import Button from '../ui/Button';
 
 import { ROLE_LABELS } from '../../constants/roles';
 import { usePermissions } from '../../hooks/usePermissions';
 import BrandLogo from '../brand/BrandLogo';
+import { ProfileAvatar, useProfilePhoto } from '../account/ProfilePhoto';
+import { Camera } from 'lucide-react';
 
 const NOTIFICATION_ICONS = {
   shipping: PackageCheck,
@@ -51,68 +51,70 @@ const NOTIFICATION_TONES = {
   order: 'bg-sky-500/15 text-sky-400',
 };
 
+const IN_APP_TITLES = {
+  'NOT-001': 'New order',
+  'NOT-002': 'Vendor order',
+  'NOT-003': 'Dispatched',
+  'NOT-004': 'Shipping update',
+  'NOT-005': 'Delivered',
+  'NOT-006': 'Return',
+  'NOT-007': 'Low stock',
+  'NOT-008': 'Job failed',
+  'NOT-009': 'Vendor assigned',
+  'NOT-010': 'Dispatch overdue',
+};
+
+const IN_APP_TYPES = {
+  'NOT-001': 'order',
+  'NOT-002': 'vendor',
+  'NOT-003': 'shipping',
+  'NOT-004': 'shipping',
+  'NOT-005': 'shipping',
+  'NOT-006': 'alert',
+  'NOT-007': 'inventory',
+  'NOT-008': 'alert',
+  'NOT-009': 'vendor',
+  'NOT-010': 'shipping',
+};
+
 function AdminHeader() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useThemeStore();
   const { toggleSidebar, breadcrumbs, mobileOpen, setMobileOpen, activeRole } = useUIStore();
   const { logout, user, effectiveRole } = useAuth();
   const { canOpenPath } = usePermissions();
-  const orders = useOrderStore((s) => s.orders);
   const [events, setEvents] = useState([]);
   const [readIds, setReadIds] = useState(() => new Set());
 
   useEffect(() => {
     if (!user || user.role === 'vendor') return undefined;
     let alive = true;
-    Promise.all([
-      api.get('/integrations/jobs').then(({ data }) => data.data || []).catch(() => []),
-      api.get('/inventory/alerts').then(({ data }) => data.data || []).catch(() => []),
-    ]).then(([jobs, low]) => {
+    api.get('/notifications').then(({ data }) => {
       if (!alive) return;
-      const failed = jobs.filter((job) => job.status === 'failed').slice(0, 3).map((job) => ({
-        id: `job-${job.id}`,
-        title: `${job.channel} ${String(job.jobType).replace(/_/g, ' ')} failed`,
-        detail: job.lastError || job.shortSummary,
-        at: job.finishedAt || job.createdAt,
-        type: 'alert',
-        href: '/integrations',
-      }));
-      const stock = low.length ? [{
-        id: `low-${low.length}`,
-        title: `${low.length} SKU${low.length === 1 ? '' : 's'} low on stock`,
-        detail: low.slice(0, 3).map((row) => `${row.sku} (${row.available})`).join(', '),
-        type: 'inventory',
-        href: '/inventory',
-      }] : [];
-      setEvents([...failed, ...stock]);
+      const rows = (data.data?.recent || []).filter((row) => row.channel === 'in_app' && row.status === 'sent');
+      setEvents(rows.map((row) => ({
+        id: `note-${row.id}`,
+        title: IN_APP_TITLES[row.eventKey] || row.eventKey,
+        detail: row.text || '',
+        at: row.at,
+        type: IN_APP_TYPES[row.eventKey] || 'alert',
+        href: '/notifications',
+      })));
+    }).catch(() => {
+      if (alive) setEvents([]);
     });
     return () => { alive = false; };
   }, [user]);
 
-  const inbox = useMemo(() => {
-    const fresh = orders.filter((order) => order.status === 'New');
-    const newOrders = fresh.length ? [{
-      id: `new-${fresh.length}`,
-      title: `${fresh.length} new order${fresh.length === 1 ? '' : 's'} to process`,
-      detail: fresh.slice(0, 3).map((order) => order.id).join(', '),
-      type: 'order',
-      href: '/orders',
-    }] : [];
-    return [...newOrders, ...events].map((item) => ({
-      ...item,
-      time: item.at ? relativeTime(item.at) : '',
-      unread: !readIds.has(item.id),
-    }));
-  }, [orders, events, readIds]);
+  const inbox = useMemo(() => events.map((item) => ({
+    ...item,
+    time: item.at ? relativeTime(item.at) : '',
+    unread: !readIds.has(item.id),
+  })), [events, readIds]);
 
+  const photo = useProfilePhoto();
   const displayName = user?.name || user?.email || 'User';
   const displayEmail = user?.email || '';
-  const initials = displayName
-    .split(' ')
-    .map((part) => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
   const unreadCount = inbox.filter((item) => item.unread).length;
 
   const handleLogout = async () => {
@@ -127,6 +129,7 @@ function AdminHeader() {
 
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center border-b border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))]/80 backdrop-blur-xl px-4 sm:px-6">
+      {photo.input}
       <div className="flex items-center gap-2 sm:gap-4">
         <Button
           variant="ghost"
@@ -265,12 +268,7 @@ function AdminHeader() {
               type="button"
               className="flex items-center gap-2 sm:gap-2.5 rounded-lg px-1.5 py-1 hover:bg-[hsl(var(--color-muted))] transition-all"
             >
-              <Avatar
-                src="https://i.pravatar.cc/150?img=68"
-                alt={displayName}
-                fallback={initials}
-                className="h-8 w-8"
-              />
+              <ProfileAvatar src={photo.src} name={displayName} className="h-8 w-8" />
               <div className="hidden lg:block text-left">
                 <div className="text-sm font-medium leading-tight text-foreground">{displayName}</div>
                 <div className="text-[11px] text-muted-foreground truncate max-w-[180px]">{displayEmail}</div>
@@ -280,12 +278,7 @@ function AdminHeader() {
           }
         >
           <div className="flex items-center gap-3 px-3.5 py-3 border-b border-[hsl(var(--color-border-premium))]">
-            <Avatar
-              src="https://i.pravatar.cc/150?img=68"
-              alt={displayName}
-              fallback={initials}
-              className="h-10 w-10"
-            />
+            <ProfileAvatar src={photo.src} name={displayName} className="h-10 w-10" />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{displayName}</p>
               <p className="truncate text-xs text-muted-foreground">{displayEmail}</p>
@@ -297,6 +290,15 @@ function AdminHeader() {
           </div>
 
           <div className="p-1.5">
+            <DropdownMenuItem onClick={photo.pick} disabled={photo.busy}>
+              <Camera className="h-4 w-4 text-muted-foreground" />
+              {photo.busy ? 'Saving photo…' : 'Change photo'}
+            </DropdownMenuItem>
+            {photo.hasPhoto && (
+              <DropdownMenuItem onClick={photo.remove} disabled={photo.busy}>
+                Remove photo
+              </DropdownMenuItem>
+            )}
             {canOpenPath('/settings') && (
               <DropdownMenuItem onClick={() => navigate('/settings')}>
                 <Settings className="h-4 w-4 text-muted-foreground" />

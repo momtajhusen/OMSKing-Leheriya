@@ -123,4 +123,43 @@ test('tax settings persist, HSN updates a SKU, and the audit row keeps before an
     () => AuditLog.updateOne({ _id: taxLog._id }, { action: 'tampered' }),
     /append-only/,
   );
+  await assert.rejects(
+    () => AuditLog.deleteOne({ _id: taxLog._id }),
+    /append-only/,
+  );
+});
+
+test('audit pages keep later rows, and a vendor role cannot take users or finance reconcile', async () => {
+  const auditLogs = require('../src/controllers/auditLogs.controller');
+  const roles = require('../src/controllers/roles.controller');
+  const Role = require('../src/models/Role');
+  const res = fakeRes();
+  await als.run({ tenantId: String(tenant._id), skipTenantFilter: false, userId: null }, () => auditLogs.list({
+    tenantId: String(tenant._id),
+    user: { id: null, role: 'super_admin', permissions: ['users.manage'] },
+    query: { page: '2', limit: '1' },
+    headers: {},
+  }, res));
+  assert.equal(res.body.meta.total >= 3, true);
+  assert.equal(res.body.data.length, 1);
+  assert.ok(res.body.data[0].action);
+  assert.ok(res.body.data[0].at);
+  assert.ok(Array.isArray(res.body.data[0].changes));
+
+  const vendor = await Role.create({
+    tenantId: tenant._id,
+    code: 'vendor',
+    name: 'Vendor',
+    permissions: ['orders.view'],
+    isSystem: true,
+  });
+  await assert.rejects(
+    () => call(roles.updateRolePermissions, {
+      params: { id: String(vendor._id) },
+      body: { permissions: ['orders.view', 'users.manage', 'finance.reconcile'] },
+    }),
+    /Vendor cannot have users\.manage or finance\.reconcile/,
+  );
+  const fresh = await Role.findById(vendor._id).setOptions({ skipTenantFilter: true });
+  assert.deepEqual(fresh.permissions, ['orders.view']);
 });

@@ -37,6 +37,7 @@ function enrichItem(item, order) {
     skuMappingId: item.skuMappingId || null,
     imageUrl: item.imageUrl || item.image || productImageUrl(item.sku, item.name),
     fulfilmentSource: item.fulfilmentSource || item.source || order?.fulfilmentSource || 'Offline',
+    locationId: item.locationId || '',
   };
 }
 
@@ -186,21 +187,34 @@ function labelHtml(order, subOrderId) {
 </html>`;
 }
 
-function invoiceHtml(order) {
-  const rows = (order.items || []).map((item) => `
+function invoiceHtml(order, { warehouseState = '', kind = 'invoice' } = {}) {
+  const { invoiceNumber, creditNoteNumber, lineTax, shipToState } = require('../services/finance.service');
+  const invoiceNo = kind === 'credit'
+    ? creditNoteNumber(order)
+    : (order.invoiceNo || invoiceNumber(order));
+  const ship = shipToState(order);
+  const rows = (order.items || []).map((item) => {
+    const tax = lineTax(item, { warehouseState, shipState: ship });
+    return `
     <tr>
       <td>${photoHtml(item.name || item.sku, item.imageUrl)}</td>
       <td>${escapeHtml(item.name)}</td>
       <td>${escapeHtml(item.sku)}</td>
+      <td>${escapeHtml(item.hsn || '')}</td>
       <td>${item.qty}</td>
-      <td>₹${Number(item.price || 0).toLocaleString('en-IN')}</td>
-    </tr>`).join('');
-  const invoiceNo = order.channel === 'Shopify' ? (order.id || order.orderNo) : `INV-${order.id || order.orderNo}`;
+      <td>${tax.taxable.toFixed(2)}</td>
+      <td>${tax.cgst.toFixed(2)}</td>
+      <td>${tax.sgst.toFixed(2)}</td>
+      <td>${tax.igst.toFixed(2)}</td>
+      <td>${tax.gross.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+  const title = kind === 'credit' ? `Credit note ${invoiceNo}` : `Tax invoice ${invoiceNo}`;
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Invoice ${escapeHtml(invoiceNo)}</title>
+  <title>${escapeHtml(title)}</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px; }
     table { width: 100%; border-collapse: collapse; margin-top: 16px; }
@@ -209,10 +223,11 @@ function invoiceHtml(order) {
   </style>
 </head>
 <body>
-  <h1>Tax invoice ${escapeHtml(invoiceNo)}</h1>
+  <h1>${escapeHtml(title)}</h1>
   <p>Order ${escapeHtml(order.id || order.orderNo)} · ${escapeHtml(order.customer)} · ${escapeHtml(order.address || '')}</p>
+  <p>Warehouse ${escapeHtml(warehouseState || '—')} · Ship-to ${escapeHtml(ship || '—')}</p>
   <table>
-    <thead><tr><th></th><th>Item</th><th>SKU</th><th>Qty</th><th>Price</th></tr></thead>
+    <thead><tr><th></th><th>Item</th><th>SKU</th><th>HSN</th><th>Qty</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
   <p style="margin-top:16px;font-weight:700">Total ₹${Number(order.total || 0).toLocaleString('en-IN')}</p>

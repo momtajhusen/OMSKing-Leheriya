@@ -13,6 +13,7 @@ const itemSchema = new mongoose.Schema({
   skuMappingId: { type: mongoose.Schema.Types.ObjectId, ref: 'SkuMapping', default: null },
   imageUrl: { type: String, default: '' },
   fulfilmentSource: { type: String, default: 'Offline' },
+  locationId: { type: String, default: '' },
 }, { _id: false });
 
 const subOrderSchema = new mongoose.Schema({
@@ -57,6 +58,8 @@ const orderSchema = new mongoose.Schema({
   channel: { type: String, default: 'Shopify' },
   status: { type: String, default: 'New' },
   paymentMode: { type: String, default: 'COD' },
+  paymentStatus: { type: String, enum: ['', 'paid', 'partially_paid', 'unpaid'], default: '' },
+  shipState: { type: String, default: '' },
   fulfilmentSource: { type: String, default: 'Offline' },
   assignedVendor: { type: String, default: '' },
   shopifyVendor: { type: String, default: '' },
@@ -79,6 +82,9 @@ const orderSchema = new mongoose.Schema({
   source: { type: String, enum: ['demo', 'manual', 'channel_api', 'channel_push'], default: 'demo' },
   externalOrderId: { type: String, default: '' },
   channelStatus: { type: String, default: '' },
+  reserveState: { type: String, enum: ['', 'reserved', 'out_of_stock', 'unmapped'], default: '' },
+  rtoRestockedAt: { type: Date },
+  sourceOrderData: { type: mongoose.Schema.Types.Mixed },
   warehouseCode: { type: String, default: '' },
   channelLines: {
     type: [new mongoose.Schema({

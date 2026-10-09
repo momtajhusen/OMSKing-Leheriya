@@ -12,9 +12,13 @@ function publicUser(user, tenant, extras = {}) {
     permissions,
     tenantId: tenantId ? String(tenantId) : null,
     tenantName: extras.tenantName || tenant?.name || user.tenantId?.name || null,
+    plan: extras.plan || tenant?.plan || user.tenantId?.plan || null,
+    tenantStatus: extras.tenantStatus || tenant?.status || user.tenantId?.status || null,
+    planExpiresAt: extras.planExpiresAt || tenant?.planExpiresAt || user.tenantId?.planExpiresAt || null,
     impersonating: Boolean(extras.impersonating),
     assignedVendorIds: (user.assignedVendorIds || []).map(String),
     twoFactorEnabled: Boolean(user.twoFactorEnabled),
+    avatarUrl: user.avatarUrl || '',
     status: user.status,
     lastLoginAt: user.lastLoginAt,
   };

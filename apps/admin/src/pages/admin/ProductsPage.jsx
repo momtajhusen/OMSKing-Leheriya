@@ -17,6 +17,7 @@ import KpiCard from '../../components/ui/KpiCard';
 import { Package, Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
+import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 
 const emptyProduct = {
   name: '',
@@ -43,6 +44,9 @@ export default function ProductsPage() {
   const navigate = useNavigate();
   const { canCatalogEdit } = usePermissions();
   const [rows, setRows] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState({ active: 0, variants: 0 });
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -56,8 +60,10 @@ export default function ProductsPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/products', { params: { q: searchQuery } });
+      const { data } = await api.get('/products', { params: { q: searchQuery, page, limit: PAGE_SIZE } });
       setRows(data.data || []);
+      setTotal(data.meta?.total || 0);
+      setStats({ active: data.meta?.active || 0, variants: data.meta?.variants || 0 });
     } catch (err) {
       toast.error(apiError(err, 'Could not load products'));
     } finally {
@@ -65,7 +71,7 @@ export default function ProductsPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [page]);
 
   const save = async () => {
     setBanner('');
@@ -196,9 +202,9 @@ export default function ProductsPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KpiCard label="Products" value={rows.length} icon={Package} />
-        <KpiCard label="Active" value={rows.filter((p) => p.status === 'active').length} icon={Package} />
-        <KpiCard label="Variants (Master SKUs)" value={rows.reduce((n, p) => n + (p.variantCount || 0), 0)} icon={Package} />
+        <KpiCard label="Products" value={total} icon={Package} />
+        <KpiCard label="Active" value={stats.active} icon={Package} />
+        <KpiCard label="Variants (Master SKUs)" value={stats.variants} icon={Package} />
       </div>
 
       <Card>
@@ -212,10 +218,10 @@ export default function ProductsPage() {
                 className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && load()}
+                onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(); } }}
               />
             </div>
-            <Button variant="outline" onClick={load}>Search</Button>
+            <Button variant="outline" onClick={() => { if (page === 1) load(); else setPage(1); }}>Search</Button>
           </div>
         </CardContent>
       </Card>
@@ -310,6 +316,7 @@ export default function ProductsPage() {
               </TableBody>
             </Table>
           )}
+          <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
         </CardContent>
       </Card>
 

@@ -10,6 +10,7 @@ import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import ProductThumb from '../../components/ui/ProductThumb';
 import { Search, Download } from 'lucide-react';
+import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 
 function showValue(value) {
   if (value == null || value === '') return '—';
@@ -26,19 +27,34 @@ export default function AuditLogsPage() {
   const [ledger, setLedger] = useState([]);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  const [applied, setApplied] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerTotal, setLedgerTotal] = useState(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setApplied(query.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
     Promise.all([
-      api.get('/audit-logs', { params: { limit: 300 } }),
-      api.get('/inventory/ledger', { params: { limit: 300 } }),
+      api.get('/audit-logs', { params: { page, limit: PAGE_SIZE, q: applied || undefined } }),
+      api.get('/inventory/ledger', { params: { page: ledgerPage, limit: PAGE_SIZE } }),
     ]).then(([auditRes, ledgerRes]) => {
       setRows(auditRes.data.data || []);
+      setTotal(auditRes.data.meta?.total || 0);
       setLedger(ledgerRes.data.data || []);
+      setLedgerTotal(ledgerRes.data.meta?.total || 0);
     }).catch((err) => {
       setError(apiError(err, 'Could not load the audit log'));
       setRows([]);
     });
-  }, []);
+  }, [page, ledgerPage, applied]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -92,8 +108,8 @@ export default function AuditLogsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Record changes ({filtered.length})</CardTitle>
-          <CardDescription>Latest 300 changes. Secrets are not stored.</CardDescription>
+          <CardTitle>Record changes ({total})</CardTitle>
+          <CardDescription>One page at a time. Secrets are not stored.</CardDescription>
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? (
@@ -130,12 +146,13 @@ export default function AuditLogsPage() {
               </Table>
             </div>
           )}
+          <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Stock ledger ({filteredLedger.length})</CardTitle>
+          <CardTitle>Stock ledger ({ledgerTotal})</CardTitle>
           <CardDescription>Every stock movement with the balance after. This ledger stays separate from the record log.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -184,6 +201,7 @@ export default function AuditLogsPage() {
               </Table>
             </div>
           )}
+          <Pagination page={ledgerPage} total={ledgerTotal} limit={PAGE_SIZE} onPage={setLedgerPage} />
         </CardContent>
       </Card>
     </div>

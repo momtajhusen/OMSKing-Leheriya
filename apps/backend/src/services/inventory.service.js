@@ -13,14 +13,38 @@ const {
   getInventoryAuthority,
   newTransactionId,
   channelsOf,
+  sellsOn,
 } = require('./warehouse.service');
+
+const { channelIds, channelById } = require('../channels/registry');
+
+const CHANNELS = channelIds();
+
+function bucket(row, name, channel) {
+  return Math.max(0, Number(row?.[name]?.[channel]) || 0);
+}
+
+function channelFree(row, channel) {
+  if (!CHANNELS.includes(channel)) return 0;
+  return Math.max(0, bucket(row, 'channelOnly', channel) - bucket(row, 'channelHeld', channel));
+}
 
 function availableOf(row) {
   return (row.physicalQty || 0) + (row.virtualQty || 0) - (row.reservedQty || 0);
 }
 
+function channelSellable(row, channel) {
+  if (!row) return 0;
+  return availableOf(row) + channelFree(row, channel);
+}
+
 function onHandOf(row) {
-  return (row.physicalQty || 0) + (row.virtualQty || 0);
+  const extra = CHANNELS.reduce((sum, channel) => sum + bucket(row, 'channelOnly', channel), 0);
+  return (row.physicalQty || 0) + (row.virtualQty || 0) + extra;
+}
+
+function sellableSomewhere(row) {
+  return availableOf(row) + CHANNELS.reduce((sum, channel) => sum + channelFree(row, channel), 0);
 }
 
 function qtyField(warehouse) {
@@ -100,7 +124,7 @@ async function appendLedger({
     qtyDelta,
     balanceAfter: onHandOf(balance),
     reservedAfter: balance.reservedQty,
-    availableAfter: availableOf(balance),
+    availableAfter: sellableSomewhere(balance),
     channel: channel || '',
     referenceType: referenceType || '',
     referenceId: referenceId || '',
@@ -167,13 +191,15 @@ function emptyBalance(sku, warehouse) {
   };
 }
 
-function atsForSku(warehouses, qtyByWarehouse) {
-  const ats = { shopify: 0, amazon: 0, myntra: 0 };
+function atsForSku(warehouses, rowsByWarehouse) {
+  const ats = Object.fromEntries(CHANNELS.map((id) => [id, 0]));
   warehouses.forEach((wh) => {
-    const qty = qtyByWarehouse.get(String(wh._id)) || 0;
-    if (wh.sellOnShopify) ats.shopify += qty;
-    if (wh.sellOnAmazon) ats.amazon += qty;
-    if (wh.sellOnMyntra) ats.myntra += qty;
+    const row = rowsByWarehouse.get(String(wh._id));
+    const shared = row ? availableOf(row) : 0;
+    CHANNELS.forEach((id) => {
+      if (!sellsOn(wh, id)) return;
+      ats[id] += shared + (row ? channelFree(row, id) : 0);
+    });
   });
   return ats;
 }
@@ -190,7 +216,7 @@ async function listBalances(tenantId, { warehouseId, q, tab } = {}) {
     const whId = String(row.warehouseId?._id || row.warehouseId);
     byKey.set(`${skuId}:${whId}`, row);
     if (!qtyBySku.has(skuId)) qtyBySku.set(skuId, new Map());
-    qtyBySku.get(skuId).set(whId, availableOf(row));
+    qtyBySku.get(skuId).set(whId, row);
   });
   const visible = warehouseId
     ? warehouses.filter((wh) => String(wh._id) === String(warehouseId))
@@ -220,16 +246,8 @@ async function listBalances(tenantId, { warehouseId, q, tab } = {}) {
 async function channelAts(tenantId, masterSkuId) {
   const warehouses = await exec(Warehouse.find({ tenantId, status: 'active' }), null);
   const balances = await exec(Inventory.find({ tenantId, masterSkuId }), null);
-  const byWh = {};
-  balances.forEach((row) => { byWh[String(row.warehouseId)] = availableOf(row); });
-  const ats = { shopify: 0, amazon: 0, myntra: 0 };
-  warehouses.forEach((wh) => {
-    const qty = byWh[String(wh._id)] || 0;
-    if (wh.sellOnShopify) ats.shopify += qty;
-    if (wh.sellOnAmazon) ats.amazon += qty;
-    if (wh.sellOnMyntra) ats.myntra += qty;
-  });
-  return ats;
+  const byWh = new Map(balances.map((row) => [String(row.warehouseId), row]));
+  return atsForSku(warehouses, byWh);
 }
 
 async function bumpQty(tenantId, sku, warehouse, delta, session) {
@@ -247,10 +265,10 @@ async function bumpQty(tenantId, sku, warehouse, delta, session) {
   return balance;
 }
 
-async function stockIn(tenantId, userId, { masterSkuId, warehouseId, qty, reason, referenceType, referenceId, movementType, skipAuthorityCheck }) {
+async function stockIn(tenantId, userId, { masterSkuId, warehouseId, qty, reason, referenceType, referenceId, movementType, skipAuthorityCheck, skipNotify }) {
   if (!skipAuthorityCheck) await assertOmsMaster(tenantId);
   const n = assertQty(qty);
-  return withTransaction(async (session) => {
+  const row = await withTransaction(async (session) => {
     const sku = await requireSku(tenantId, masterSkuId, session);
     const warehouse = await requireWarehouse(tenantId, warehouseId, session);
     await getOrCreateBalance(tenantId, sku._id, warehouse._id, session);
@@ -276,6 +294,51 @@ async function stockIn(tenantId, userId, { masterSkuId, warehouseId, qty, reason
     }
     return mapBalance(balance, warehouse, sku);
   });
+  if (!skipNotify) await notifyChannels(tenantId, userId, masterSkuId);
+  await watchLowStock(tenantId, row);
+  return row;
+}
+
+function notifyChannels(tenantId, userId, masterSkuId) {
+  const { queueInventoryPushes } = require('./inventoryPush.service');
+  return queueInventoryPushes(tenantId, userId, masterSkuId).catch((err) => {
+    console.error('[JOBS]', err.message);
+  });
+}
+
+async function setChannelAvailable(tenantId, userId, { masterSkuId, warehouseId, available, reason }) {
+  const target = Math.max(0, Math.floor(Number(available) || 0));
+  const result = await withTransaction(async (session) => {
+    const sku = await requireSku(tenantId, masterSkuId, session);
+    const warehouse = await requireWarehouse(tenantId, warehouseId, session);
+    await getOrCreateBalance(tenantId, sku._id, warehouse._id, session);
+    const current = await exec(Inventory.findOne({ tenantId, masterSkuId: sku._id, warehouseId: warehouse._id }), session);
+    const delta = target - availableOf(current);
+    if (delta === 0) return { balance: mapBalance(current, warehouse, sku), changed: false };
+    const balance = await exec(
+      Inventory.findOneAndUpdate(
+        { tenantId, masterSkuId: sku._id, warehouseId: warehouse._id },
+        { $inc: { [qtyField(warehouse)]: delta } },
+        { new: true },
+      ),
+      session,
+    );
+    await appendLedger({
+      tenantId,
+      masterSkuId: sku._id,
+      warehouseId: warehouse._id,
+      movementType: 'virtual_sync',
+      qtyDelta: delta,
+      balance,
+      channel: 'shopify',
+      reason: reason || 'Channel quantity wrote this warehouse',
+      userId,
+      session,
+    });
+    return { balance: mapBalance(balance, warehouse, sku), changed: true };
+  });
+  if (result.changed) await notifyChannels(tenantId, userId, masterSkuId);
+  return result.balance;
 }
 
 async function resolveMasterSkuForChannelSku(tenantId, skuCode) {
@@ -304,10 +367,67 @@ async function resolveMasterSkuForChannelSku(tenantId, skuCode) {
   return exec(MasterSku.findOne({ tenantId, name: new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }), null);
 }
 
-async function restockReturn(tenantId, userId, { items = [], referenceId, reason } = {}) {
+function channelsForDestination(destination) {
+  const key = String(destination || 'All').trim().toLowerCase();
+  if (key === 'none') return [];
+  if (key === 'all' || key === 'all channels') return CHANNELS.slice();
+  const byId = CHANNELS.find((id) => key === id || key.startsWith(id));
+  if (byId) return [byId];
+  const byName = CHANNELS.map((id) => channelById(id)).find((row) => key === row.name.toLowerCase());
+  if (byName) return [byName.id];
+  return CHANNELS.slice();
+}
+
+async function addChannelOnly(tenantId, userId, { sku, warehouse, channel, qty, reason, referenceType, referenceId, movementType }) {
+  return withTransaction(async (session) => {
+    await getOrCreateBalance(tenantId, sku._id, warehouse._id, session);
+    const balance = await exec(
+      Inventory.findOneAndUpdate(
+        { tenantId, masterSkuId: sku._id, warehouseId: warehouse._id },
+        { $inc: { [`channelOnly.${channel}`]: qty } },
+        { new: true },
+      ),
+      session,
+    );
+    if (!balance) throw new HttpError(409, 'Could not restock this channel');
+    await appendLedger({
+      tenantId,
+      masterSkuId: sku._id,
+      warehouseId: warehouse._id,
+      movementType: movementType || 'return_restock',
+      qtyDelta: qty,
+      balance,
+      channel,
+      reason: reason || `Restock ${channel} only`,
+      referenceType,
+      referenceId,
+      userId,
+      session,
+    });
+    return balance;
+  });
+}
+
+async function offlineWarehouse(tenantId, warehouseCode) {
   await ensureDefaultWarehouses(tenantId);
-  const warehouse = await exec(Warehouse.findOne({ tenantId, code: 'WH-001', status: 'active' }), null);
-  if (!warehouse) throw new HttpError(404, 'WH-001 Offline warehouse not found');
+  const requested = warehouseCode && warehouseCode !== 'WH-002'
+    ? await exec(Warehouse.findOne({ tenantId, code: warehouseCode, status: 'active', type: 'physical' }), null)
+    : null;
+  if (requested) return requested;
+  const offline = await exec(Warehouse.findOne({ tenantId, code: 'WH-001', status: 'active' }), null);
+  if (!offline) throw new HttpError(404, 'WH-001 warehouse not found');
+  return offline;
+}
+
+async function restockReturn(tenantId, userId, { items = [], referenceId, reason, movementType, destination, warehouseCode } = {}) {
+  const selected = destination == null ? null : channelsForDestination(destination);
+  const warehouse = await offlineWarehouse(tenantId, warehouseCode);
+  const code = warehouse.code;
+  if (selected && !selected.length) {
+    return { warehouse: code, channels: [], posted: [], skipped: [] };
+  }
+  const onlyChannel = selected && selected.length === 1 ? selected[0] : null;
+  const { queueInventoryPushes } = require('./inventoryPush.service');
   const posted = [];
   const skipped = [];
   for (const item of items) {
@@ -317,30 +437,45 @@ async function restockReturn(tenantId, userId, { items = [], referenceId, reason
       skipped.push(item.sku);
       continue;
     }
-    await stockIn(tenantId, userId, {
-      masterSkuId: sku._id,
-      warehouseId: warehouse._id,
-      qty,
-      reason: reason || 'Return approved — restock Offline WH-001; Amazon + Myntra ATS',
-      referenceType: 'return',
-      referenceId,
-      movementType: 'return_restock',
-      skipAuthorityCheck: true,
-    });
+    if (onlyChannel) {
+      await addChannelOnly(tenantId, userId, {
+        sku,
+        warehouse,
+        channel: onlyChannel,
+        qty,
+        reason: reason || `Return received — ${onlyChannel} only`,
+        referenceType: 'return',
+        referenceId,
+        movementType: movementType || 'return_restock',
+      });
+    } else {
+      await stockIn(tenantId, userId, {
+        masterSkuId: sku._id,
+        warehouseId: warehouse._id,
+        qty,
+        reason: reason || 'Return received — restock',
+        referenceType: 'return',
+        referenceId,
+        movementType: movementType || 'return_restock',
+        skipAuthorityCheck: true,
+        skipNotify: true,
+      });
+    }
+    await queueInventoryPushes(tenantId, userId, sku._id, selected || undefined);
     posted.push({
       sku: sku.code,
       channelSku: item.sku,
       qty,
-      warehouse: 'WH-001',
-      channels: ['shopify', 'amazon', 'myntra'],
+      warehouse: code,
+      channels: selected || CHANNELS.slice(),
     });
   }
   if (!posted.length) {
     throw new HttpError(400, `No Master SKU is mapped for ${skipped.join(', ') || 'these items'}. Map it on SKU Mapping first.`);
   }
   return {
-    warehouse: 'WH-001',
-    channels: ['shopify', 'amazon', 'myntra'],
+    warehouse: code,
+    channels: selected || CHANNELS.slice(),
     posted,
     skipped,
   };
@@ -349,7 +484,7 @@ async function restockReturn(tenantId, userId, { items = [], referenceId, reason
 async function stockOut(tenantId, userId, { masterSkuId, warehouseId, qty, reason, referenceType, referenceId }) {
   await assertOmsMaster(tenantId);
   const n = assertQty(qty);
-  return withTransaction(async (session) => {
+  const row = await withTransaction(async (session) => {
     const sku = await requireSku(tenantId, masterSkuId, session);
     const warehouse = await requireWarehouse(tenantId, warehouseId, session);
     const balance = await bumpQty(tenantId, sku, warehouse, -n, session);
@@ -374,6 +509,9 @@ async function stockOut(tenantId, userId, { masterSkuId, warehouseId, qty, reaso
     }
     return mapBalance(balance, warehouse, sku);
   });
+  await notifyChannels(tenantId, userId, masterSkuId);
+  await watchLowStock(tenantId, row);
+  return row;
 }
 
 async function adjustStock(tenantId, userId, body) {
@@ -405,7 +543,9 @@ async function setReorderPoint(tenantId, id, reorderPoint) {
     );
   }
   if (!row) throw new HttpError(404, 'Inventory row not found');
-  return mapBalance(row, row.warehouseId, row.masterSkuId);
+  const mapped = mapBalance(row, row.warehouseId, row.masterSkuId);
+  await watchLowStock(tenantId, mapped);
+  return mapped;
 }
 
 async function planAllocation(tenantId, masterSkuId, channel, qty, session) {
@@ -419,7 +559,7 @@ async function planAllocation(tenantId, masterSkuId, channel, qty, session) {
       Inventory.findOne({ tenantId, masterSkuId, warehouseId: warehouse._id }),
       session,
     );
-    const avail = balance ? availableOf(balance) : 0;
+    const avail = balance ? channelSellable(balance, channel) : 0;
     if (avail < 1) continue;
     const take = Math.min(avail, need);
     plan.push({ warehouse, qty: take });
@@ -431,20 +571,55 @@ async function planAllocation(tenantId, masterSkuId, channel, qty, session) {
   return plan;
 }
 
-async function atomicReserve(tenantId, masterSkuId, warehouseId, qty, session) {
-  return exec(
-    Inventory.findOneAndUpdate(
-      {
-        tenantId,
-        masterSkuId,
-        warehouseId,
-        $expr: { $gte: [availableExpr, qty] },
-      },
-      { $inc: { reservedQty: qty } },
-      { new: true },
-    ),
+async function holdSlice(tenantId, masterSkuId, warehouse, channel, qty, session) {
+  const current = await exec(
+    Inventory.findOne({ tenantId, masterSkuId, warehouseId: warehouse._id }),
     session,
   );
+  const ch = CHANNELS.includes(channel) && warehouse.type !== 'virtual' ? channel : '';
+  const fromOnly = ch ? Math.min(channelFree(current, ch), qty) : 0;
+  const fromShared = qty - fromOnly;
+  const inc = {};
+  const expr = [];
+  if (fromShared) {
+    inc.reservedQty = fromShared;
+    expr.push({ $gte: [availableExpr, fromShared] });
+  }
+  if (fromOnly) {
+    inc[`channelHeld.${ch}`] = fromOnly;
+    expr.push({
+      $gte: [
+        {
+          $subtract: [
+            { $ifNull: [`$channelOnly.${ch}`, 0] },
+            { $ifNull: [`$channelHeld.${ch}`, 0] },
+          ],
+        },
+        fromOnly,
+      ],
+    });
+  }
+  const filter = { tenantId, masterSkuId, warehouseId: warehouse._id };
+  if (expr.length === 1) filter.$expr = expr[0];
+  else if (expr.length > 1) filter.$expr = { $and: expr };
+  const balance = await exec(Inventory.findOneAndUpdate(filter, { $inc: inc }, { new: true }), session);
+  return balance ? { balance, fromChannelOnly: fromOnly } : null;
+}
+
+async function releaseHold(tenantId, masterSkuId, warehouseId, qty, fromChannelOnly, channel, session) {
+  const shared = qty - (fromChannelOnly || 0);
+  const inc = {};
+  const filter = { tenantId, masterSkuId, warehouseId };
+  if (shared > 0) {
+    inc.reservedQty = -shared;
+    filter.reservedQty = { $gte: shared };
+  }
+  if (fromChannelOnly > 0 && CHANNELS.includes(channel)) {
+    inc[`channelHeld.${channel}`] = -fromChannelOnly;
+    filter[`channelHeld.${channel}`] = { $gte: fromChannelOnly };
+  }
+  if (!Object.keys(inc).length) return null;
+  return exec(Inventory.findOneAndUpdate(filter, { $inc: inc }, { new: true }), session);
 }
 
 async function atomicReleaseReserved(tenantId, masterSkuId, warehouseId, qty, session) {
@@ -465,7 +640,15 @@ async function atomicReleaseReserved(tenantId, masterSkuId, warehouseId, qty, se
 
 async function reverseAllocations(tenantId, masterSkuId, done, session, userId, trx) {
   for (const item of [...done].reverse()) {
-    const balance = await atomicReleaseReserved(tenantId, masterSkuId, item.warehouse._id, item.qty, session);
+    const balance = await releaseHold(
+      tenantId,
+      masterSkuId,
+      item.warehouse._id,
+      item.qty,
+      item.fromChannelOnly || 0,
+      item.channel,
+      session,
+    );
     if (item.reservation && item.reservation.status === 'held') {
       item.reservation.status = 'released';
       await item.reservation.save(session ? { session } : undefined);
@@ -496,7 +679,7 @@ async function reserveInside(tenantId, userId, {
   const n = assertQty(qty);
   const sku = await requireSku(tenantId, masterSkuId, session);
   const ch = String(channel || 'manual').toLowerCase();
-  if (!['shopify', 'amazon', 'myntra', 'manual'].includes(ch)) throw new HttpError(400, 'Unknown channel');
+  if (ch !== 'manual' && !CHANNELS.includes(ch)) throw new HttpError(400, 'Unknown channel');
   const key = String(idempotencyKey || crypto.randomUUID());
   const existing = await exec(
     InventoryReservation.findOne({ tenantId, idempotencyKey: key }),
@@ -522,10 +705,13 @@ async function reserveInside(tenantId, userId, {
   const ref = String(orderRef || `RES-${trx}`);
   try {
     for (const slice of plan) {
-      const balance = await atomicReserve(tenantId, sku._id, slice.warehouse._id, slice.qty, session);
-      if (!balance) {
+      const held = await holdSlice(tenantId, sku._id, slice.warehouse, ch, slice.qty, session);
+      if (!held) {
         throw new HttpError(409, `Out of stock while reserving ${slice.warehouse.code}`);
       }
+      const balance = held.balance;
+      slice.fromChannelOnly = held.fromChannelOnly;
+      slice.channel = ch;
       const holdKey = reserved.length === 0 ? key : `${key}:${slice.warehouse.code}`;
       const hold = new InventoryReservation({
         tenantId,
@@ -534,6 +720,7 @@ async function reserveInside(tenantId, userId, {
         orderRef: ref,
         channel: ch,
         qty: slice.qty,
+        fromChannelOnly: held.fromChannelOnly,
         status: 'held',
         idempotencyKey: holdKey,
         reason: reason || 'Order reserve',
@@ -591,7 +778,14 @@ async function reserveStock(tenantId, userId, input) {
     }
   }
   try {
-    return await withTransaction((session) => reserveInside(tenantId, userId, { ...input, session }));
+    const result = await withTransaction((session) => reserveInside(tenantId, userId, { ...input, session }));
+    if (!result.idempotent) {
+      await notifyChannels(tenantId, userId, input.masterSkuId);
+      for (const slice of result.allocations || []) {
+        await watchLowStock(tenantId, { sku: result.sku, warehouse: slice.warehouse, available: slice.available });
+      }
+    }
+    return result;
   } catch (err) {
     if (err.code === 11000 && key) {
       const again = await exec(InventoryReservation.findOne({ tenantId, idempotencyKey: key }), null);
@@ -602,7 +796,7 @@ async function reserveStock(tenantId, userId, input) {
 }
 
 async function releaseReservation(tenantId, userId, { orderRef, idempotencyKey, reason }) {
-  return withTransaction(async (session) => {
+  const result = await withTransaction(async (session) => {
     const filter = { tenantId, status: 'held' };
     if (idempotencyKey) filter.idempotencyKey = idempotencyKey;
     else if (orderRef) filter.orderRef = orderRef;
@@ -612,7 +806,15 @@ async function releaseReservation(tenantId, userId, { orderRef, idempotencyKey, 
     const trx = newTransactionId();
     const out = [];
     for (const hold of holds) {
-      const balance = await atomicReleaseReserved(tenantId, hold.masterSkuId, hold.warehouseId, hold.qty, session);
+      const balance = await releaseHold(
+        tenantId,
+        hold.masterSkuId,
+        hold.warehouseId,
+        hold.qty,
+        hold.fromChannelOnly || 0,
+        hold.channel,
+        session,
+      );
       if (!balance) throw new HttpError(409, 'Could not release reservation (qty mismatch)');
       hold.status = 'released';
       await hold.save(session ? { session } : undefined);
@@ -633,12 +835,14 @@ async function releaseReservation(tenantId, userId, { orderRef, idempotencyKey, 
       });
       out.push({ warehouseId: String(hold.warehouseId), qty: hold.qty, available: availableOf(balance) });
     }
-    return { status: 'released', slices: out };
+    return { status: 'released', slices: out, masterSkuId: holds[0].masterSkuId };
   });
+  await notifyChannels(tenantId, userId, result.masterSkuId);
+  return result;
 }
 
 async function consumeReservation(tenantId, userId, { orderRef, reason }) {
-  return withTransaction(async (session) => {
+  const result = await withTransaction(async (session) => {
     const holds = await exec(
       InventoryReservation.find({ tenantId, orderRef, status: 'held' }),
       session,
@@ -651,18 +855,28 @@ async function consumeReservation(tenantId, userId, { orderRef, reason }) {
       for (const hold of holds) {
         const warehouse = await requireWarehouse(tenantId, hold.warehouseId, session);
         const field = qtyField(warehouse);
+        const fromOnly = hold.fromChannelOnly || 0;
+        const shared = hold.qty - fromOnly;
+        const inc = {};
+        const filter = {
+          tenantId,
+          masterSkuId: hold.masterSkuId,
+          warehouseId: hold.warehouseId,
+        };
+        if (shared > 0) {
+          inc.reservedQty = -shared;
+          inc[field] = -shared;
+          filter.reservedQty = { $gte: shared };
+          filter[field] = { $gte: shared };
+        }
+        if (fromOnly > 0 && CHANNELS.includes(hold.channel)) {
+          inc[`channelOnly.${hold.channel}`] = -fromOnly;
+          inc[`channelHeld.${hold.channel}`] = -fromOnly;
+          filter[`channelOnly.${hold.channel}`] = { $gte: fromOnly };
+          filter[`channelHeld.${hold.channel}`] = { $gte: fromOnly };
+        }
         const balance = await exec(
-          Inventory.findOneAndUpdate(
-            {
-              tenantId,
-              masterSkuId: hold.masterSkuId,
-              warehouseId: hold.warehouseId,
-              reservedQty: { $gte: hold.qty },
-              [field]: { $gte: hold.qty },
-            },
-            { $inc: { reservedQty: -hold.qty, [field]: -hold.qty } },
-            { new: true },
-          ),
+          Inventory.findOneAndUpdate(filter, { $inc: inc }, { new: true }),
           session,
         );
         if (!balance) throw new HttpError(409, `Cannot fulfil ${warehouse.code} — reserved/on-hand mismatch`);
@@ -683,17 +897,26 @@ async function consumeReservation(tenantId, userId, { orderRef, reason }) {
           transactionId: trx,
           session,
         });
-        consumed.push({ hold, warehouse, field });
+        consumed.push({ hold, warehouse, field, fromOnly, shared });
         out.push({ warehouse: warehouse.code, qty: hold.qty, available: availableOf(balance) });
       }
-      return { status: 'consumed', slices: out };
+      return { status: 'consumed', slices: out, masterSkuId: holds[0].masterSkuId };
     } catch (err) {
       if (!session) {
         for (const item of consumed.reverse()) {
+          const undo = {};
+          if (item.shared > 0) {
+            undo.reservedQty = item.shared;
+            undo[item.field] = item.shared;
+          }
+          if (item.fromOnly > 0 && CHANNELS.includes(item.hold.channel)) {
+            undo[`channelOnly.${item.hold.channel}`] = item.fromOnly;
+            undo[`channelHeld.${item.hold.channel}`] = item.fromOnly;
+          }
           await exec(
             Inventory.findOneAndUpdate(
               { tenantId, masterSkuId: item.hold.masterSkuId, warehouseId: item.hold.warehouseId },
-              { $inc: { reservedQty: item.hold.qty, [item.field]: item.hold.qty } },
+              { $inc: undo },
               { new: true },
             ),
             null,
@@ -705,6 +928,8 @@ async function consumeReservation(tenantId, userId, { orderRef, reason }) {
       throw err;
     }
   });
+  await notifyChannels(tenantId, userId, result.masterSkuId);
+  return result;
 }
 
 async function listLedger(tenantId, { masterSkuId, warehouseId, limit } = {}) {
@@ -744,6 +969,51 @@ async function lowStockAlerts(tenantId) {
   return listBalances(tenantId, { tab: 'low' });
 }
 
+async function watchLowStock(tenantId, row) {
+  if (!row?.sku && !row?.id) return;
+  try {
+    let doc = null;
+    if (row.id && !String(row.id).startsWith('pending')) {
+      doc = await exec(Inventory.findOne({ _id: row.id, tenantId }), null);
+    } else if (row.sku && row.warehouse) {
+      const sku = await exec(MasterSku.findOne({ tenantId, code: row.sku }), null);
+      const warehouse = await exec(Warehouse.findOne({ tenantId, code: row.warehouse }), null);
+      if (sku && warehouse) {
+        doc = await exec(Inventory.findOne({ tenantId, masterSkuId: sku._id, warehouseId: warehouse._id }), null);
+      }
+    }
+    if (!doc) return;
+    const available = row.available != null ? Number(row.available) : availableOf(doc);
+    const point = row.reorderPoint != null ? Number(row.reorderPoint) : (doc.reorderPoint ?? 10);
+    const low = available <= point;
+    const dedupeKey = `low:${row.sku || doc.masterSkuId}:${row.warehouse || ''}`;
+    if (!low) {
+      if (doc.lowStockAlertedAt) {
+        doc.lowStockAlertedAt = undefined;
+        await doc.save();
+        const NotificationDelivery = require('../models/NotificationDelivery');
+        const escaped = dedupeKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        await NotificationDelivery.deleteMany({ tenantId, dedupeKey: new RegExp(`^${escaped}(:|$)`) }).setOptions({ skipTenantFilter: true });
+      }
+      return;
+    }
+    if (doc.lowStockAlertedAt) return;
+    const { notifyEventEmail } = require('./notify.service');
+    const note = await notifyEventEmail(tenantId, 'NOT-007', {
+      dedupeKey,
+      subject: `Low stock ${row.sku || ''}`.trim(),
+      text: `SKU: ${row.sku || '—'}\nWarehouse: ${row.warehouse || '—'}\nAvailable: ${available}`,
+    });
+    const sent = [note.email, note.whatsapp, note.telegram, note.inApp].some((state) => state === 'sent' || state === 'already_sent');
+    if (sent) {
+      doc.lowStockAlertedAt = new Date();
+      await doc.save();
+    }
+  } catch (err) {
+    console.error('[NOTIFY]', err.message);
+  }
+}
+
 async function stressReserve(tenantId, userId, { masterSkuId, channel, qty = 1, attempts = 10 }) {
   const n = Math.min(Math.max(Number(attempts) || 10, 2), 50);
   const stamp = Date.now();
@@ -767,6 +1037,7 @@ async function stressReserve(tenantId, userId, { masterSkuId, channel, qty = 1, 
 
 module.exports = {
   availableOf,
+  channelSellable,
   listBalances,
   channelAts,
   stockIn,
@@ -777,6 +1048,7 @@ module.exports = {
   reserveStock,
   releaseReservation,
   consumeReservation,
+  setChannelAvailable,
   listLedger,
   lowStockAlerts,
   stressReserve,

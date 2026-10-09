@@ -11,6 +11,7 @@ import { ArrowLeft } from 'lucide-react';
 import BrandLogo from '../../components/brand/BrandLogo';
 import api, { apiFormError } from '../../lib/api';
 import { resetPasswordSchema } from '../../lib/validation';
+import CompanyChoice, { companiesFromError } from '../../components/auth/CompanyChoice';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -19,6 +20,7 @@ export default function ResetPasswordPage() {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
+  const [companies, setCompanies] = useState([]);
 
   const {
     register,
@@ -29,7 +31,7 @@ export default function ResetPasswordPage() {
     formState: { errors },
   } = useForm({
     resolver: zodResolver(resetPasswordSchema),
-    defaultValues: { email: emailFromQuery, otp: '', password: '', confirmPassword: '' },
+    defaultValues: { email: emailFromQuery, workspace: searchParams.get('workspace') || '', otp: '', password: '', confirmPassword: '' },
   });
 
   const password = watch('password', '');
@@ -40,6 +42,7 @@ export default function ResetPasswordPage() {
     try {
       await api.post('/auth/reset-password', {
         email: data.email,
+        workspace: data.workspace,
         otp: data.otp,
         password: data.password,
       });
@@ -50,7 +53,9 @@ export default function ResetPasswordPage() {
       ['email', 'otp', 'password'].forEach((field) => {
         if (parsed.fields[field]) setError(field, { type: 'server', message: parsed.fields[field] });
       });
-      setFormError(parsed.message === 'Validation failed' ? 'Please fix the highlighted fields.' : parsed.message);
+      const choices = companiesFromError(err);
+      if (parsed.status === 409 && choices.length) setCompanies(choices);
+      setFormError(parsed.status === 409 ? 'This email is on more than one company. Choose which one.' : (parsed.message === 'Validation failed' ? 'Please fix the highlighted fields.' : parsed.message));
     } finally {
       setSubmitting(false);
     }
@@ -65,10 +70,13 @@ export default function ResetPasswordPage() {
     setFormError('');
     setResending(true);
     try {
-      await api.post('/auth/forgot-password', { email });
+      await api.post('/auth/forgot-password', { email, workspace: getValues('workspace') });
       toast.success('A new OTP was sent to Gmail.');
     } catch (err) {
-      setFormError(apiFormError(err, 'Could not resend OTP.').message);
+      const parsed = apiFormError(err, 'Could not resend OTP.');
+      const choices = companiesFromError(err);
+      if (parsed.status === 409 && choices.length) setCompanies(choices);
+      setFormError(parsed.status === 409 ? 'This email is on more than one company. Choose which one.' : parsed.message);
     } finally {
       setResending(false);
     }
@@ -96,6 +104,7 @@ export default function ResetPasswordPage() {
               <label htmlFor="email" className="block text-sm font-medium mb-2">Email</label>
               <Input id="email" type="email" placeholder="you@gmail.com" {...register('email')} error={errors.email?.message} />
             </div>
+            <CompanyChoice companies={companies} register={register} error={errors.workspace?.message} />
             <div>
               <label htmlFor="otp" className="block text-sm font-medium mb-2">OTP from Gmail</label>
               <Input id="otp" inputMode="numeric" maxLength={6} placeholder="123456" {...register('otp')} error={errors.otp?.message} />

@@ -56,7 +56,7 @@ export default function AuthLayout() {
           isLogin ? 'min-h-[calc(100dvh-72px)] items-center py-6' : 'items-start pt-2 sm:pt-4'
         )}
       >
-        <div className={cn('relative w-full', isLogin ? 'max-w-[440px]' : 'max-w-[480px]')}>
+        <div className={cn('relative w-full', isLogin ? 'max-w-[440px]' : 'max-w-[640px]')}>
           {isLogin &&
             floaters.map((item) => (
               <div

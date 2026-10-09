@@ -19,6 +19,8 @@ router.patch(
   body('gstin').optional().trim().isLength({ min: 15, max: 15 }).withMessage('GSTIN must be 15 characters'),
   body('pan').optional().trim().isLength({ min: 10, max: 10 }).withMessage('PAN must be 10 characters'),
   body('supportEmail').optional().trim().isEmail().withMessage('Invalid email format'),
+  body('gmailUser').optional({ values: 'falsy' }).trim().isEmail().withMessage('Enter the company Gmail address'),
+  body('gmailAppPassword').optional().trim(),
   validate,
   asyncHandler(settings.patchCompany),
 );

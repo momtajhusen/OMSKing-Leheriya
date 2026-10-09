@@ -1,4 +1,5 @@
-const { successResponse } = require('../utils/response');
+const { successResponse, paginatedResponse } = require('../utils/response');
+const { pageOf } = require('../utils/page');
 const { HttpError } = require('../utils/httpError');
 const { sessionTenantId } = require('../lib/tenantAccess');
 const { acceptWebhook, listEvents, retryEvent } = require('../services/webhookInbox.service');
@@ -25,7 +26,8 @@ async function ingest(req, res) {
 
 async function listWebhookEvents(req, res) {
   const rows = await listEvents(merchantTenant(req));
-  return successResponse(res, rows, 'Webhook events');
+  const paged = pageOf(rows, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Webhook events');
 }
 
 async function retryWebhook(req, res) {
@@ -35,7 +37,8 @@ async function retryWebhook(req, res) {
 
 async function listIntegrationJobs(req, res) {
   const rows = await listJobs(merchantTenant(req));
-  return successResponse(res, rows, 'Integration jobs', 200, { queue: queueEngine() });
+  const paged = pageOf(rows, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Integration jobs', { queue: queueEngine() });
 }
 
 async function createJob(req, res) {

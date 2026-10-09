@@ -18,6 +18,8 @@ import { FormBanner } from '../../components/ui/FormBanner';
 import { Warehouse, Package, AlertTriangle, TrendingUp, Search } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
+import { CHANNEL_CATALOG, orderChannelLabel } from '../../constants/channelCatalog';
+import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 
 const TABS = [
   { id: 'all', label: 'All Stock' },
@@ -38,6 +40,10 @@ export default function InventoryPage() {
   const [warehouseId, setWarehouseId] = useState('');
   const [tab, setTab] = useState('all');
   const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerTotal, setLedgerTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -56,10 +62,10 @@ export default function InventoryPage() {
     setLoading(true);
     try {
       const [inv, wh, sku, led] = await Promise.all([
-        api.get('/inventory', { params: { warehouseId: warehouseId || undefined, q: q || undefined, tab: tab === 'ledger' ? 'all' : tab } }),
+        api.get('/inventory', { params: { warehouseId: warehouseId || undefined, q: q || undefined, tab: tab === 'ledger' ? 'all' : tab, page, limit: PAGE_SIZE } }),
         api.get('/warehouses'),
         api.get('/master-skus'),
-        tab === 'ledger' ? api.get('/inventory/ledger') : Promise.resolve({ data: { data: [] } }),
+        tab === 'ledger' ? api.get('/inventory/ledger', { params: { page: ledgerPage, limit: PAGE_SIZE } }) : Promise.resolve({ data: { data: [], meta: { total: 0 } } }),
       ]);
       const nextRows = inv.data.data?.rows || [];
       setRows(nextRows);
@@ -67,11 +73,13 @@ export default function InventoryPage() {
         if (!current) return null;
         return nextRows.find((row) => row.masterSkuId === current.masterSkuId && row.warehouseId === current.warehouseId) || null;
       });
+      setTotal(inv.data.meta?.total || nextRows.length);
       setKpis(inv.data.data?.kpis || kpis);
       setAuthority(inv.data.data?.inventoryAuthority || wh.data.data?.inventoryAuthority || 'oms');
       setWarehouses(wh.data.data?.warehouses || []);
       setMasters(sku.data.data || []);
       setLedger(led.data.data || []);
+      setLedgerTotal(led.data.meta?.total || (led.data.data || []).length);
     } catch (err) {
       toast.error(apiError(err, 'Could not load inventory'));
     } finally {
@@ -79,7 +87,7 @@ export default function InventoryPage() {
     }
   };
 
-  useEffect(() => { load(); }, [warehouseId, tab]);
+  useEffect(() => { load(); }, [warehouseId, tab, page, ledgerPage]);
 
   useEffect(() => {
     if (!selected) {
@@ -199,7 +207,7 @@ export default function InventoryPage() {
             <div>
               <p className="font-medium">Available to sell</p>
               <p className="text-sm text-muted-foreground">
-                Shopify = WH-001 + WH-002. Amazon = WH-001 only. Myntra = WH-001 only.
+                Shopify = offline WH-001 + virtual WH-002. Every other channel = WH-001 only. Virtual stock stays on Shopify. A return restocked to one channel raises only that channel.
                 {omsMaster
                   ? ' Stock in and adjust write a ledger row. They do not replace the balance in place.'
                   : ' Shopify is inventory master, so sellable quantity is read-only in OMS.'}
@@ -210,17 +218,17 @@ export default function InventoryPage() {
       </Card>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <KpiCard label="On hand" value={kpis.totalStock} icon={Package} onClick={() => setTab('all')} />
-        <KpiCard label="Reserved" value={kpis.reserved} icon={Package} onClick={() => setTab('reserved')} />
-        <KpiCard label="Available" value={kpis.available} icon={Package} onClick={() => setTab('available')} />
-        <KpiCard label="Low Stock" value={kpis.low} icon={AlertTriangle} onClick={() => setTab('low')} />
+        <KpiCard label="On hand" value={kpis.totalStock} icon={Package} onClick={() => { setTab('all'); setPage(1); }} />
+        <KpiCard label="Reserved" value={kpis.reserved} icon={Package} onClick={() => { setTab('reserved'); setPage(1); }} />
+        <KpiCard label="Available" value={kpis.available} icon={Package} onClick={() => { setTab('available'); setPage(1); }} />
+        <KpiCard label="Low Stock" value={kpis.low} icon={AlertTriangle} onClick={() => { setTab('low'); setPage(1); }} />
         <KpiCard label="Stock Value" value={formatINR(kpis.stockValue)} icon={TrendingUp} />
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button variant={!warehouseId ? 'default' : 'outline'} size="sm" onClick={() => setWarehouseId('')}>All warehouses</Button>
+        <Button variant={!warehouseId ? 'default' : 'outline'} size="sm" onClick={() => { setWarehouseId(''); setPage(1); }}>All warehouses</Button>
         {warehouses.map((wh) => (
-          <Button key={wh.id} variant={warehouseId === wh.id ? 'default' : 'outline'} size="sm" onClick={() => setWarehouseId(wh.id)}>
+          <Button key={wh.id} variant={warehouseId === wh.id ? 'default' : 'outline'} size="sm" onClick={() => { setWarehouseId(wh.id); setPage(1); }}>
             {wh.code}
           </Button>
         ))}
@@ -229,7 +237,7 @@ export default function InventoryPage() {
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex gap-2 flex-wrap">
           {TABS.map((item) => (
-            <Button key={item.id} variant={tab === item.id ? 'default' : 'outline'} size="sm" onClick={() => setTab(item.id)}>
+            <Button key={item.id} variant={tab === item.id ? 'default' : 'outline'} size="sm" onClick={() => { setTab(item.id); setPage(1); setLedgerPage(1); }}>
               {item.label}
             </Button>
           ))}
@@ -242,7 +250,7 @@ export default function InventoryPage() {
             className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && load()}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(); } }}
           />
         </div>
         <Button variant="outline" size="sm" onClick={load}>Search</Button>
@@ -250,7 +258,7 @@ export default function InventoryPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{tab === 'ledger' ? 'Immutable movements' : `Stock by SKU (${rows.length})`}</CardTitle>
+          <CardTitle>{tab === 'ledger' ? `Immutable movements (${ledgerTotal})` : `Stock by SKU (${total})`}</CardTitle>
         </CardHeader>
         <CardContent>
           {tab === 'ledger' ? (
@@ -310,9 +318,7 @@ export default function InventoryPage() {
                   <TableHead>On hand</TableHead>
                   <TableHead>Reserved</TableHead>
                   <TableHead>Available</TableHead>
-                  <TableHead>Shopify ATS</TableHead>
-                  <TableHead>Amazon ATS</TableHead>
-                  <TableHead>Myntra ATS</TableHead>
+                  {CHANNEL_CATALOG.map((channel) => <TableHead key={channel.id}>{orderChannelLabel(channel)} ATS</TableHead>)}
                   <TableHead>Status</TableHead>
                   {canInventoryAdjust && omsMaster && <TableHead />}
                 </TableRow>
@@ -335,9 +341,7 @@ export default function InventoryPage() {
                     <TableCell>{item.stock}</TableCell>
                     <TableCell>{item.reserved}</TableCell>
                     <TableCell className="font-medium">{item.available}</TableCell>
-                    <TableCell>{item.ats?.shopify ?? 0}</TableCell>
-                    <TableCell>{item.ats?.amazon ?? 0}</TableCell>
-                    <TableCell>{item.ats?.myntra ?? 0}</TableCell>
+                    {CHANNEL_CATALOG.map((channel) => <TableCell key={channel.id}>{item.ats?.[channel.id] ?? 0}</TableCell>)}
                     <TableCell>
                       {!item.tracked ? (
                         <Badge variant="outline">Not received</Badge>
@@ -359,6 +363,9 @@ export default function InventoryPage() {
               </TableBody>
             </Table>
           )}
+          {tab === 'ledger'
+            ? <Pagination page={ledgerPage} total={ledgerTotal} limit={PAGE_SIZE} onPage={setLedgerPage} />
+            : <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />}
         </CardContent>
       </Card>
 
@@ -375,7 +382,7 @@ export default function InventoryPage() {
             {ats && (
               <div>
                 <p className="text-muted-foreground mb-1">ATS for this Master SKU</p>
-                <p>Shopify {ats.shopify} · Amazon {ats.amazon} · Myntra {ats.myntra}</p>
+                <p>{CHANNEL_CATALOG.map((channel) => `${orderChannelLabel(channel)} ${ats[channel.id] ?? 0}`).join(' · ')}</p>
               </div>
             )}
             {canInventoryAdjust && omsMaster && (
@@ -474,9 +481,11 @@ export default function InventoryPage() {
         <div className="space-y-3">
           {banner && <FormBanner tone="error" title="Could not reserve">{banner}</FormBanner>}
           <Select value={reserve.channel} onChange={(e) => setReserve({ ...reserve, channel: e.target.value })}>
-            <option value="amazon">Amazon (WH-001 only)</option>
-            <option value="myntra">Myntra (WH-001 only)</option>
-            <option value="shopify">Shopify (WH-001 then WH-002)</option>
+            {CHANNEL_CATALOG.map((channel) => (
+              <option key={channel.id} value={channel.id}>
+                {orderChannelLabel(channel)}{channel.id === 'shopify' ? ' (WH-001 then WH-002)' : ' (WH-001 only)'}
+              </option>
+            ))}
           </Select>
           <Input type="number" min="1" value={reserve.qty} onChange={(e) => setReserve({ ...reserve, qty: e.target.value })} />
           <Input type="number" min="2" max="50" value={reserve.attempts} onChange={(e) => setReserve({ ...reserve, attempts: e.target.value })} />

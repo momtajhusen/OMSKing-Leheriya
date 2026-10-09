@@ -1,3 +1,5 @@
+const { paymentStanding, invoiceNumber } = require('../services/finance.service');
+
 function toOrderDto(doc) {
   const order = typeof doc.toObject === 'function' ? doc.toObject() : doc;
   const subOrders = order.subOrders || [];
@@ -12,6 +14,10 @@ function toOrderDto(doc) {
     channel: order.channel,
     status: order.status,
     paymentMode: order.paymentMode,
+    paymentStatus: order.paymentStatus || '',
+    paymentLabel: paymentStanding(order).label,
+    paid: paymentStanding(order).paid,
+    shipState: order.shipState || '',
     fulfilmentSource: order.fulfilmentSource,
     assignedVendor: order.assignedVendor || '',
     shopifyVendor: order.shopifyVendor || '',
@@ -57,7 +63,7 @@ function toOrderDto(doc) {
     createdAt: order.orderDate || order.createdAt,
     courier: order.courier || '',
     awb: order.awb || '',
-    invoiceNo: order.invoiceNo || '',
+    invoiceNo: order.invoiceNo || (order.channel === 'Shopify' ? invoiceNumber(order) : ''),
     labelGeneratedAt: order.labelGeneratedAt || null,
     invoiceGeneratedAt: order.invoiceGeneratedAt || null,
     reversePickup: order.reversePickup || null,

@@ -1,2 +1,2 @@
-/Users/momtajhusen/Desktop/OMSKing/docs/10-INTEGRATION-BUILD-PLAN.md es document ke base par 
-phase 1 ko chek karo kiya compleate hai aur es ke liye kiya baki hai mujhe kiya cha hiye yadi mujhe kuch nahi cha hiye aur aap compleate kar lo ge to compleate karo aur kuch cha hiye to bata o 
+/Users/momtajhusen/Desktop/OMSKing/docs/11-ROLE-COMPLETION-PHASES.md
+es document ko checj karo aur phase 1 ko chek karo kiya compleate hai kiya nahi jo nahi hai compleate us ko compleate karo 

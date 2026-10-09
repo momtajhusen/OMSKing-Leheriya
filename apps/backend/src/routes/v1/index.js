@@ -15,8 +15,13 @@ const settingsRoutes = require('./settings.routes');
 const integrationsRoutes = require('./integrations.routes');
 const ordersRoutes = require('./orders.routes');
 const returnsRoutes = require('./returns.routes');
+const financeRoutes = require('./finance.routes');
+const ndrRoutes = require('./ndr.routes');
 const vendorsRoutes = require('./vendors.routes');
 const auditLogsRoutes = require('./audit-logs.routes');
+const notificationsRoutes = require('./notifications.routes');
+const demoRequestsRoutes = require('./demoRequests.routes');
+const pricingRoutes = require('./pricing.routes');
 
 const router = express.Router();
 
@@ -37,7 +42,12 @@ router.use('/settings', settingsRoutes);
 router.use('/integrations', integrationsRoutes);
 router.use('/orders', ordersRoutes);
 router.use('/returns', returnsRoutes);
+router.use('/finance', financeRoutes);
+router.use('/ndr', ndrRoutes);
 router.use('/vendors', vendorsRoutes);
 router.use('/audit-logs', auditLogsRoutes);
+router.use('/notifications', notificationsRoutes);
+router.use('/demo-requests', demoRequestsRoutes);
+router.use('/pricing', pricingRoutes);
 
 module.exports = router;

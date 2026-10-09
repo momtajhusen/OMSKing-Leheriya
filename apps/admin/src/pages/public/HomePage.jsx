@@ -63,8 +63,8 @@ export default function HomePage() {
               OMSKing is Leheriya’s packing desk as SaaS. Master SKU, two warehouses, GST on the Order ID — each merchant is a locked tenant.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <MarketingCta to="/contact" className="px-7 py-3">
-                See Leheriya’s desk
+              <MarketingCta to="/demo" className="px-7 py-3">
+                Request a demo
                 <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
               </MarketingCta>
               <MarketingCta to="/features" variant="outline" className="px-7 py-3">
@@ -202,7 +202,7 @@ export default function HomePage() {
           <p className="mt-3 text-slate-600">Start your own merchant trial, or sign in to the Leheriya workspace.</p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <MarketingCta to="/auth/register">Start a merchant trial</MarketingCta>
-            <MarketingCta to="/contact" variant="outline">Talk to us</MarketingCta>
+            <MarketingCta to="/demo" variant="outline">Request a demo</MarketingCta>
           </div>
           <Link to="/pricing" className="mt-4 text-sm font-medium text-emerald-700 hover:underline">
             Tenant plans

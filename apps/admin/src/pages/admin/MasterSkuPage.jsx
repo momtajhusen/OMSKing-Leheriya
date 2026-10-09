@@ -16,6 +16,7 @@ import ProductThumb from '../../components/ui/ProductThumb';
 import { Pencil, Plus, Search } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
+import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 
 const empty = { name: '', code: '', color: '', size: '', barcode: '', sellingPrice: '', mrp: '', hsnCode: '' };
 
@@ -23,6 +24,8 @@ export default function MasterSkuPage() {
   const navigate = useNavigate();
   const { canCatalogEdit } = usePermissions();
   const [rows, setRows] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -34,8 +37,9 @@ export default function MasterSkuPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/master-skus', { params: { q } });
+      const { data } = await api.get('/master-skus', { params: { q, page, limit: PAGE_SIZE } });
       setRows(data.data || []);
+      setTotal(data.meta?.total || 0);
     } catch (err) {
       toast.error(apiError(err, 'Could not load Master SKUs'));
     } finally {
@@ -43,7 +47,7 @@ export default function MasterSkuPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [page]);
 
   const save = async () => {
     setBanner('');
@@ -122,10 +126,10 @@ export default function MasterSkuPage() {
                 placeholder="Search code, name or barcode..."
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && load()}
+                onKeyDown={(e) => { if (e.key === 'Enter') { if (page === 1) load(); else setPage(1); } }}
               />
             </div>
-            <Button variant="outline" onClick={load}>Search</Button>
+            <Button variant="outline" onClick={() => { if (page === 1) load(); else setPage(1); }}>Search</Button>
           </div>
         </CardContent>
       </Card>
@@ -204,6 +208,7 @@ export default function MasterSkuPage() {
               </TableBody>
             </Table>
           )}
+          <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
         </CardContent>
       </Card>
 

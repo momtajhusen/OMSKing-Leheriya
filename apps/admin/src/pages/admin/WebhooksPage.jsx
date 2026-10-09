@@ -6,6 +6,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '.
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import { RefreshCw } from 'lucide-react';
+import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 
 function statusVariant(status) {
   if (status === 'processed') return 'outline';
@@ -15,18 +16,21 @@ function statusVariant(status) {
 
 export default function WebhooksPage() {
   const [rows, setRows] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    const { data } = await api.get('/integrations/webhooks');
+  const load = async (nextPage = page) => {
+    const { data } = await api.get('/integrations/webhooks', { params: { page: nextPage, limit: PAGE_SIZE } });
     setRows(data.data || []);
+    setTotal(data.meta?.total || 0);
   };
 
   useEffect(() => {
-    load()
+    load(page)
       .catch((err) => toast.error(apiError(err, 'Could not load webhooks')))
       .finally(() => setLoading(false));
-  }, []);
+  }, [page]);
 
   const retry = async (row) => {
     try {
@@ -43,7 +47,7 @@ export default function WebhooksPage() {
       <div>
         <h1 className="text-3xl font-bold mb-2">Webhooks</h1>
         <p className="text-muted-foreground">
-          Inbox for Shopify, Amazon, and Myntra. POST /api/v1/integrations/shopify/webhook (amazon and myntra use the same path). The shop signature picks the tenant. The same event id is stored once and is not applied again. A public HTTPS host is required; localhost does not receive channel webhooks.
+          Inbox for every channel. POST /api/v1/integrations/:channel/webhook. The shop signature picks the tenant. The same event id is stored once and is not applied again. A public HTTPS host is required; localhost does not receive channel webhooks.
         </p>
       </div>
       <Card>
@@ -93,6 +97,7 @@ export default function WebhooksPage() {
               </TableBody>
             </Table>
           )}
+          <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
         </CardContent>
       </Card>
     </div>

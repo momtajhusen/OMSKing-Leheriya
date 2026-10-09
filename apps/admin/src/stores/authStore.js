@@ -3,6 +3,7 @@ import { ROLES } from '../constants/roles';
 import { attachPermissions } from '../constants/permissions';
 import useUIStore from './uiStore';
 import api from '../lib/api';
+import { resetCompanyData } from './companyMemory';
 
 const STORAGE_USER = 'user';
 const STORAGE_TOKEN = 'token';
@@ -28,11 +29,13 @@ const useAuthStore = create((set, get) => ({
   loading: Boolean(stored),
 
   persist: (token, userData) => {
+    const previous = get().user?.tenantId || null;
     const next = attachPermissions(userData);
     localStorage.setItem(STORAGE_TOKEN, token);
     localStorage.setItem(STORAGE_USER, JSON.stringify(next));
     set({ isAuthenticated: true, user: next, loading: false });
     useUIStore.getState().setActiveRole(next.impersonating ? ROLES.SUPER_ADMIN : next.role);
+    if (previous !== next.tenantId) resetCompanyData();
   },
 
   login: (token, userData) => {
@@ -43,6 +46,7 @@ const useAuthStore = create((set, get) => ({
     localStorage.removeItem(STORAGE_TOKEN);
     localStorage.removeItem(STORAGE_USER);
     set({ isAuthenticated: false, user: null, loading: false });
+    resetCompanyData();
   },
 
   logout: async () => {

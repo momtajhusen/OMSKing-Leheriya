@@ -8,6 +8,8 @@ const inventorySchema = new mongoose.Schema({
   physicalQty: { type: Number, default: 0, min: 0 },
   virtualQty: { type: Number, default: 0, min: 0 },
   reservedQty: { type: Number, default: 0, min: 0 },
+  channelOnly: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+  channelHeld: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
   reorderPoint: { type: Number, default: 10, min: 0 },
   safetyStock: { type: Number, default: 0, min: 0 },
   lastCountedAt: Date,

@@ -113,5 +113,50 @@ module.exports = {
   pullCatalog,
   pullProducts: async (creds, opts) => (await pullCatalog(creds, opts)).rows,
   pullOrders: async () => { throw later('Myntra order pull starts in Phase 3'); },
-  pushInventory: async () => { throw later('Myntra inventory push starts in Phase 4'); },
+  shipOrder: async (creds, { sellerOrderId, packetId, client } = {}) => {
+    if (!String(creds?.merchantId || '').trim() || !String(creds?.secretKey || '').trim()) {
+      const err = new Error('Myntra ship was not called. Merchant Id and Secret Key are missing.');
+      err.statusCode = 400;
+      err.terminal = true;
+      throw err;
+    }
+    const api = client || createMyntraClient(creds);
+    const result = await api.readyToDispatch({
+      sellerOrderId: String(sellerOrderId || ''),
+      packetId: String(packetId || ''),
+      warehouse: String(creds.storeId || creds.warehouseCode || ''),
+    });
+    const trackingNumber = String(result?.trackingNumber || result?.packetId || packetId || '').trim();
+    if (!trackingNumber) {
+      const err = new Error('Myntra ready-to-dispatch did not return a tracking id.');
+      err.statusCode = 502;
+      throw err;
+    }
+    return { trackingNumber, courier: 'myntra' };
+  },
+  pushInventory: async (creds, { items = [], client } = {}) => {
+    if (!String(creds?.merchantId || '').trim() || !String(creds?.secretKey || '').trim()) {
+      const err = new Error('Myntra stock was not pushed. Merchant Id and Secret Key are missing, so the inventory API was not called.');
+      err.statusCode = 400;
+      err.terminal = true;
+      throw err;
+    }
+    const storeCode = String(creds.storeId || creds.warehouseCode || '').trim();
+    if (!storeCode) {
+      const err = new Error('Myntra stock was not pushed. Store Id is missing, so the inventory API was not called.');
+      err.statusCode = 400;
+      err.terminal = true;
+      throw err;
+    }
+    const api = client || createMyntraClient(creds);
+    try {
+      return await api.updateInventory(items, {
+        storeCode,
+        processingSla: Number(creds.slaDaysInventory) || 2,
+      });
+    } catch (err) {
+      if (err.channelStatus === 403 || err.statusCode === 400) err.terminal = true;
+      throw err;
+    }
+  },
 };

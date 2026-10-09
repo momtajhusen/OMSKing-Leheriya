@@ -10,6 +10,9 @@ const returns = require('../../controllers/returns.controller');
 const router = require('express').Router();
 const approve = [authMiddleware, tenantMiddleware, vendorScope('orders'), requirePermission('returns.approve')];
 
+router.get('/', ...approve, asyncHandler(returns.listReturns));
+router.post('/:returnNo/approve', ...approve, asyncHandler(returns.approveReturn));
+router.post('/:returnNo/receive', ...approve, asyncHandler(returns.receiveReturn));
 router.post(
   '/approve-restock',
   ...approve,

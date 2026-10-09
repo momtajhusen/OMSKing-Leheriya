@@ -16,6 +16,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import { inviteUserSchema } from '../../lib/validation';
 import { FormBanner } from '../../components/ui/FormBanner';
 import { Users, Shield, Plus, Search, Check, X, Copy, Pencil } from 'lucide-react';
+import Pagination, { useClientPage } from '../../components/ui/Pagination';
 
 const emptyUser = { name: '', email: '', role: ROLES.OPERATIONS };
 const MATRIX_ROLES = MERCHANT_ASSIGNABLE_ROLES.filter((role) => role !== ROLES.ADMIN);
@@ -60,6 +61,7 @@ export default function UsersRolesPage() {
     const label = ROLE_LABELS[item.role] || item.role;
     return !q || item.name.toLowerCase().includes(q) || item.email.toLowerCase().includes(q) || label.toLowerCase().includes(q);
   }), [userList, searchQuery]);
+  const paged = useClientPage(filtered);
 
   const saveUser = async () => {
     setFormBanner('');
@@ -130,6 +132,10 @@ export default function UsersRolesPage() {
   const togglePerm = async (role, key) => {
     if (role.code === ROLES.SUPER_ADMIN && key === 'users.manage' && role.permissions.includes(key)) {
       toast.error('Merchant Super Admin must keep Manage users');
+      return;
+    }
+    if (role.code === ROLES.VENDOR && (key === 'users.manage' || key === 'finance.reconcile') && !role.permissions.includes(key)) {
+      toast.error('Vendor cannot manage users or reconcile finance');
       return;
     }
     const next = role.permissions.includes(key)
@@ -203,6 +209,7 @@ export default function UsersRolesPage() {
             {filtered.length === 0 ? (
               <EmptyState title="No users match" />
             ) : (
+              <>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -215,7 +222,7 @@ export default function UsersRolesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((row) => (
+                  {paged.rows.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="font-medium">{row.name}</TableCell>
                       <TableCell>{row.email}</TableCell>
@@ -240,6 +247,8 @@ export default function UsersRolesPage() {
                   ))}
                 </TableBody>
               </Table>
+              <Pagination page={paged.page} total={paged.total} limit={paged.limit} onPage={paged.setPage} />
+              </>
             )}
           </CardContent>
         </Card>
@@ -290,7 +299,7 @@ export default function UsersRolesPage() {
                             type="button"
                             className="mx-auto block rounded p-1 hover:bg-muted disabled:opacity-40"
                             title={canUsers ? 'Click to grant or revoke' : 'View only'}
-                            disabled={!canUsers || (code === ROLES.SUPER_ADMIN && perm.key === 'users.manage')}
+                            disabled={!canUsers || (code === ROLES.SUPER_ADMIN && perm.key === 'users.manage') || (code === ROLES.VENDOR && (perm.key === 'users.manage' || perm.key === 'finance.reconcile'))}
                             onClick={() => role && togglePerm(role, perm.key)}
                           >
                             {hasPermission(granted, perm.key)

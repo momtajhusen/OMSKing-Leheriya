@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { Check, Sparkles, Rocket, Building2, Radio, Layers } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -6,10 +6,11 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { MarketingCta, MktCard } from '../../components/marketing/MarketingCta';
 import { SUBSCRIPTION_PLANS } from '../../constants/channelCatalog';
+import api, { apiFormError } from '../../lib/api';
 
 const faqs = [
-  { q: 'Is there a trial?', a: 'Yes. Register a merchant trial — you become that company’s Super Admin.' },
-  { q: 'Which channels at launch?', a: 'Shopify, Amazon and Myntra only. Flipkart or others can be added later per tenant — they are not in the first build.' },
+  { q: 'Is there a trial?', a: 'Yes. A 14-day trial does not charge per order. After that, the bill is the rate for that month’s orders, or the monthly minimum if usage is lower.' },
+  { q: 'Which channels are included?', a: 'Shopify, Amazon, Myntra, Flipkart, Meesho, AJIO and Nykaa. Each channel uses its own API host. Orders, listings and stock show on the same screens.' },
   { q: 'How are tenants isolated?', a: 'Every row carries tenantId from the login. A Leheriya Super Admin never sees another merchant’s orders.' },
 ];
 
@@ -19,7 +20,16 @@ const planMeta = {
   enterprise: { icon: Building2, accent: 'bg-lime-500', popular: false },
 };
 
+function inr(amount) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount || 0);
+}
+
 export default function PricingPage() {
+  const [card, setCard] = useState(null);
+  const [orders, setOrders] = useState('1000');
+  const [quote, setQuote] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -33,15 +43,38 @@ export default function PricingPage() {
     message: '',
   });
 
+  useEffect(() => {
+    api.get('/pricing').then(({ data }) => setCard(data.data)).catch(() => setCard(null));
+  }, []);
+
+  useEffect(() => {
+    if (!card) return undefined;
+    const handle = setTimeout(() => {
+      api.get('/pricing', { params: { orders } })
+        .then(({ data }) => setQuote(data.data?.quote || null))
+        .catch(() => setQuote(null));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [card, orders]);
+
   const onChange = (event) => setForm({ ...form, [event.target.name]: event.target.value });
 
-  const onSubmit = (event) => {
+  const onSubmit = async (event) => {
     event.preventDefault();
-    toast.success('Pricing request sent. We will reply with a plan fit.');
-    setForm({
-      name: '', email: '', phone: '', company: '', orders: '', products: '',
-      channels: '', city: '', state: '', message: '',
-    });
+    setFormError('');
+    setSending(true);
+    try {
+      await api.post('/pricing/inquiries', form);
+      toast.success('Pricing request saved. We will reply with a plan fit.');
+      setForm({
+        name: '', email: '', phone: '', company: '', orders: '', products: '',
+        channels: '', city: '', state: '', message: '',
+      });
+    } catch (err) {
+      setFormError(apiFormError(err, 'Could not save the pricing request.').message);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -52,7 +85,9 @@ export default function PricingPage() {
         <div className="relative mx-auto max-w-2xl">
           <h1 className="text-3xl font-bold tracking-tight sm:text-5xl">Pricing</h1>
           <p className="mt-3 text-sm leading-6 text-emerald-100 sm:text-base">
-            Per tenant. Priced on Shopify / Amazon / Myntra and monthly Master Orders — not a credit pack.
+            {card
+              ? `As low as ${inr(card.lowestRate)} per order. A quiet month still pays the ${inr(card.minimumMonthly)} minimum.`
+              : 'Charged per order, with a monthly minimum.'}
           </p>
         </div>
       </section>
@@ -73,8 +108,47 @@ export default function PricingPage() {
             ))}
           </div>
 
+          {card && (
+            <div className="mb-12 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+              <MktCard>
+                <h2 className="text-2xl font-bold text-slate-900">Per order</h2>
+                <p className="mt-2 text-sm text-slate-600">More orders in the month use a lower rate. The last slab applies to the whole month.</p>
+                <table className="mt-5 w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-slate-500">
+                      <th className="py-2 font-medium">Orders this month</th>
+                      <th className="py-2 text-right font-medium">Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {card.slabs.map((slab) => (
+                      <tr key={slab.label} className="border-t border-slate-100">
+                        <td className="py-3 text-slate-800">{slab.label}</td>
+                        <td className="py-3 text-right font-semibold text-slate-900">{inr(slab.rate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-3 text-sm text-slate-600">Minimum {inr(card.minimumMonthly)} a month. If usage is lower, the difference is added.</p>
+              </MktCard>
+              <MktCard>
+                <h2 className="text-2xl font-bold text-slate-900">Estimate</h2>
+                <label htmlFor="order-estimate" className="mt-4 mb-1.5 block text-sm font-medium text-slate-700">Orders this month</label>
+                <Input id="order-estimate" inputMode="numeric" value={orders} onChange={(event) => setOrders(event.target.value.replace(/[^\d]/g, ''))} />
+                {quote && (
+                  <dl className="mt-5 space-y-2 text-sm">
+                    <div className="flex justify-between"><dt className="text-slate-500">Rate</dt><dd className="font-semibold">{inr(quote.rate)} / order</dd></div>
+                    <div className="flex justify-between"><dt className="text-slate-500">Usage</dt><dd className="font-semibold">{inr(quote.usage)}</dd></div>
+                    <div className="flex justify-between"><dt className="text-slate-500">Minimum adjustment</dt><dd className="font-semibold">{inr(quote.adjustment)}</dd></div>
+                    <div className="flex justify-between border-t border-slate-100 pt-2 text-base"><dt className="font-semibold text-slate-900">Bill</dt><dd className="font-bold text-emerald-700">{inr(quote.bill)}</dd></div>
+                  </dl>
+                )}
+              </MktCard>
+            </div>
+          )}
+
           <p className="mx-auto mb-8 max-w-2xl px-1 text-center text-base font-semibold leading-6 text-slate-800 sm:mb-10 sm:text-lg">
-            Plans from ₹2,999 / month. Growth adds the vendor portal and Amazon / Myntra settlement matching.
+            Every company pays this same rate. The trial packages below only change which channels you can connect.
           </p>
 
           <div className="mb-16 grid items-stretch gap-6 md:grid-cols-3">
@@ -106,11 +180,11 @@ export default function PricingPage() {
                     ))}
                   </ul>
                   <MarketingCta
-                    to="/contact"
+                    to={`/auth/register?plan=${plan.id}`}
                     variant={meta.popular ? 'solid' : 'outline'}
                     className="mt-6 w-full"
                   >
-                    {plan.id === 'enterprise' ? 'Talk to us' : 'Request this plan'}
+                    Start {plan.name} trial
                   </MarketingCta>
                 </MktCard>
               );
@@ -124,6 +198,7 @@ export default function PricingPage() {
                 We quote on launch channels and monthly Master Orders. Leheriya is the first tenant we sized this against.
               </p>
               <form onSubmit={onSubmit} className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {formError && <p className="sm:col-span-2 text-sm font-medium text-red-600" role="alert">{formError}</p>}
                 <Field label="Your name" name="name" value={form.name} onChange={onChange} required />
                 <Field label="Email" name="email" type="email" value={form.email} onChange={onChange} required />
                 <Field label="Mobile" name="phone" value={form.phone} onChange={onChange} />
@@ -143,8 +218,8 @@ export default function PricingPage() {
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <Button type="submit" className="rounded-full">
-                    Send pricing request
+                  <Button type="submit" disabled={sending} className="rounded-full">
+                    {sending ? 'Saving…' : 'Send pricing request'}
                   </Button>
                 </div>
               </form>
@@ -158,8 +233,8 @@ export default function PricingPage() {
                 </MktCard>
               ))}
               <p className="px-1 text-sm text-slate-600">
-                Prefer a tenant walkthrough?{' '}
-                <Link to="/contact" className="font-medium text-emerald-700 hover:underline">Open contact</Link>
+                Prefer a walkthrough before you sign up?{' '}
+                <Link to="/demo" className="font-medium text-emerald-700 hover:underline">Request a demo</Link>
               </p>
             </div>
           </div>

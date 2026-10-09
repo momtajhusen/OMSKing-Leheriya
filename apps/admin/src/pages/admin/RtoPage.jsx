@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import api, { apiError } from '../../lib/api';
 import useOrderStore from '../../stores/orderStore';
-import useReturnsStore from '../../stores/returnsStore';
+import useReturnsStore, { EMPTY_WORKFLOW } from '../../stores/returnsStore';
+import useAuthStore from '../../stores/authStore';
 import { formatDate, statusBadgeVariant } from '../../utils/format';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
@@ -16,7 +17,10 @@ import EmptyState from '../../components/ui/EmptyState';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
 import { RotateCcw, ClipboardCheck, CheckCircle, XCircle, RefreshCw, AlertTriangle, PackageCheck, Truck } from 'lucide-react';
 
-const RESTOCK_DESTINATIONS = ['All', 'None'];
+import { CHANNEL_CATALOG, orderChannelLabel } from '../../constants/channelCatalog';
+import Pagination, { useClientPage } from '../../components/ui/Pagination';
+
+const RESTOCK_DESTINATIONS = ['All', ...CHANNEL_CATALOG.map((channel) => orderChannelLabel(channel)), 'None'];
 
 function trackingOf(order) {
   return order.awb || (order.channelLines || []).find((line) => line.trackingNumber)?.trackingNumber || '';
@@ -33,7 +37,8 @@ export default function RtoPage() {
   const orders = useOrderStore((s) => s.orders);
   const loaded = useOrderStore((s) => s.loaded);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
-  const workflow = useReturnsStore((s) => s.workflow);
+  const tenantId = useAuthStore((s) => s.user?.tenantId);
+  const workflow = useReturnsStore((s) => (tenantId && s.workflowByTenant?.[tenantId]) || EMPTY_WORKFLOW);
   const setWorkflow = useReturnsStore((s) => s.setWorkflow);
   const [activeTab, setActiveTab] = useState('All');
   const [restockChoices, setRestockChoices] = useState({});
@@ -60,6 +65,7 @@ export default function RtoPage() {
   }).sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt))), [orders, workflow]);
 
   const filtered = rows.filter((row) => activeTab === 'All' || row.status === activeTab);
+  const paged = useClientPage(filtered);
 
   const qcPass = async (row) => {
     const destination = restockChoices[row.id] || 'All';
@@ -69,6 +75,9 @@ export default function RtoPage() {
         await api.post('/returns/approve-restock', {
           returnId: row.id,
           referenceId: row.id,
+          destination,
+          movementType: 'rto_restock',
+          warehouseCode: 'WH-001',
           items: (row.order.items || []).map((item) => ({ sku: item.sku, qty: item.qty || 1 })),
           reason: `RTO ${row.order.id} QC passed`,
         });
@@ -143,7 +152,7 @@ export default function RtoPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((row) => {
+                  {paged.rows.map((row) => {
                     const pending = row.status === 'QC Pending';
                     return (
                       <TableRow key={row.id}>
@@ -162,7 +171,7 @@ export default function RtoPage() {
                         <TableCell>
                           {pending ? (
                             <Select className="w-32" value={restockChoices[row.id] || 'All'} onChange={(e) => setRestockChoices((prev) => ({ ...prev, [row.id]: e.target.value }))}>
-                              {RESTOCK_DESTINATIONS.map((dest) => <option key={dest} value={dest}>{dest === 'All' ? 'WH-001 (all channels)' : 'No restock'}</option>)}
+                              {RESTOCK_DESTINATIONS.map((dest) => <option key={dest} value={dest}>{dest === 'None' ? 'No restock' : dest}</option>)}
                             </Select>
                           ) : (
                             <Badge variant="secondary">{row.restockDestination || 'None'}</Badge>
@@ -189,6 +198,7 @@ export default function RtoPage() {
                   })}
                 </TableBody>
               </Table>
+              <Pagination page={paged.page} total={paged.total} limit={paged.limit} onPage={paged.setPage} />
             </div>
           )}
         </CardContent>

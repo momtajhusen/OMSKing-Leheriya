@@ -8,13 +8,32 @@ export function vendorReportLabel(name) {
   return text;
 }
 
+function tenantKey() {
+  try {
+    return JSON.parse(localStorage.getItem('user') || '{}').tenantId || 'none';
+  } catch {
+    return 'none';
+  }
+}
+
 const useVendorStore = create(persist((set, get) => ({
   vendors: [],
   loaded: false,
   error: '',
-  autoAssign: false,
+  autoAssignByTenant: {},
 
-  setAutoAssign: (on) => set({ autoAssign: Boolean(on) }),
+  autoAssignOn() {
+    return Boolean(get().autoAssignByTenant[tenantKey()]);
+  },
+
+  setAutoAssign: (on) => {
+    const key = tenantKey();
+    set({ autoAssignByTenant: { ...get().autoAssignByTenant, [key]: Boolean(on) } });
+  },
+
+  clearCompany() {
+    set({ vendors: [], loaded: false, error: '' });
+  },
 
   load: async () => {
     try {
@@ -61,9 +80,9 @@ const useVendorStore = create(persist((set, get) => ({
   },
 }), {
   name: 'omsking-vendor-desk',
-  version: 2,
-  partialize: (state) => ({ autoAssign: state.autoAssign }),
-  migrate: (persisted) => ({ autoAssign: Boolean(persisted?.autoAssign) }),
+  version: 3,
+  partialize: (state) => ({ autoAssignByTenant: state.autoAssignByTenant }),
+  migrate: () => ({ autoAssignByTenant: {} }),
 }));
 
 export default useVendorStore;

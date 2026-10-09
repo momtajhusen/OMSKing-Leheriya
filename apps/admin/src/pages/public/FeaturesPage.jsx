@@ -92,10 +92,10 @@ export default function FeaturesPage() {
       <section className="relative overflow-hidden bg-gradient-to-r from-emerald-900 via-emerald-700 to-teal-600 py-16 text-white">
         <div className="pointer-events-none absolute right-0 top-0 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
         <div className="relative mx-auto max-w-xl px-4 text-center">
-          <h2 className="text-2xl font-bold">See Leheriya’s desk</h2>
-          <p className="mt-2 text-emerald-100">Orders, WH-001 / WH-002 and GST on a sample tenant — not a generic console tour.</p>
-          <MarketingCta to="/contact" variant="outline" className="mt-6 border-white/50 bg-white text-emerald-800 hover:border-white hover:text-emerald-900">
-            See Leheriya’s desk
+          <h2 className="text-2xl font-bold">See it on a walkthrough</h2>
+          <p className="mt-2 text-emerald-100">Orders, WH-001 / WH-002 and GST. The demo form does not create a login.</p>
+          <MarketingCta to="/demo" variant="outline" className="mt-6 border-white/50 bg-white text-emerald-800 hover:border-white hover:text-emerald-900">
+            Request a demo
           </MarketingCta>
         </div>
       </section>

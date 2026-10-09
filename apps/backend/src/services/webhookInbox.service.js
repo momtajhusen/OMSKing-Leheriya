@@ -7,7 +7,9 @@ const { header } = require('../adapters/signature');
 const { enqueue } = require('./jobQueue.service');
 const { HttpError } = require('../utils/httpError');
 
-const CHANNELS = new Set(['shopify', 'amazon', 'myntra']);
+const { channelIds } = require('../channels/registry');
+
+const CHANNELS = new Set(channelIds());
 
 function parseBody(rawBody) {
   if (!rawBody || !rawBody.length) return {};

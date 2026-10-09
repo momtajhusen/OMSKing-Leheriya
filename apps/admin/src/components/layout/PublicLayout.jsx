@@ -1,5 +1,5 @@
 import { Outlet, NavLink, Link, useLocation } from 'react-router-dom';
-import { Menu, X, Mail, Phone, MapPin, Sparkles, Layers, BadgeIndianRupee, Info, MessageCircle, LogIn, Home } from 'lucide-react';
+import { Menu, X, Mail, Phone, MapPin, Sparkles, Layers, BadgeIndianRupee, Info, MessageCircle, LogIn, Home, PlayCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import BrandMark from '../marketing/BrandMark';
 import { MarketingCta } from '../marketing/MarketingCta';
@@ -12,6 +12,7 @@ const NAV = [
   { to: '/#why', label: 'How it works', hash: true, icon: Sparkles },
   { to: '/features', label: 'Features', icon: Layers },
   { to: '/pricing', label: 'Pricing', icon: BadgeIndianRupee },
+  { to: '/demo', label: 'Demo request', icon: PlayCircle },
   { to: '/about', label: 'About', icon: Info },
   { to: '/contact', label: 'Contact', icon: MessageCircle },
 ];
@@ -99,8 +100,8 @@ export default function PublicLayout() {
             <MarketingCta to="/auth/login" variant="ghost">
               Login
             </MarketingCta>
-            <MarketingCta to="/contact">
-              See Leheriya’s desk
+            <MarketingCta to="/demo">
+              Request a demo
             </MarketingCta>
           </div>
 
@@ -189,8 +190,8 @@ export default function PublicLayout() {
                 <LogIn className="h-4 w-4" />
                 Login
               </Link>
-              <MarketingCta to="/contact" className="h-12 w-full">
-                See Leheriya’s desk
+              <MarketingCta to="/demo" className="h-12 w-full">
+                Request a demo
               </MarketingCta>
             </div>
           </aside>
@@ -226,6 +227,7 @@ export default function PublicLayout() {
               <li><Link to="/about" className="hover:text-emerald-700">About</Link></li>
               <li><Link to="/contact" className="hover:text-emerald-700">Contact</Link></li>
               <li><Link to="/auth/register" className="hover:text-emerald-700">Start trial</Link></li>
+              <li><Link to="/demo" className="hover:text-emerald-700">Request a demo</Link></li>
             </ul>
           </div>
           <div>

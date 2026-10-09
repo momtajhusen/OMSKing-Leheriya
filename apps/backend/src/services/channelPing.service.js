@@ -168,6 +168,11 @@ async function pingChannel(channel, creds) {
   if (channel === 'myntra') return pingMyntra(creds);
   if (channel === 'amazon') return pingAmazon(creds);
   if (channel === 'shopify') return pingShopify(creds);
+  const { channelById } = require('../channels/registry');
+  if (channelById(channel)?.kind === 'partner') {
+    const partner = require('../adapters/partner');
+    return partner.ping(creds);
+  }
   return { ok: false, incomplete: true, message: 'This channel can be saved. Live ping is not wired yet.' };
 }
 

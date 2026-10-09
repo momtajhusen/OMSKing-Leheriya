@@ -6,7 +6,7 @@ export default function ChannelsPage() {
       <div>
         <h1 className="text-3xl font-bold mb-2">Channels</h1>
         <p className="text-muted-foreground">
-          Launch for Leheriya: Shopify, Amazon, Myntra. Pick a channel, attach a warehouse, then save API keys. Extra marketplaces are not in the first tenant.
+          Every channel’s keys belong to this company. Another company’s Super Admin cannot see or reuse them. Orders, listings and stock from each API show on the same screens.
         </p>
       </div>
       <ChannelSetup />

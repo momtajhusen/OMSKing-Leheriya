@@ -34,6 +34,9 @@ async function updateRolePermissions(req, res) {
   if (role.code !== 'platform_admin' && next.includes(PERMISSIONS.TENANTS_MANAGE)) {
     throw new HttpError(400, 'tenants.manage is SaaS-only');
   }
+  if (role.code === 'vendor' && (next.includes(PERMISSIONS.USERS_MANAGE) || next.includes(PERMISSIONS.FINANCE_RECONCILE))) {
+    throw new HttpError(400, 'Vendor cannot have users.manage or finance.reconcile');
+  }
   const before = { permissions: [...(role.permissions || [])].sort() };
   role.permissions = next;
   await role.save();

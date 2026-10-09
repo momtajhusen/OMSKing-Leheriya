@@ -10,6 +10,9 @@ const router = require('express').Router();
 const gate = [authMiddleware, tenantMiddleware, requirePermission('tenants.manage')];
 
 router.get('/', ...gate, asyncHandler(tenants.listTenants));
+router.get('/ops/jobs', ...gate, asyncHandler(tenants.listOpsJobs));
+router.get('/ops/logs', ...gate, asyncHandler(tenants.listOpsLogs));
+router.post('/ops/jobs/:id/retry', ...gate, asyncHandler(tenants.retryOpsJob));
 router.post(
   '/',
   ...gate,

@@ -8,22 +8,30 @@ const SCHEDULED_LOOKBACK_DAYS = 10;
 
 let timer = null;
 
+function pullReady(row, creds) {
+  if (row.status === 'error') return false;
+  if (row.channel === 'myntra') return Boolean(creds.merchantId && creds.secretKey);
+  if (row.channel === 'shopify') return Boolean(String(creds.shopUrl || '').trim() && String(creds.adminToken || '').trim());
+  if (row.channel === 'amazon') return Boolean(creds.sellerId && creds.refreshToken && creds.lwaClientId && creds.lwaClientSecret);
+  return false;
+}
+
 async function enqueueScheduledPulls(now = new Date()) {
-  const rows = await ChannelConnection.find({ channel: 'myntra' }).setOptions({ skipTenantFilter: true });
+  const rows = await ChannelConnection.find({ channel: { $in: ['shopify', 'amazon', 'myntra'] } }).setOptions({ skipTenantFilter: true });
   let queued = 0;
   for (const row of rows) {
     const creds = credsOf(row);
-    if (!creds.merchantId || !creds.secretKey || row.status === 'error') continue;
+    if (!pullReady(row, creds)) continue;
     const open = await IntegrationJob.exists({
       tenantId: row.tenantId,
-      channel: 'myntra',
+      channel: row.channel,
       jobType: 'orders_pull',
       status: { $in: ['queued', 'running'] },
     }).setOptions({ skipTenantFilter: true });
     if (open) continue;
     await enqueue({
       tenantId: row.tenantId,
-      channel: 'myntra',
+      channel: row.channel,
       jobType: 'orders_pull',
       triggeredBy: 'scheduler',
       payload: { from: new Date(now.getTime() - SCHEDULED_LOOKBACK_DAYS * 864e5).toISOString() },

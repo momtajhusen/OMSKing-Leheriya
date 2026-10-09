@@ -3,12 +3,13 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
   LayoutDashboard, Building2, Shield, LogOut, Sun, Moon, Activity, ListTodo,
-  FileWarning, Settings, CreditCard, Users, Menu, X,
+  FileWarning, Settings, CreditCard, Users, Menu, X, CalendarClock,
 } from 'lucide-react';
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
 import PageFade from '../motion/PageFade';
 import BrandLogo from '../brand/BrandLogo';
+import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
 
 const GROUPS = [
   {
@@ -22,6 +23,7 @@ const GROUPS = [
     label: 'Commercial',
     items: [
       { path: '/platform/plans', label: 'Plans', icon: CreditCard },
+      { path: '/platform/demo-requests', label: 'Demo requests', icon: CalendarClock },
       { path: '/platform/users', label: 'Staff', icon: Users },
     ],
   },
@@ -63,7 +65,7 @@ export default function PlatformLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const current = FLAT.find((item) => isActive(location.pathname, item.path)) || FLAT[0];
-  const initial = (user?.name || user?.email || 'P').charAt(0).toUpperCase();
+  const photo = useProfilePhoto();
 
   const Nav = ({ onClick }) =>
     GROUPS.map((group) => (
@@ -117,13 +119,14 @@ export default function PlatformLayout() {
             <Nav onClick={() => setMobileOpen(false)} />
           </nav>
           <div className="border-t border-[hsl(var(--color-border-premium))] p-4">
+            {photo.input}
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-700 to-lime-600 text-sm font-bold text-white">
-                {initial}
-              </div>
+              <ProfilePhotoButton name={user?.name || user?.email || 'Platform'} />
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{user?.name || 'Platform'}</div>
-                <div className="truncate text-[11px] text-muted-foreground">{user?.email}</div>
+                <button type="button" className="truncate text-[11px] text-emerald-700" onClick={photo.pick} disabled={photo.busy}>
+                  {photo.busy ? 'Saving…' : 'Change photo'}
+                </button>
               </div>
             </div>
           </div>

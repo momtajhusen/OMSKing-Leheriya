@@ -5,6 +5,7 @@ import api from '../../lib/api';
 import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate } from '../../utils/format';
 import { isChannelManaged, packetIdOf, openMyntraDocument } from '../../lib/channelOrders';
+import { downloadPdfBase64 } from '../../lib/orderPrint';
 import { lineTax, downloadCsv, isCancelled } from '../../lib/orderMetrics';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
@@ -14,6 +15,7 @@ import KpiCard from '../../components/ui/KpiCard';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { FileText, Download, AlertTriangle, Receipt } from 'lucide-react';
+import Pagination, { useClientPage } from '../../components/ui/Pagination';
 
 const TABS = [
   { id: 'invoiced', label: 'Tax invoices' },
@@ -25,14 +27,29 @@ function invoiceNoOf(order) {
   return order.invoiceNo || (order.channelLines || []).find((line) => line.invoiceNumber)?.invoiceNumber || '';
 }
 
-function orderTax(order) {
+function cleanState(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+
+function shipStateOf(order) {
+  if (order.shipState) return order.shipState;
+  const parts = String(order.city || '').split(',').map((part) => part.replace(/\b\d{6}\b/, '').trim()).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : '';
+}
+
+function orderTax(order, warehouseState) {
+  const intraState = Boolean(cleanState(warehouseState)) && cleanState(warehouseState) === cleanState(shipStateOf(order));
   return (order.items || []).reduce((acc, item) => {
-    const tax = lineTax(item);
+    const tax = lineTax(item, { intraState });
     acc.taxable += tax.taxable;
+    acc.cgst += tax.cgst;
+    acc.sgst += tax.sgst;
+    acc.igst += tax.igst;
     acc.gst += tax.cgst + tax.sgst + tax.igst;
     acc.gross += tax.gross;
+    acc.intraState = intraState;
     return acc;
-  }, { taxable: 0, gst: 0, gross: 0 });
+  }, { taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0, gross: 0, intraState });
 }
 
 export default function GstInvoicePage() {
@@ -42,34 +59,45 @@ export default function GstInvoicePage() {
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const generateInvoice = useOrderStore((s) => s.generateInvoice);
   const [company, setCompany] = useState(null);
+  const [warehouseState, setWarehouseState] = useState('');
   const [tab, setTab] = useState('invoiced');
   const [busy, setBusy] = useState('');
 
   useEffect(() => {
     hydrateFromApi();
     api.get('/settings/company').then(({ data }) => setCompany(data.data)).catch(() => setCompany(null));
+    api.get('/warehouses').then(({ data }) => {
+      const home = (data.data || []).find((row) => row.code === 'WH-001');
+      setWarehouseState(home?.address?.state || '');
+    }).catch(() => setWarehouseState(''));
   }, [hydrateFromApi]);
 
   const rows = useMemo(() => orders.map((order) => ({
     order,
     invoiceNo: invoiceNoOf(order),
-    tax: orderTax(order),
-  })).sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt))), [orders]);
+    tax: orderTax(order, warehouseState),
+    creditNote: (isCancelled(order) || order.reversePickup?.returnId || order.channelStatus === 'RTO') && (order.invoiceNo || order.channel === 'Shopify')
+      ? `CN-${order.invoiceNo || order.externalOrderId || order.id}`
+      : '',
+  })).sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt))), [orders, warehouseState]);
 
   const groups = useMemo(() => ({
     invoiced: rows.filter((row) => row.invoiceNo && !isCancelled(row.order)),
     pending: rows.filter((row) => !row.invoiceNo && ['Dispatched', 'Delivered'].includes(row.order.status)),
-    notes: rows.filter((row) => row.invoiceNo && isCancelled(row.order)),
+    notes: rows.filter((row) => row.creditNote),
   }), [rows]);
 
   const hsnSummary = useMemo(() => {
     const map = new Map();
-    groups.invoiced.forEach(({ order }) => (order.items || []).forEach((item) => {
+    groups.invoiced.forEach(({ order, tax: orderTaxRow }) => (order.items || []).forEach((item) => {
       const key = `${item.hsn || '—'}|${item.gst ?? '—'}`;
-      const tax = lineTax(item);
+      const tax = lineTax(item, { intraState: orderTaxRow.intraState });
       const row = map.get(key) || { hsn: item.hsn || '—', rate: item.gst, qty: 0, taxable: 0, gst: 0 };
       row.qty += Number(item.qty) || 1;
       row.taxable += tax.taxable;
+      row.cgst = (row.cgst || 0) + tax.cgst;
+      row.sgst = (row.sgst || 0) + tax.sgst;
+      row.igst = (row.igst || 0) + tax.igst;
       row.gst += tax.cgst + tax.sgst + tax.igst;
       map.set(key, row);
     }));
@@ -81,15 +109,29 @@ export default function GstInvoicePage() {
     gst: acc.gst + row.tax.gst,
   }), { taxable: 0, gst: 0 });
 
-  const openInvoice = async (order) => {
+  const invoiceNote = (email) => {
+    if (email?.emailed) return 'PDF opened and emailed from the company mailbox.';
+    if (email?.mailError) return 'Email did not send. The PDF is still ready.';
+    if (email?.reason === 'gmail') return 'PDF ready. Email skipped because company Gmail is not saved.';
+    return 'PDF ready.';
+  };
+
+  const openInvoice = async (order, { download = false } = {}) => {
     setBusy(order.id);
     try {
       if (isChannelManaged(order)) {
         await openMyntraDocument(order, 'invoice');
-      } else {
-        const next = await generateInvoice(order.id);
-        if (next?.error) toast.error(next.error);
+        return;
       }
+      const kind = tab === 'notes' ? 'credit' : 'invoice';
+      const next = await generateInvoice(order.id, { kind, email: !download, preview: !download });
+      if (next?.error) {
+        toast.error(next.error);
+        return;
+      }
+      const filename = `${kind === 'credit' ? next.creditNote || `CN-${next.invoiceNo || order.id}` : (next.invoiceNo || order.id)}.pdf`;
+      if (download && next.invoicePdf) downloadPdfBase64(next.invoicePdf, filename);
+      toast.success(download ? 'PDF downloaded.' : invoiceNote(next.invoiceEmail));
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -103,19 +145,20 @@ export default function GstInvoicePage() {
       toast.error('Nothing to export in this tab');
       return;
     }
-    const lines = list.flatMap(({ order, invoiceNo }) => (order.items || []).map((item) => {
-      const tax = lineTax(item);
-      return [invoiceNo, order.createdAt ? String(order.createdAt).slice(0, 10) : '', order.id, order.channel, order.customer,
-        item.sku, item.name, item.hsn || '', item.gst ?? '', item.qty, tax.taxable.toFixed(2), (tax.cgst + tax.sgst + tax.igst).toFixed(2), tax.gross.toFixed(2)];
+    const lines = list.flatMap(({ order, invoiceNo, tax: orderTaxRow }) => (order.items || []).map((item) => {
+      const tax = lineTax(item, { intraState: orderTaxRow.intraState });
+      return [invoiceNo, order.createdAt ? String(order.createdAt).slice(0, 10) : '', order.id, order.channel,
+        item.sku, item.name, item.hsn || '', item.gst ?? '', item.qty, tax.taxable.toFixed(2), tax.cgst.toFixed(2), tax.sgst.toFixed(2), tax.igst.toFixed(2), tax.gross.toFixed(2)];
     }));
     downloadCsv(`gst-${tab}-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Invoice No', 'Date', 'Order', 'Channel', 'Customer', 'SKU', 'Item', 'HSN', 'GST %', 'Qty', 'Taxable', 'GST', 'Total'], lines);
+      ['Invoice No', 'Date', 'Order', 'Channel', 'SKU', 'Item', 'HSN', 'GST %', 'Qty', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'], lines);
     toast.success(`${lines.length} invoice lines exported`);
   };
 
-  if (!loaded) return <PageLoader label="Loading invoices..." />;
+  const list = groups[tab] || [];
+  const paged = useClientPage(list);
 
-  const list = groups[tab];
+  if (!loaded) return <PageLoader label="Loading invoices..." />;
 
   return (
     <div className="p-6 space-y-6">
@@ -126,6 +169,24 @@ export default function GstInvoicePage() {
             Myntra and Amazon issue the tax invoice for their orders; open it from here. Shopify and manual orders are invoiced by OMSKing (invoice no. = Order ID for Shopify).
           </p>
         </div>
+        <Button variant="outline" onClick={() => {
+          const lines = groups.invoiced.flatMap(({ order, invoiceNo, tax }) => (order.items || []).map((item) => {
+            const row = lineTax(item, { intraState: tax.intraState });
+            return ['Sales', invoiceNo, order.id, row.taxable.toFixed(2), row.cgst.toFixed(2), row.sgst.toFixed(2), row.igst.toFixed(2), row.gross.toFixed(2)];
+          })).concat(groups.notes.map(({ order, creditNote, tax }) => (
+            ['Credit Note', creditNote, order.id, (-tax.taxable).toFixed(2), (-tax.cgst).toFixed(2), (-tax.sgst).toFixed(2), (-tax.igst).toFixed(2), (-tax.gross).toFixed(2)]
+          )));
+          if (!lines.length) {
+            toast.error('Nothing to export for Tally');
+            return;
+          }
+          downloadCsv(`tally-gst-${new Date().toISOString().slice(0, 10)}.csv`,
+            ['Voucher', 'Number', 'Order', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'], lines);
+          toast.success('Tally CSV downloaded. This is a file export, not a Tally API.');
+        }}>
+          <Download className="w-4 h-4 mr-2" />
+          Tally export
+        </Button>
         <Button variant="outline" onClick={exportRegister}>
           <Download className="w-4 h-4 mr-2" />
           Export register (CSV)
@@ -149,7 +210,7 @@ export default function GstInvoicePage() {
             <div className="grid gap-1 sm:grid-cols-3">
               <div><span className="text-muted-foreground">Name:</span> {company.companyName || '—'}</div>
               <div><span className="text-muted-foreground">GSTIN:</span> {company.gstin || <span className="text-destructive">not set</span>}</div>
-              <div><span className="text-muted-foreground">City:</span> {company.city || '—'}</div>
+              <div><span className="text-muted-foreground">WH-001 state:</span> {warehouseState || <span className="text-destructive">not set</span>}</div>
             </div>
           ) : (
             <p className="text-muted-foreground">Company details need Settings access. <button type="button" className="text-primary hover:underline" onClick={() => navigate('/settings')}>Open Settings</button></p>
@@ -184,13 +245,16 @@ export default function GstInvoicePage() {
                     <TableHead>Channel</TableHead>
                     <TableHead>Customer</TableHead>
                     <TableHead className="text-right">Taxable</TableHead>
-                    <TableHead className="text-right">GST</TableHead>
+                    <TableHead className="text-right">CGST</TableHead>
+                    <TableHead className="text-right">SGST</TableHead>
+                    <TableHead className="text-right">IGST</TableHead>
+                    {tab === 'notes' && <TableHead>Credit note</TableHead>}
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {list.map(({ order, invoiceNo, tax }) => (
+                  {paged.rows.map(({ order, invoiceNo, tax, creditNote }) => (
                     <TableRow key={order.id}>
                       <TableCell className="font-medium font-mono text-xs">{invoiceNo || '—'}</TableCell>
                       <TableCell>{order.createdAt ? formatDate(order.createdAt) : '—'}</TableCell>
@@ -200,19 +264,30 @@ export default function GstInvoicePage() {
                       <TableCell><Badge variant="outline">{order.channel}</Badge></TableCell>
                       <TableCell>{order.customer}</TableCell>
                       <TableCell className="text-right">{formatINR(Math.round(tax.taxable))}</TableCell>
-                      <TableCell className="text-right">{formatINR(Math.round(tax.gst))}</TableCell>
+                      <TableCell className="text-right">{formatINR(Math.round(tax.cgst))}</TableCell>
+                      <TableCell className="text-right">{formatINR(Math.round(tax.sgst))}</TableCell>
+                      <TableCell className="text-right">{formatINR(Math.round(tax.igst))}</TableCell>
+                      {tab === 'notes' && <TableCell className="font-mono text-xs">{creditNote}</TableCell>}
                       <TableCell className="text-right font-medium">{formatINR(order.total)}</TableCell>
                       <TableCell>
                         {(isChannelManaged(order) ? packetIdOf(order) : true) && (
-                          <Button variant="ghost" size="sm" disabled={busy === order.id} onClick={() => openInvoice(order)}>
-                            {isChannelManaged(order) ? `${order.channel} invoice` : invoiceNo ? 'Print' : 'Generate'}
-                          </Button>
+                          <div className="flex gap-1 justify-end">
+                            <Button variant="ghost" size="sm" disabled={busy === order.id} onClick={() => openInvoice(order)}>
+                              {isChannelManaged(order) ? `${order.channel} invoice` : tab === 'notes' ? 'Credit note PDF' : 'PDF'}
+                            </Button>
+                            {!isChannelManaged(order) && (
+                              <Button variant="ghost" size="sm" disabled={busy === order.id} onClick={() => openInvoice(order, { download: true })}>
+                                Download
+                              </Button>
+                            )}
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              <Pagination page={paged.page} total={paged.total} limit={paged.limit} onPage={paged.setPage} />
             </div>
           )}
         </CardContent>

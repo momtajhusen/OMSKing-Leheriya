@@ -30,6 +30,14 @@ function AdminLayout() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)]">
+      {user?.tenantStatus === 'trial' && !user?.impersonating && (
+        <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-emerald-500/15 px-4 text-sm text-emerald-950 dark:text-emerald-100">
+          <span>
+            <strong className="capitalize">{user.plan || 'starter'}</strong> trial
+            {user.planExpiresAt ? ` until ${new Date(user.planExpiresAt).toLocaleDateString()}` : ''}
+          </span>
+        </div>
+      )}
       {user?.impersonating && (
         <div className="flex h-10 shrink-0 items-center justify-center gap-3 bg-amber-500/15 px-4 text-sm text-amber-950 dark:text-amber-100">
           <span>

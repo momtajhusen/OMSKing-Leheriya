@@ -2,6 +2,7 @@ const MasterSku = require('../models/MasterSku');
 const SkuMapping = require('../models/SkuMapping');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
+const { pageOf } = require('../utils/page');
 const { generateMasterCode, normalizeSkuCode, assertHsnCode } = require('../services/skuIdentity.service');
 const { mapMaster } = require('../services/catalogMapping.service');
 const { merchantTenant } = require('./products.controller');
@@ -43,7 +44,8 @@ async function listMasterSkus(req, res) {
       || (s.barcode || '').toLowerCase().includes(q)
     );
   }
-  return paginatedResponse(res, data, 1, data.length || 50, data.length, 'Master SKUs');
+  const paged = pageOf(data, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Master SKUs');
 }
 
 async function createMasterSku(req, res) {

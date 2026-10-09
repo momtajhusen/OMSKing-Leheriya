@@ -1,7 +1,9 @@
 const mongoose = require('mongoose');
 const { tenantPlugin } = require('../plugins/tenantPlugin');
 
-const CHANNELS = ['shopify', 'amazon', 'myntra'];
+const { channelIds } = require('../channels/registry');
+
+const CHANNELS = channelIds();
 const JOB_TYPES = [
   'orders_pull',
   'orders_status_push',

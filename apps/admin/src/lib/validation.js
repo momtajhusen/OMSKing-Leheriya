@@ -16,12 +16,14 @@ export const passwordSchema = z
 export const loginSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, 'Password is required').min(8, 'Password must be at least 8 characters'),
+  workspace: z.string().trim().max(80).optional(),
 });
 
 export const registerSchema = z.object({
   name: z.string().trim().min(2, 'Full name must be at least 2 characters'),
   email: emailSchema,
   company: z.string().trim().min(2, 'Company name is required'),
+  plan: z.enum(['starter', 'growth', 'enterprise']),
   password: passwordSchema,
   confirmPassword: z.string().min(1, 'Please confirm your password'),
   terms: z.boolean().refine((value) => value === true, {
@@ -34,10 +36,12 @@ export const registerSchema = z.object({
 
 export const forgotPasswordSchema = z.object({
   email: emailSchema,
+  workspace: z.string().trim().max(80).optional(),
 });
 
 export const resetPasswordSchema = z.object({
   email: emailSchema,
+  workspace: z.string().trim().max(80).optional(),
   otp: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit OTP from Gmail'),
   password: passwordSchema,
   confirmPassword: z.string().min(1, 'Please confirm your password'),

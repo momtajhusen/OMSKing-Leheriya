@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
+import api, { apiError } from '../../lib/api';
 import useOrderStore from '../../stores/orderStore';
-import useReturnsStore from '../../stores/returnsStore';
+import useReturnsStore, { EMPTY_WORKFLOW } from '../../stores/returnsStore';
+import useAuthStore from '../../stores/authStore';
 import { formatINR, formatDate } from '../../utils/format';
 import { CHANNELS } from '../../lib/orderMetrics';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
@@ -29,8 +32,11 @@ export default function ReturnsRefundsReconciliationPage() {
   const orders = useOrderStore((s) => s.orders);
   const loaded = useOrderStore((s) => s.loaded);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
-  const workflow = useReturnsStore((s) => s.workflow);
+  const tenantId = useAuthStore((s) => s.user?.tenantId);
+  const workflow = useReturnsStore((s) => (tenantId && s.workflowByTenant?.[tenantId]) || EMPTY_WORKFLOW);
   const [tab, setTab] = useState('all');
+  const [returnFile, setReturnFile] = useState([]);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     hydrateFromApi();
@@ -73,6 +79,22 @@ export default function ReturnsRefundsReconciliationPage() {
     return { channel, total: list.length, awaiting: list.filter((row) => row.shipped && !row.received).length };
   });
 
+  const uploadReturnFile = async (file) => {
+    const csv = await file.text();
+    setBusy(true);
+    try {
+      const { data } = await api.post('/finance/returns', { csv });
+      const rows = data.data?.rows || [];
+      setReturnFile(rows);
+      const received = rows.filter((row) => row.label === 'Return Received').length;
+      toast.success(received ? `${received} return ${received === 1 ? 'line matches' : 'lines match'} a Master Order` : 'No return line matched a Master Order');
+    } catch (err) {
+      toast.error(apiError(err, 'Return file was not matched'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!loaded) return <PageLoader label="Loading refunds..." />;
 
   return (
@@ -112,7 +134,7 @@ export default function ReturnsRefundsReconciliationPage() {
       <Card>
         <CardHeader>
           <CardTitle>Records ({filtered.length})</CardTitle>
-          <CardDescription>"Received" comes from Returns (marked received) and RTO (QC closed).</CardDescription>
+          <CardDescription>A return file is matched on its own. It is not compared with the payment settlement file.</CardDescription>
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? (
@@ -130,6 +152,7 @@ export default function ReturnsRefundsReconciliationPage() {
                     <TableHead className="text-right">Order value</TableHead>
                     <TableHead>Parcel</TableHead>
                     <TableHead className="text-right">Refund to customer</TableHead>
+                    <TableHead>Credit note</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -142,11 +165,14 @@ export default function ReturnsRefundsReconciliationPage() {
                       <TableCell>{row.order.createdAt ? formatDate(row.order.createdAt) : '—'}</TableCell>
                       <TableCell className="text-right">{formatINR(row.order.total)}</TableCell>
                       <TableCell>
-                        {!row.shipped ? <Badge variant="secondary">Never shipped</Badge>
-                          : row.received ? <Badge variant="outline">Received</Badge>
-                            : <Badge variant="destructive">Not back</Badge>}
+                        {returnFile.find((file) => file.orderNo === row.order.id)?.label === 'Return Received'
+                          ? <Badge variant="outline">Return Received</Badge>
+                          : !row.shipped ? <Badge variant="secondary">Never shipped</Badge>
+                            : row.received ? <Badge variant="outline">Received</Badge>
+                              : <Badge variant="destructive">Not back</Badge>}
                       </TableCell>
                       <TableCell className="text-right">{row.refund ? formatINR(row.refund) : '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{row.order.invoiceNo ? `CN-${row.order.invoiceNo}` : '—'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -156,12 +182,51 @@ export default function ReturnsRefundsReconciliationPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Return file</CardTitle>
+          <CardDescription>CSV column: order. One row matches one Master Order as Return Received. Payment settlement is not used.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) uploadReturnFile(file);
+              event.target.value = '';
+            }}
+          />
+          {returnFile.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order</TableHead>
+                  <TableHead>Result</TableHead>
+                  <TableHead>Exception</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {returnFile.map((row) => (
+                  <TableRow key={`${row.key}-${row.orderNo || 'none'}`}>
+                    <TableCell className="font-mono text-xs">{row.orderNo || row.key}</TableCell>
+                    <TableCell><Badge variant={row.label === 'Return Received' ? 'outline' : 'destructive'}>{row.label}</Badge></TableCell>
+                    <TableCell className="text-sm">{row.exception || '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="bg-primary/5 border-primary/20">
         <CardContent className="pt-6">
           <div className="flex items-start gap-3">
             <Info className="w-5 h-5 text-primary mt-0.5" />
             <p className="text-sm text-muted-foreground">
-              Marketplace refunds are paid by Amazon / Myntra and recovered in their settlement. Matching against their return / refund files is not built yet.
+              A credit note uses the invoice number. Marketplace refunds reduce the expected settlement net. The courier freight bill stays on Payment Reconciliation.
             </p>
           </div>
         </CardContent>

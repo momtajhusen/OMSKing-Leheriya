@@ -15,6 +15,7 @@ import VendorCourierPick, { resolveVendorCourier } from '../../components/vendor
 import Badge from '../../components/ui/Badge';
 import { DISPATCH_SLA_DAYS, DISPATCH_URGENT_MESSAGE, isDispatchOverdue } from '../../lib/vendorDispatchAlert';
 import { Save, Truck, Check, X, Inbox, MessageCircle } from 'lucide-react';
+import Pagination, { useClientPage } from '../../components/ui/Pagination';
 
 const TABS = [
   { id: 'All', label: 'All Orders' },
@@ -62,6 +63,7 @@ export default function VendorOrdersPage() {
     const date = String(r.assignedDate).slice(0, 10);
     return matchesTab && (!fromDate || date >= fromDate) && (!toDate || date <= toDate);
   });
+  const paged = useClientPage(visibleRows);
   const dirtyRows = rows.filter(isDirty);
   const overdueRows = rows.filter((row) => isDispatchOverdue(row));
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selectedIds.includes(r.id));
@@ -253,7 +255,7 @@ export default function VendorOrdersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visibleRows.map((row) => {
+              {paged.rows.map((row) => {
                 const base = rows.find((r) => r.id === row.id);
                 const overdue = isDispatchOverdue(row);
                 const dirty = isDirty(base);
@@ -313,6 +315,7 @@ export default function VendorOrdersPage() {
               })}
             </TableBody>
           </Table>
+          <Pagination page={paged.page} total={paged.total} limit={paged.limit} onPage={paged.setPage} />
         </VendorSheet>
       )}
 

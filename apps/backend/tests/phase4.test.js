@@ -182,7 +182,9 @@ test('inventory lists every master SKU at both warehouses before any receipt', a
   assert.deepEqual(mine.map((row) => row.warehouse).sort(), ['WH-001', 'WH-002']);
   assert.ok(mine.every((row) => row.tracked === false && row.stock === 0 && row.low === false));
   const physical = mine.find((row) => row.warehouse === 'WH-001');
-  assert.deepEqual(physical.ats, { shopify: 0, amazon: 0, myntra: 0 });
+  assert.deepEqual(physical.ats, {
+    shopify: 0, amazon: 0, myntra: 0, flipkart: 0, meesho: 0, ajio: 0, nykaa: 0,
+  });
   assert.equal(physical.channels.includes('amazon'), true);
   const virtual = mine.find((row) => row.warehouse === 'WH-002');
   assert.deepEqual(virtual.channels, ['shopify']);

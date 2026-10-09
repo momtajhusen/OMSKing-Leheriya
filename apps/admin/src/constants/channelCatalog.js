@@ -52,9 +52,10 @@ export const CHANNEL_CATALOG = [
   {
     id: 'flipkart',
     name: 'Flipkart',
-    description: 'Seller API — Application Id + Secret from Flipkart seller dashboard.',
+    description: 'Seller API. Orders, listings and stock use the API host saved here.',
     fields: [
       API_MODE_FIELD,
+      { key: 'apiBaseUrl', label: 'API host', placeholder: 'https://api.flipkart.net', type: 'text', required: true, hint: 'HTTPS host for this seller account. Orders are read from /orders and listings from /products.' },
       { key: 'applicationId', label: 'Application Id', placeholder: 'Flipkart app id', type: 'text', required: true, hint: 'Seller dashboard → Create New Access' },
       { key: 'applicationSecret', label: 'Application Secret', placeholder: 'Leave blank to keep saved', type: 'password', required: true, hint: 'Leave blank if already saved.' },
       { key: 'locationId', label: 'Location ID', placeholder: 'Flipkart location id', type: 'text' },
@@ -67,9 +68,10 @@ export const CHANNEL_CATALOG = [
   {
     id: 'meesho',
     name: 'Meesho',
-    description: 'Supplier API — can be enabled later per tenant.',
+    description: 'Supplier API. Orders, listings and stock use the API host saved here.',
     fields: [
       API_MODE_FIELD,
+      { key: 'apiBaseUrl', label: 'API host', placeholder: 'https://api.meesho.com', type: 'text', required: true, hint: 'HTTPS host. Orders are read from /orders and listings from /products.' },
       { key: 'supplierId', label: 'Supplier ID', placeholder: 'MSH…', type: 'text', required: true },
       { key: 'apiToken', label: 'API token', placeholder: 'Leave blank to keep saved', type: 'password', required: true, hint: 'Leave blank if already saved.' },
       { key: 'importOrdersFrom', label: 'Import orders from', placeholder: 'YYYY-MM-DD', type: 'date' },
@@ -100,9 +102,10 @@ export const CHANNEL_CATALOG = [
   {
     id: 'ajio',
     name: 'AJIO',
-    description: 'Vendor API — can be enabled later per tenant.',
+    description: 'Vendor API. Orders, listings and stock use the API host saved here.',
     fields: [
       API_MODE_FIELD,
+      { key: 'apiBaseUrl', label: 'API host', placeholder: 'https://api.ajio.com', type: 'text', required: true, hint: 'HTTPS host. Orders are read from /orders and listings from /products.' },
       { key: 'vendorCode', label: 'Vendor code', placeholder: 'AJ…', type: 'text', required: true },
       { key: 'apiToken', label: 'API token', placeholder: 'Leave blank to keep saved', type: 'password', required: true, hint: 'Leave blank if already saved.' },
       { key: 'importOrdersFrom', label: 'Import orders from', placeholder: 'YYYY-MM-DD', type: 'date' },
@@ -111,9 +114,10 @@ export const CHANNEL_CATALOG = [
   {
     id: 'nykaa',
     name: 'Nykaa',
-    description: 'Partner API — can be enabled later per tenant.',
+    description: 'Partner API. Orders, listings and stock use the API host saved here.',
     fields: [
       API_MODE_FIELD,
+      { key: 'apiBaseUrl', label: 'API host', placeholder: 'https://api.nykaa.com', type: 'text', required: true, hint: 'HTTPS host. Orders are read from /orders and listings from /products.' },
       { key: 'partnerId', label: 'Partner ID', placeholder: 'NYK…', type: 'text', required: true },
       { key: 'apiToken', label: 'API token', placeholder: 'Leave blank to keep saved', type: 'password', required: true, hint: 'Leave blank if already saved.' },
       { key: 'importOrdersFrom', label: 'Import orders from', placeholder: 'YYYY-MM-DD', type: 'date' },
@@ -121,25 +125,30 @@ export const CHANNEL_CATALOG = [
   },
 ];
 
+export function orderChannelLabel(channel) {
+  if (channel.id === 'myntra') return 'Myntra';
+  return channel.name;
+}
+
 export const SUBSCRIPTION_PLANS = [
   {
     id: 'starter',
     name: 'Starter',
-    price: '₹2,999 / month',
+    price: 'Billed per order',
     channelLimit: 1,
     features: ['1 of Shopify / Amazon / Myntra', 'Orders + inventory', 'GST invoice'],
   },
   {
     id: 'growth',
     name: 'Growth',
-    price: '₹7,999 / month',
+    price: 'Billed per order',
     channelLimit: 3,
     features: ['Shopify + Amazon + Myntra', 'Vendor portal', 'Settlement matching'],
   },
   {
     id: 'enterprise',
     name: 'Enterprise',
-    price: 'Custom',
+    price: 'Billed per order',
     channelLimit: null,
     features: ['Unlimited channels', 'All modules', 'Priority support'],
   },

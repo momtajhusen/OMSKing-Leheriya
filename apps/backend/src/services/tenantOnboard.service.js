@@ -41,15 +41,13 @@ async function provisionMerchant({
   const exists = await Tenant.findOne({ slug: finalSlug });
   if (exists) throw new HttpError(409, 'A tenant with this slug already exists');
 
-  const emailTaken = await User.findOne({ email: ownerEmail.toLowerCase() }).setOptions({ skipTenantFilter: true });
-  if (emailTaken) throw new HttpError(409, 'Email already in use');
-
   const tenant = await Tenant.create({
     name,
     slug: finalSlug,
     kind: 'merchant',
     status,
     plan,
+    planExpiresAt: status === 'trial' ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : undefined,
     legalEntity: { email: ownerEmail },
     settings: { channels, skuPrefix: (finalSlug || 'OMS').slice(0, 4).toUpperCase() },
   });

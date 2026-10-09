@@ -12,8 +12,8 @@ import EmptyState from '../../components/ui/EmptyState';
 import { Check, Plug, ListTodo, ScrollText, Settings } from 'lucide-react';
 
 const TITLES = {
-  jobs: ['System jobs', 'Jobs run inside each merchant tenant. Open a subscriber to see its queue.'],
-  logs: ['Error logs', 'Adapter failures are stored on that merchant’s Integrations page, not here.'],
+  jobs: ['System jobs', 'Retry uses the same job. A second stock reserve is not created.'],
+  logs: ['Error logs', 'Failed jobs only. Tokens and webhook secrets are not shown on the row.'],
   settings: ['Platform settings', 'Session TTL is set in the API. Merchant GST stays on the tenant.'],
   plans: ['Plans', 'What a new subscriber gets. Change a live tenant’s plan from Subscribers.'],
   health: ['Subscribers', 'Merchant status from the tenants API. Channel health is inside each tenant.'],
@@ -40,17 +40,38 @@ export default function PlatformOpsPage() {
 
   const [title, subtitle] = TITLES[mode];
   const [tenants, setTenants] = useState([]);
-  const [loading, setLoading] = useState(mode === 'health');
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(mode === 'health' || mode === 'jobs' || mode === 'logs');
+  const [retrying, setRetrying] = useState('');
 
   useEffect(() => {
-    if (mode !== 'health') return undefined;
+    if (mode !== 'health' && mode !== 'jobs' && mode !== 'logs') return undefined;
     let alive = true;
-    api.get('/tenants')
-      .then(({ data }) => { if (alive) setTenants(data.data || []); })
-      .catch((err) => toast.error(apiError(err, 'Could not load tenants')))
+    const path = mode === 'jobs' ? '/tenants/ops/jobs' : mode === 'logs' ? '/tenants/ops/logs' : '/tenants';
+    setLoading(true);
+    api.get(path)
+      .then(({ data }) => {
+        if (!alive) return;
+        if (mode === 'health') setTenants(data.data || []);
+        else setJobs(data.data || []);
+      })
+      .catch((err) => toast.error(apiError(err, 'Could not load platform ops')))
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [mode]);
+
+  const retryJob = async (row) => {
+    setRetrying(row.id);
+    try {
+      await api.post(`/tenants/ops/jobs/${row.id}/retry`);
+      toast.success('Job requeued. The same job is used, so stock is not reserved again.');
+      setJobs((current) => current.map((job) => (job.id === row.id ? { ...job, status: 'queued', lastError: '' } : job)));
+    } catch (err) {
+      toast.error(apiError(err, 'Could not retry the job'));
+    } finally {
+      setRetrying('');
+    }
+  };
 
   return (
     <PlatformPage title={title} subtitle={subtitle}>
@@ -71,7 +92,7 @@ export default function PlatformOpsPage() {
                   <TableHead>Plan</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Channels</TableHead>
-                  <TableHead>Updated</TableHead>
+                  <TableHead>Last sync</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -93,21 +114,79 @@ export default function PlatformOpsPage() {
       )}
 
       {mode === 'jobs' && (
-        <EmptyState
-          icon={<ListTodo className="h-7 w-7 text-muted-foreground" />}
-          title="No platform-wide queue"
-          description="Orders pull, inventory push and webhooks run per merchant. Open a tenant, then /integrations."
-          action={<Button variant="outline" onClick={() => navigate('/platform/tenants')}>Open a tenant</Button>}
-        />
+        loading ? <PageLoader label="Loading jobs..." /> : !jobs.length ? (
+          <EmptyState
+            icon={<ListTodo className="h-7 w-7 text-muted-foreground" />}
+            title="No jobs yet"
+            description="Channel pulls and inventory jobs appear here. Retry uses the same job, so a reserve is not created again."
+          />
+        ) : (
+          <PlatformSheet>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Merchant</TableHead>
+                  <TableHead>Job</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>When</TableHead>
+                  <TableHead>Detail</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {jobs.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-medium">{row.tenantName || '—'}</TableCell>
+                    <TableCell>{row.channel} · {row.jobType}</TableCell>
+                    <TableCell><Badge variant={row.status === 'failed' ? 'destructive' : 'outline'}>{row.status}</Badge></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{when(row.finishedAt || row.createdAt)}</TableCell>
+                    <TableCell className="max-w-[18rem] whitespace-normal text-sm">{row.lastError || row.shortSummary || '—'}</TableCell>
+                    <TableCell>
+                      {row.status === 'failed' && (
+                        <Button size="sm" variant="outline" disabled={retrying === row.id} onClick={() => retryJob(row)}>
+                          {retrying === row.id ? 'Retrying…' : 'Retry'}
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </PlatformSheet>
+        )
       )}
 
       {mode === 'logs' && (
-        <EmptyState
-          icon={<ScrollText className="h-7 w-7 text-muted-foreground" />}
-          title="No platform error inbox yet"
-          description="Failed jobs stay on that merchant’s Integrations page so a retry cannot create a second Master Order."
-          action={<Button variant="outline" onClick={() => navigate('/platform/tenants')}>Open a tenant</Button>}
-        />
+        loading ? <PageLoader label="Loading logs..." /> : !jobs.length ? (
+          <EmptyState
+            icon={<ScrollText className="h-7 w-7 text-muted-foreground" />}
+            title="No failed jobs"
+            description="Adapter errors show here. Tokens and webhook secrets are not stored on the row."
+          />
+        ) : (
+          <PlatformSheet>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>When</TableHead>
+                  <TableHead>Merchant</TableHead>
+                  <TableHead>Job</TableHead>
+                  <TableHead>Error</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {jobs.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="text-xs text-muted-foreground">{when(row.finishedAt || row.createdAt)}</TableCell>
+                    <TableCell className="font-medium">{row.tenantName || '—'}</TableCell>
+                    <TableCell>{row.channel} · {row.jobType}</TableCell>
+                    <TableCell className="max-w-[24rem] whitespace-normal text-sm">{row.lastError || row.shortSummary || '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </PlatformSheet>
+        )
       )}
 
       {mode === 'settings' && (

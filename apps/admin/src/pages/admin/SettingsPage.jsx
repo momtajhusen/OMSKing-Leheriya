@@ -20,6 +20,15 @@ const companySchema = z.object({
   district: z.string().min(1, 'District is required'),
   supportEmail: z.string().email('Invalid email format'),
   supportPhone: z.string().min(10, 'Phone must be at least 10 characters'),
+  gmailUser: z.string().trim(),
+  gmailAppPassword: z.string(),
+}).superRefine((data, ctx) => {
+  if (data.gmailUser && !z.string().email().safeParse(data.gmailUser).success) {
+    ctx.addIssue({ code: 'custom', path: ['gmailUser'], message: 'Enter the company Gmail address' });
+  }
+  if (data.gmailAppPassword && !data.gmailUser) {
+    ctx.addIssue({ code: 'custom', path: ['gmailUser'], message: 'Gmail address is required with the app password' });
+  }
 });
 
 export default function SettingsPage() {
@@ -28,11 +37,13 @@ export default function SettingsPage() {
   const [inventoryAuthority, setInventoryAuthority] = useState('oms');
   const [authorityBusy, setAuthorityBusy] = useState(false);
   const [companyBusy, setCompanyBusy] = useState(false);
+  const [mailConfigured, setMailConfigured] = useState(false);
 
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(companySchema),
@@ -45,6 +56,8 @@ export default function SettingsPage() {
       district: '',
       supportEmail: '',
       supportPhone: '',
+      gmailUser: '',
+      gmailAppPassword: '',
     },
   });
 
@@ -63,7 +76,10 @@ export default function SettingsPage() {
         district: company.district || '',
         supportEmail: company.supportEmail || '',
         supportPhone: company.supportPhone || '',
+        gmailUser: company.gmailUser || '',
+        gmailAppPassword: '',
       });
+      setMailConfigured(Boolean(company.mailConfigured));
     }).catch((err) => {
       toast.error(apiError(err, 'Could not load company details'));
     });
@@ -73,6 +89,9 @@ export default function SettingsPage() {
     setCompanyBusy(true);
     try {
       await api.patch('/settings/company', data);
+      if (data.gmailAppPassword) setMailConfigured(true);
+      if (!data.gmailUser) setMailConfigured(false);
+      setValue('gmailAppPassword', '');
       setSaveStatus('success');
       toast.success('Company details saved');
       setTimeout(() => setSaveStatus(null), 3000);
@@ -104,7 +123,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-            <p className="text-muted-foreground mt-1">Leheriya company, GST and pickup. Channel API keys live on Channels — not here for Admin.</p>
+            <p className="text-muted-foreground mt-1">This company’s profile, Gmail, GST, and pickup. Channel and courier keys stay on this company only.</p>
           </div>
         </div>
       </div>
@@ -261,6 +280,36 @@ export default function SettingsPage() {
                 {errors.district && (
                   <p className="text-sm text-destructive">{errors.district.message}</p>
                 )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-foreground">Company Gmail</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    {...register('gmailUser')}
+                    type="email"
+                    autoComplete="off"
+                    className="premium-input pl-10"
+                    placeholder="mail@yourcompany.com"
+                  />
+                </div>
+                {errors.gmailUser && (
+                  <p className="text-sm text-destructive">{errors.gmailUser.message}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-foreground">Gmail app password</label>
+                <input
+                  {...register('gmailAppPassword')}
+                  type="password"
+                  autoComplete="new-password"
+                  className="premium-input"
+                  placeholder={mailConfigured ? 'Saved. Leave blank to keep it.' : 'Google app password for this company'}
+                />
+                <p className="text-xs text-muted-foreground">OTP, invites, and notification email send from this mailbox. Another company cannot use it.</p>
               </div>
             </div>
 

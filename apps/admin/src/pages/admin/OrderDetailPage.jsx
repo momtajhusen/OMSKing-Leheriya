@@ -104,6 +104,12 @@ export default function OrderDetailPage() {
             <Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge>
             <Badge variant="outline">{order.channel}</Badge>
             <Badge variant="secondary">{order.paymentMode}</Badge>
+            {order.paymentDetail === 'Partially paid' && (
+              <span className="text-xs text-muted-foreground">Partially paid, handled as COD</span>
+            )}
+            {order.paymentMode === 'Void' && (
+              <span className="text-xs text-muted-foreground">Void. Not booked as COD.</span>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">
             Master order stays one. Qty &gt; 1 is split as {masterHint(order)}.

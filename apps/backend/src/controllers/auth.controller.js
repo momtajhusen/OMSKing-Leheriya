@@ -15,16 +15,18 @@ const {
   setRefreshCookie, clearRefreshCookie, deviceFromUa, COOKIE_NAME,
 } = require('../lib/tokens');
 const { provisionMerchant } = require('../services/tenantOnboard.service');
-const { sendMail, assertMailConfigured } = require('../lib/mailer');
+const { sendMail, assertMailConfigured, mailboxOf } = require('../lib/mailer');
+const config = require('../config');
 const { welcomeEmail, resetOtpEmail } = require('../lib/mailTemplates');
+const { removeStoredUpload } = require('../middleware/uploadImage');
 
 const POPULATE = [
-  { path: 'roleId' },
-  { path: 'tenantId' },
+  { path: 'roleId', options: { allowCrossTenant: true } },
+  { path: 'tenantId', options: { allowCrossTenant: true } },
 ];
 
 async function loadUserById(id) {
-  return User.findById(id).populate(POPULATE).setOptions({ skipTenantFilter: true });
+  return User.findById(id).populate(POPULATE).setOptions({ allowCrossTenant: true });
 }
 
 async function issueSession(req, res, user, extras = {}) {
@@ -33,7 +35,7 @@ async function issueSession(req, res, user, extras = {}) {
   const accessToken = signAccessToken(accessPayload(dto, { rv: user.refreshTokenVersion }));
   const refreshToken = signRefreshToken({ sub: String(user._id), sid: crypto.randomUUID(), rv: user.refreshTokenVersion });
   const decoded = verifyRefresh(refreshToken);
-  await RefreshSession.create({
+  const session = new RefreshSession({
     tenantId: user.tenantId._id || user.tenantId,
     userId: user._id,
     tokenHash: hashToken(refreshToken),
@@ -42,22 +44,59 @@ async function issueSession(req, res, user, extras = {}) {
     device: deviceFromUa(req.headers['user-agent']),
     expiresAt: new Date(decoded.exp * 1000),
   });
+  await session.save({ allowCrossTenant: true });
   setRefreshCookie(res, refreshToken);
   return { accessToken, user: dto };
+}
+
+function tenantOf(user) {
+  return user?.tenantId && typeof user.tenantId === 'object' ? user.tenantId : null;
+}
+
+async function accountsForEmail(email) {
+  return User.find({ email }).populate(POPULATE).setOptions({ skipTenantFilter: true });
+}
+
+function companyChoices(users) {
+  return users.map((user) => {
+    const tenant = tenantOf(user);
+    return { slug: tenant?.slug || '', name: tenant?.name || 'Company' };
+  }).filter((row) => row.slug);
+}
+
+function pickAccount(users, workspace) {
+  const slug = String(workspace || '').trim().toLowerCase();
+  if (slug) {
+    const matches = users.filter((user) => String(tenantOf(user)?.slug || '') === slug);
+    return matches.length === 1 ? matches[0] : null;
+  }
+  if (users.length > 1) {
+    const err = new HttpError(409, 'This email is on more than one company. Choose which one.');
+    err.data = { companies: companyChoices(users) };
+    throw err;
+  }
+  return users[0] || null;
 }
 
 async function login(req, res) {
   const email = String(req.body.email || '').toLowerCase().trim();
   const password = req.body.password || '';
-  const user = await User.findOne({ email }).populate(POPULATE).setOptions({ skipTenantFilter: true });
+  const users = await accountsForEmail(email);
+  const matched = [];
+  for (const row of users) {
+    if (row.passwordHash && await bcrypt.compare(password, row.passwordHash)) matched.push(row);
+  }
+  if (!matched.length) throw new HttpError(401, 'Invalid email or password');
+  const user = pickAccount(matched, req.body.workspace);
   if (!user) throw new HttpError(401, 'Invalid email or password');
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) throw new HttpError(401, 'Invalid email or password');
   if (user.status === 'disabled') throw new HttpError(403, 'Account disabled');
 
   const tenant = user.tenantId;
   if (tenant.kind === 'merchant' && tenant.status === 'suspended') {
     throw new HttpError(403, 'This tenant is suspended');
+  }
+  if (tenant.kind === 'merchant' && tenant.status === 'trial' && tenant.planExpiresAt && new Date(tenant.planExpiresAt) < new Date()) {
+    throw new HttpError(403, 'This 14-day trial has ended. Renew the plan to sign in.');
   }
 
   user.lastLoginAt = new Date();
@@ -66,15 +105,44 @@ async function login(req, res) {
   return successResponse(res, session, 'Signed in');
 }
 
+const DEMO_ACCOUNTS = {
+  merchant: { email: 'superadmin@omsking.com', label: 'Merchant demo' },
+  platform: { email: 'platform@omsking.com', label: 'Platform demo' },
+  vendor: { email: 'vendor@omsking.com', label: 'Vendor demo' },
+};
+
+const PLANS = {
+  starter: ['Shopify'],
+  growth: ['Shopify', 'Amazon', 'Myntra'],
+  enterprise: ['Shopify', 'Amazon', 'Myntra'],
+};
+
+async function demoLogin(req, res) {
+  if (!config.demoLogin) throw new HttpError(404, 'Demo login is off');
+  const account = DEMO_ACCOUNTS[String(req.body.kind || '')];
+  if (!account) throw new HttpError(400, 'Choose merchant, platform, or vendor demo');
+  const users = await accountsForEmail(account.email);
+  const user = users[0];
+  if (!user || user.status === 'disabled') throw new HttpError(404, 'Demo account is not ready. Seed the database first.');
+  const tenant = user.tenantId;
+  if (tenant?.kind === 'merchant' && tenant.status === 'suspended') throw new HttpError(403, 'This tenant is suspended');
+  user.lastLoginAt = new Date();
+  await user.save();
+  const session = await issueSession(req, res, user);
+  return successResponse(res, session, 'Demo signed in');
+}
+
 async function register(req, res) {
   const { name, email, company, password } = req.body;
+  const plan = PLANS[req.body.plan] ? req.body.plan : 'starter';
   const { tenant, owner } = await provisionMerchant({
     name: company,
     ownerEmail: email,
     ownerName: name,
     password,
     status: 'trial',
-    plan: 'starter',
+    plan,
+    channels: PLANS[plan],
   });
   const user = await loadUserById(owner._id);
   const session = await issueSession(req, res, user, { tenant });
@@ -122,7 +190,7 @@ async function logout(req, res) {
   return successResponse(res, null, 'Signed out');
 }
 
-async function me(req, res) {
+async function currentDto(req) {
   const user = await loadUserById(req.user.id);
   if (!user) throw new HttpError(401, 'User not found');
   const extras = {};
@@ -135,7 +203,11 @@ async function me(req, res) {
     extras.tenantName = tenant?.name;
     extras.tenant = tenant;
   }
-  return successResponse(res, publicUser(user, extras.tenant || user.tenantId, extras), 'Current user');
+  return publicUser(user, extras.tenant || user.tenantId, extras);
+}
+
+async function me(req, res) {
+  return successResponse(res, await currentDto(req), 'Current user');
 }
 
 async function patchMe(req, res) {
@@ -161,12 +233,37 @@ async function patchMe(req, res) {
   return successResponse(res, publicUser(fresh, fresh.tenantId), 'Profile updated');
 }
 
+async function uploadMyAvatar(req, res) {
+  if (!req.file) throw new HttpError(400, 'Choose a photo');
+  const user = await User.findById(req.user.id).setOptions({ skipTenantFilter: true });
+  if (!user) throw new HttpError(401, 'User not found');
+  const folder = String(req.avatarFolder || req.tenantId || req.user.homeTenantId || 'platform');
+  removeStoredUpload(user.avatarUrl, folder);
+  user.avatarUrl = `/uploads/${folder}/${req.file.filename}`;
+  await user.save();
+  return successResponse(res, await currentDto(req), 'Profile photo updated');
+}
+
+async function clearMyAvatar(req, res) {
+  const user = await User.findById(req.user.id).setOptions({ skipTenantFilter: true });
+  if (!user) throw new HttpError(401, 'User not found');
+  const folder = String(req.tenantId || req.user.homeTenantId || 'platform');
+  removeStoredUpload(user.avatarUrl, folder);
+  user.avatarUrl = '';
+  await user.save();
+  return successResponse(res, await currentDto(req), 'Profile photo removed');
+}
+
 async function forgotPassword(req, res) {
-  assertMailConfigured();
   const email = String(req.body.email || '').toLowerCase().trim();
   const generic = { sent: true };
-  const user = await User.findOne({ email }).setOptions({ skipTenantFilter: true });
+  const users = await accountsForEmail(email);
+  const user = pickAccount(users, req.body.workspace);
   if (!user || user.status === 'disabled') {
+    return successResponse(res, generic, 'If that Gmail is registered, an OTP was sent');
+  }
+  const box = await mailboxOf(user.tenantId?._id || user.tenantId);
+  if (!box) {
     return successResponse(res, generic, 'If that Gmail is registered, an OTP was sent');
   }
 
@@ -177,13 +274,13 @@ async function forgotPassword(req, res) {
 
   const otp = String(crypto.randomInt(100000, 1000000));
   await PasswordReset.create({
-    tenantId: user.tenantId,
+    tenantId: user.tenantId?._id || user.tenantId,
     userId: user._id,
     tokenHash: hashToken(`otp:${user._id}:${otp}`),
     expiresAt: new Date(Date.now() + 10 * 60 * 1000),
   });
   const mail = resetOtpEmail({ name: user.fullName, otp });
-  await sendMail({ to: email, ...mail });
+  await sendMail({ to: email, tenantId: user.tenantId?._id || user.tenantId, ...mail });
   return successResponse(res, generic, 'If that Gmail is registered, an OTP was sent');
 }
 
@@ -191,7 +288,8 @@ async function resetPassword(req, res) {
   const email = String(req.body.email || '').toLowerCase().trim();
   const otp = String(req.body.otp || '').trim();
   const { password } = req.body;
-  const user = await User.findOne({ email }).setOptions({ skipTenantFilter: true });
+  const users = await accountsForEmail(email);
+  const user = pickAccount(users, req.body.workspace);
   if (!user) throw new HttpError(400, 'Invalid email or OTP');
   const row = await PasswordReset.findOne({
     userId: user._id,
@@ -252,11 +350,14 @@ async function listPasswordResets(req, res) {
 
 module.exports = {
   login,
+  demoLogin,
   register,
   refresh,
   logout,
   me,
   patchMe,
+  uploadMyAvatar,
+  clearMyAvatar,
   forgotPassword,
   resetPassword,
   exitImpersonation,

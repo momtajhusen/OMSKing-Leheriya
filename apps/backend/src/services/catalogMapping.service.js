@@ -149,7 +149,8 @@ function listingExtras(row) {
 
 async function ingestListing(tenantId, userId, row, options = {}) {
   const channel = normalizeChannel(row.channel);
-  if (!['shopify', 'amazon', 'myntra', 'custom'].includes(channel)) {
+  const { isKnownChannel } = require('../channels/registry');
+  if (channel !== 'custom' && !isKnownChannel(channel)) {
     throw new HttpError(400, `Unknown channel: ${row.channel}`);
   }
   const channelSkuCode = String(row.channelSkuCode || row.sku || '').trim();

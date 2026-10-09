@@ -9,6 +9,7 @@ import { useAuth } from '../../hooks/useAuth';
 import PageFade from '../motion/PageFade';
 import { usePermissions } from '../../hooks/usePermissions';
 import BrandLogo from '../brand/BrandLogo';
+import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
 
 const vendorRoutes = [
   { path: '/vendor/dashboard', label: 'Home', icon: LayoutDashboard },
@@ -29,7 +30,7 @@ function VendorLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const current = vendorRoutes.find((r) => location.pathname === r.path) || vendorRoutes[1];
-  const initial = (user?.name || 'V').charAt(0).toUpperCase();
+  const photo = useProfilePhoto();
 
   const handleLogout = async () => {
     await logout();
@@ -84,13 +85,14 @@ function VendorLayout() {
             <NavLinks onClick={() => setMobileOpen(false)} />
           </nav>
           <div className="border-t border-[hsl(var(--color-border-premium))] p-4">
+            {photo.input}
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-teal-600 text-sm font-bold text-white">
-                {initial}
-              </div>
+              <ProfilePhotoButton name={user?.name || 'Vendor'} />
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{user?.name || 'Vendor'}</div>
-                <div className="truncate text-[11px] text-muted-foreground">{user?.tenantName || 'Assigned vendor'}</div>
+                <button type="button" className="truncate text-[11px] text-emerald-700" onClick={photo.pick} disabled={photo.busy}>
+                  {photo.busy ? 'Saving…' : 'Change photo'}
+                </button>
               </div>
             </div>
           </div>

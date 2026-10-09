@@ -5,6 +5,7 @@ const config = require('../config');
 const Tenant = require('../models/Tenant');
 const Role = require('../models/Role');
 const User = require('../models/User');
+const Vendor = require('../models/Vendor');
 const { ROLE_DEFAULT_PERMISSIONS } = require('../constants/permissions');
 const { provisionMerchant } = require('../services/tenantOnboard.service');
 const { seedLeheriyaChannels } = require('./phase3Channels');
@@ -40,7 +41,7 @@ async function seed() {
     });
   }
 
-  const platformUser = await User.findOne({ email: 'platform@omsking.com' }).setOptions({ skipTenantFilter: true });
+  const platformUser = await User.findOne({ tenantId: platform._id, email: 'platform@omsking.com' }).setOptions({ skipTenantFilter: true });
   if (!platformUser) {
     await User.create({
       tenantId: platform._id,
@@ -73,7 +74,7 @@ async function seed() {
   }
 
   async function ensureStaff(email, fullName, code) {
-    const existing = await User.findOne({ email }).setOptions({ skipTenantFilter: true });
+    const existing = await User.findOne({ tenantId: leheriya._id, email }).setOptions({ skipTenantFilter: true });
     if (existing) return;
     const role = await Role.findOne({ tenantId: leheriya._id, code }).setOptions({ skipTenantFilter: true });
     await User.create({
@@ -88,6 +89,26 @@ async function seed() {
 
   await ensureStaff('ops@leheriya.com', 'Anita Sharma', 'operations');
   await ensureStaff('vendor@omsking.com', 'Sandeep Textiles', 'vendor');
+  const vendorUser = await User.findOne({ tenantId: leheriya._id, email: 'vendor@omsking.com' }).setOptions({ skipTenantFilter: true });
+  if (vendorUser) {
+    let vendorRow = await Vendor.findOne({ tenantId: leheriya._id, nameNorm: 'sandeep textiles' }).setOptions({ skipTenantFilter: true });
+    if (!vendorRow) {
+      vendorRow = await Vendor.create({
+        tenantId: leheriya._id,
+        name: 'Sandeep Textiles',
+        nameNorm: 'sandeep textiles',
+        email: 'vendor@omsking.com',
+      });
+    } else if (!vendorRow.email) {
+      vendorRow.email = 'vendor@omsking.com';
+      await vendorRow.save();
+    }
+    const linked = (vendorUser.assignedVendorIds || []).some((id) => String(id) === String(vendorRow._id));
+    if (!linked) {
+      vendorUser.assignedVendorIds = [...(vendorUser.assignedVendorIds || []), vendorRow._id];
+      await vendorUser.save();
+    }
+  }
 
   const surat = await Tenant.findOne({ slug: 'surat-silks' });
   if (!surat) {
@@ -104,7 +125,7 @@ async function seed() {
   }
 
   await Role.updateMany(
-    { code: { $in: ['super_admin', 'operations'] } },
+    { tenantId: leheriya._id, code: { $in: ['super_admin', 'operations'] } },
     { $addToSet: { permissions: 'vendors.manage' } },
   ).setOptions({ skipTenantFilter: true });
 

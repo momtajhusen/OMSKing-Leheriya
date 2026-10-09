@@ -13,7 +13,10 @@ import { GitCompare, Link, Search, Unlink } from 'lucide-react';
 import api, { apiError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
 
-const CHANNELS = ['shopify', 'myntra', 'amazon'];
+import { CHANNEL_CATALOG } from '../../constants/channelCatalog';
+import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
+
+const CHANNELS = CHANNEL_CATALOG.map((row) => row.id);
 
 export default function SkuMappingPage() {
   const navigate = useNavigate();
@@ -27,23 +30,27 @@ export default function SkuMappingPage() {
   const [counts, setCounts] = useState({ mapped: 0, unmapped: 0, failed: 0, unlisted: 0 });
   const [mappingInput, setMappingInput] = useState({});
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const loadTab = async (tab) => {
+  const loadTab = async (tab, nextPage = page) => {
     if (tab === 'unlisted') {
-      const { data } = await api.get('/sku-mappings/unlisted', { params: { channel: unlistedChannel } });
+      const { data } = await api.get('/sku-mappings/unlisted', { params: { channel: unlistedChannel, page: nextPage, limit: PAGE_SIZE } });
+      setTotal(data.meta?.total || 0);
       return data.data || [];
     }
     const { data } = await api.get('/sku-mappings', {
-      params: { tab, channel: channel || undefined, q: q || undefined },
+      params: { tab, channel: channel || undefined, q: q || undefined, page: nextPage, limit: PAGE_SIZE },
     });
+    setTotal(data.meta?.total || 0);
     return data.data || [];
   };
 
-  const load = async (tab = activeTab) => {
+  const load = async (tab = activeTab, nextPage = page) => {
     setLoading(true);
     try {
       const [current, summary, skuRes] = await Promise.all([
-        loadTab(tab),
+        loadTab(tab, nextPage),
         api.get('/sku-mappings/summary', { params: { channel: unlistedChannel } }),
         api.get('/master-skus'),
       ]);
@@ -57,11 +64,12 @@ export default function SkuMappingPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(activeTab, page); }, [page]);
 
   const changeTab = (tab) => {
     setActiveTab(tab);
-    load(tab);
+    setPage(1);
+    load(tab, 1);
   };
 
   const mapExisting = async (id) => {
@@ -133,7 +141,7 @@ export default function SkuMappingPage() {
         <div>
           <h1 className="text-3xl font-bold mb-2">SKU Mapping</h1>
           <p className="text-muted-foreground">
-            Shopify / Amazon / Myntra listings attach to one Master SKU. Match is normalized seller SKU, then barcode — never title.
+            Every channel listing attaches to one Master SKU. Match is normalized seller SKU, then barcode — never title.
           </p>
         </div>
         <Button variant="outline" onClick={() => navigate('/import')}>Bulk import</Button>
@@ -168,12 +176,14 @@ export default function SkuMappingPage() {
                 const next = e.target.value;
                 setUnlistedChannel(next);
                 setActiveTab('unlisted');
+                setPage(1);
                 setLoading(true);
                 Promise.all([
-                  api.get('/sku-mappings/unlisted', { params: { channel: next } }),
+                  api.get('/sku-mappings/unlisted', { params: { channel: next, page: 1, limit: PAGE_SIZE } }),
                   api.get('/sku-mappings/summary', { params: { channel: next } }),
                 ]).then(([current, summary]) => {
                   setRows(current.data.data || []);
+                  setTotal(current.data.meta?.total || 0);
                   setCounts(summary.data.data || counts);
                 }).catch((err) => toast.error(apiError(err, 'Could not load mappings'))).finally(() => setLoading(false));
               }}
@@ -197,11 +207,11 @@ export default function SkuMappingPage() {
               placeholder="Search SKU / title"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && load(activeTab)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(activeTab, 1); } }}
             />
           </div>
         )}
-        <Button size="sm" variant="outline" onClick={() => load(activeTab)}>Apply</Button>
+        <Button size="sm" variant="outline" onClick={() => { setPage(1); load(activeTab, 1); }}>Apply</Button>
       </div>
 
       <Card>
@@ -288,6 +298,7 @@ export default function SkuMappingPage() {
               </TableBody>
             </Table>
           )}
+          <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
         </CardContent>
       </Card>
 

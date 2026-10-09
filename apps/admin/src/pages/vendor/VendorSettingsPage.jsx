@@ -13,6 +13,7 @@ import Input from '../../components/ui/Input';
 import EmptyState from '../../components/ui/EmptyState';
 import PageLoader from '../../components/ui/PageLoader';
 import { VendorPage } from '../../components/vendor/VendorChrome';
+import { ProfilePhotoButton, useProfilePhoto } from '../../components/account/ProfilePhoto';
 import { Save, Send, Store } from 'lucide-react';
 
 const profileSchema = z.object({
@@ -30,6 +31,7 @@ export default function VendorSettingsPage() {
   const load = useVendorStore((s) => s.load);
   const upsertRow = useVendorStore((s) => s.upsertRow);
   const [busy, setBusy] = useState(false);
+  const photo = useProfilePhoto();
 
   useEffect(() => {
     load();
@@ -96,6 +98,21 @@ export default function VendorSettingsPage() {
         </CardHeader>
         <CardContent className="p-4 pt-2">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <div className="flex items-center gap-3">
+              {photo.input}
+              <ProfilePhotoButton name={user?.name || 'Vendor'} className="h-14 w-14" />
+              <div>
+                <p className="text-sm font-medium">Profile photo</p>
+                <button type="button" className="text-sm text-emerald-700" onClick={photo.pick} disabled={photo.busy}>
+                  {photo.busy ? 'Saving…' : 'Change photo'}
+                </button>
+                {photo.hasPhoto && (
+                  <button type="button" className="ml-3 text-sm text-muted-foreground" onClick={photo.remove} disabled={photo.busy}>
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Business name</label>
@@ -116,7 +133,7 @@ export default function VendorSettingsPage() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Telegram group</label>
-              <Input {...register('telegramGroup')} error={errors.telegramGroup?.message} />
+              <Input {...register('telegramGroup')} error={errors.telegramGroup?.message} placeholder="-1001234567890 or @vendor_group" />
             </div>
             <Button type="submit" disabled={busy}>
               <Save className="h-4 w-4 mr-2" />
@@ -129,7 +146,7 @@ export default function VendorSettingsPage() {
       <Card className="premium-card border-0 shadow-none">
         <CardHeader className="p-4 pb-2">
           <CardTitle className="text-base">Alerts</CardTitle>
-          <CardDescription>Telegram send is not connected yet. The group name is stored on your vendor row.</CardDescription>
+          <CardDescription>When the merchant turns on Vendor Order Telegram, assign messages go to this group. The owner chat is a separate alert.</CardDescription>
         </CardHeader>
         <CardContent className="p-4 pt-2">
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[hsl(var(--color-border-premium))] p-3">

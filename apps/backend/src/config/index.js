@@ -19,6 +19,7 @@ const config = {
     .map((s) => s.trim())
     .filter(Boolean),
   channelEncryptionKey: process.env.CHANNEL_ENCRYPTION_KEY || '',
+  demoLogin: process.env.DEMO_LOGIN === 'true' || (process.env.NODE_ENV || 'development') !== 'production',
   mail: {
     user: process.env.GMAIL_USER || '',
     pass: process.env.GMAIL_APP_PASSWORD || '',

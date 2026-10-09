@@ -190,7 +190,15 @@ async function upsertMappedOrder(tenantId, mapped) {
     delete doc.id;
     delete doc.createdAt;
     delete doc.subOrderIndexMap;
+    const { syncOrderReservations } = require('./orderReserve.service');
+    await syncOrderReservations(tenantId, doc);
     await Order.create({ ...doc, tenantId, lastChannelSyncAt: now });
+    const { notifyEventEmail } = require('./notify.service');
+    await notifyEventEmail(tenantId, 'NOT-001', {
+      dedupeKey: `order.new:${mapped.orderNo}`,
+      subject: `New order ${mapped.orderNo}`,
+      text: `Order: ${mapped.orderNo}\nChannel: Myntra`,
+    });
     return 'created';
   }
   const before = JSON.stringify([existing.status, existing.channelStatus, existing.awb, existing.invoiceNo]);
@@ -222,6 +230,8 @@ async function upsertMappedOrder(tenantId, mapped) {
     sub.status = omsStatus(line.status);
     sub.deliveryStatus = deliveryStatusFor(sub.status);
   });
+  const { syncOrderReservations } = require('./orderReserve.service');
+  await syncOrderReservations(tenantId, existing);
   existing.lastChannelSyncAt = now;
   await existing.save();
   const after = JSON.stringify([existing.status, existing.channelStatus, existing.awb, existing.invoiceNo]);

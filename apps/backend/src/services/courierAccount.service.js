@@ -79,6 +79,15 @@ function catalogPayload() {
   };
 }
 
+async function activeCourierCreds(tenantId, code) {
+  const rows = await CourierAccount.find({ tenantId, code, status: 'active' }).setOptions({ skipTenantFilter: true });
+  const ready = rows
+    .map((row) => ({ row, creds: decryptObject(row.credentialsEnc) }))
+    .filter((item) => String(item.creds.apiToken || item.creds.token || '').trim());
+  const own = ready.find((item) => item.row.source === 'own');
+  return (own || ready[0] || { creds: {} }).creds;
+}
+
 async function listCouriers(tenantId) {
   const rows = await CourierAccount.find({ tenantId }).sort({ priority: 1, name: 1 }).setOptions({ skipTenantFilter: true });
   return { ...catalogPayload(), accounts: rows.map(toDto) };
@@ -217,4 +226,5 @@ module.exports = {
   createCourier,
   updateCourier,
   removeCourier,
+  activeCourierCreds,
 };

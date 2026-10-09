@@ -1,4 +1,4 @@
-/** Events that can trigger a notification. Delivery (Telegram / email / WhatsApp) is not wired yet. */
+/** Events that can trigger Telegram, Gmail, or WhatsApp once that channel is set up. */
 export const NOTIFICATION_EVENTS = [
   {
     id: 'NOT-001',

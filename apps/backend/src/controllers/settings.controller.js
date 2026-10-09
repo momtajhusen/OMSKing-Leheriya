@@ -8,6 +8,7 @@ const { sessionTenantId } = require('../lib/tenantAccess');
 const couriers = require('../services/courierAccount.service');
 const taxSettings = require('../services/taxSettings.service');
 const { recordFromReq } = require('../services/auditLog.service');
+const { encryptObject } = require('../lib/secretBox');
 
 function merchantTenant(req) {
   const tenantId = sessionTenantId(req);
@@ -26,6 +27,8 @@ function mapCompany(tenant) {
     district: legal.district || '',
     supportEmail: legal.email || '',
     supportPhone: legal.phone || '',
+    gmailUser: tenant.settings?.mail?.gmailUser || '',
+    mailConfigured: Boolean(tenant.settings?.mail?.gmailUser && tenant.settings?.mail?.gmailAppPasswordEnc),
   };
 }
 
@@ -50,6 +53,19 @@ async function patchCompany(req, res) {
   if (body.supportEmail != null) tenant.legalEntity.email = String(body.supportEmail).trim().toLowerCase();
   if (body.supportPhone != null) tenant.legalEntity.phone = String(body.supportPhone).trim();
   tenant.markModified('legalEntity');
+  tenant.settings = tenant.settings || {};
+  tenant.settings.mail = tenant.settings.mail || { gmailUser: '', gmailAppPasswordEnc: '' };
+  if (body.gmailUser != null) {
+    const gmailUser = String(body.gmailUser).trim().toLowerCase();
+    tenant.settings.mail.gmailUser = gmailUser;
+    if (!gmailUser) tenant.settings.mail.gmailAppPasswordEnc = '';
+  }
+  const appPassword = String(body.gmailAppPassword || '').trim();
+  if (appPassword) {
+    if (!tenant.settings.mail.gmailUser) throw new HttpError(400, 'Gmail address is required with the app password');
+    tenant.settings.mail.gmailAppPasswordEnc = encryptObject({ pass: appPassword });
+  }
+  tenant.markModified('settings');
   await tenant.save();
   const after = mapCompany(tenant);
   await recordFromReq(req, {

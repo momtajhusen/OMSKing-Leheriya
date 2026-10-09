@@ -36,7 +36,8 @@ async function listConnections(req, res) {
 async function saveConnection(req, res) {
   const tenantId = merchantTenant(req);
   const channel = String(req.params.channel || '').toLowerCase();
-  if (!['shopify', 'amazon', 'myntra', 'flipkart', 'meesho', 'ajio', 'nykaa'].includes(channel)) {
+  const { isKnownChannel } = require('../channels/registry');
+  if (!isKnownChannel(channel)) {
     throw new HttpError(400, 'Unknown channel');
   }
   const existing = await getConnection(tenantId, channel);

@@ -2,6 +2,7 @@ const MasterSku = require('../models/MasterSku');
 const SkuMapping = require('../models/SkuMapping');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
+const { pageOf } = require('../utils/page');
 const {
   mapMapping,
   ingestListing,
@@ -27,7 +28,8 @@ async function listMappings(req, res) {
   if (tab === 'unmapped') filter.syncStatus = 'unmapped';
   else if (tab === 'failed') filter.syncStatus = 'error';
   else if (tab === 'mapped') filter.syncStatus = { $in: ['synced', 'pending'] };
-  if (['shopify', 'amazon', 'myntra', 'custom'].includes(channel)) filter.channel = channel;
+  const { isKnownChannel } = require('../channels/registry');
+  if (channel === 'custom' || isKnownChannel(channel)) filter.channel = channel;
   const rows = await SkuMapping.find(filter)
     .populate('masterSkuId')
     .sort({ updatedAt: -1 })
@@ -47,7 +49,8 @@ async function listMappings(req, res) {
       || (row.productName || '').toLowerCase().includes(q)
     );
   }
-  return paginatedResponse(res, data, 1, data.length || 50, data.length, 'SKU mappings');
+  const paged = pageOf(data, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'SKU mappings');
 }
 
 async function mappingSummary(req, res) {
@@ -95,7 +98,8 @@ async function listUnlisted(req, res) {
     status: 'unlisted',
     channelSku: '—',
   }));
-  return paginatedResponse(res, data, 1, data.length || 50, data.length, 'Unlisted');
+  const paged = pageOf(data, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Unlisted');
 }
 
 async function ingest(req, res) {
@@ -154,7 +158,8 @@ async function importListings(req, res) {
 async function pullLiveCatalog(req, res) {
   const tenantId = merchantTenant(req);
   const channel = String(req.body?.channel || '').toLowerCase();
-  if (!['shopify', 'amazon', 'myntra'].includes(channel)) throw new HttpError(400, 'Channel must be shopify, amazon, or myntra');
+  const { isKnownChannel } = require('../channels/registry');
+  if (!isKnownChannel(channel)) throw new HttpError(400, 'Unknown channel');
   const summary = await pullChannel(tenantId, req.user.id, channel);
   return successResponse(res, summary, `Pulled ${channel} catalog`);
 }

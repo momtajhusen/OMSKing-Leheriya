@@ -34,8 +34,16 @@ async function pullAmazonOrders(tenantId) {
       phone: '',
       address: '',
     });
+    const { syncOrderReservations } = require('./orderReserve.service');
+    await syncOrderReservations(tenantId, next);
     if (!existing) {
       await Order.create(next);
+      const { notifyEventEmail } = require('./notify.service');
+      await notifyEventEmail(tenantId, 'NOT-001', {
+        dedupeKey: `order.new:${orderNo}`,
+        subject: `New order ${orderNo}`,
+        text: `Order: ${orderNo}\nChannel: Amazon`,
+      });
       out.created += 1;
       continue;
     }
@@ -46,6 +54,7 @@ async function pullAmazonOrders(tenantId) {
     existing.subOrders = next.subOrders;
     existing.orderDate = next.orderDate || existing.orderDate;
     existing.source = 'channel_api';
+    if (next.reserveState !== undefined) existing.reserveState = next.reserveState;
     await existing.save();
     if (before === `${existing.status}|${existing.total}`) out.unchanged += 1;
     else out.updated += 1;

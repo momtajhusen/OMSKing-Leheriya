@@ -1,7 +1,9 @@
 const mongoose = require('mongoose');
 const { tenantPlugin } = require('../plugins/tenantPlugin');
 
-const CHANNELS = ['shopify', 'amazon', 'myntra', 'custom'];
+const { channelIds } = require('../channels/registry');
+
+const CHANNELS = [...channelIds(), 'custom'];
 const SYNC = ['synced', 'pending', 'error', 'unmapped'];
 
 const skuMappingSchema = new mongoose.Schema({

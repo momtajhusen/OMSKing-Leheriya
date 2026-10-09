@@ -4,7 +4,11 @@ const { HttpError } = require('../utils/httpError');
 const { getConnection, credsOf } = require('./channelConnection.service');
 const { bullEnabled, scheduleBull, startBullTransport, stopBullTransport } = require('./bullTransport');
 
-const CHANNELS = new Set(['shopify', 'amazon', 'myntra']);
+const { channelIds, channelById } = require('../channels/registry');
+const { adapterFor } = require('../adapters');
+const partner = require('../adapters/partner');
+
+const CHANNELS = new Set(channelIds());
 const MANUAL_TYPES = new Set(['orders_pull', 'inventory_push', 'products_pull']);
 const STUCK_MS = 15_000;
 const MAX_RETRIES = 5;
@@ -17,7 +21,13 @@ function retryDelayMs(count) {
 }
 
 function directionFor(jobType) {
-  return jobType === 'inventory_push' ? 'push' : 'pull';
+  return jobType === 'inventory_push' || jobType === 'shipment_push' ? 'push' : 'pull';
+}
+
+function redactSecrets(value) {
+  return String(value || '')
+    .replace(/\b(?:shpat|shpca|shpse|xoxb|xoxp|ya29)_[A-Za-z0-9_\-]+/g, '[redacted]')
+    .replace(/(token|secret|password|apiToken|webhookSecret|accessToken)\s*[:=]\s*\S+/gi, '$1=[redacted]');
 }
 
 function toJobDto(row) {
@@ -29,8 +39,8 @@ function toJobDto(row) {
     status: row.status,
     retriesCount: row.retriesCount || 0,
     triggeredBy: row.triggeredBy,
-    shortSummary: row.shortSummary || '',
-    lastError: row.lastError || '',
+    shortSummary: redactSecrets(row.shortSummary),
+    lastError: redactSecrets(row.lastError),
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
     createdAt: row.createdAt,
@@ -82,8 +92,16 @@ async function enqueueManual(tenantId, userId, body) {
     const blocked = await catalogPullBlock(tenantId, channel);
     if (blocked) throw new HttpError(400, blocked);
   }
-  if (jobType === 'inventory_push') {
-    throw new HttpError(400, notLiveMessage(channel, jobType));
+  if (jobType === 'inventory_push' && body?.masterSkuId) {
+    const job = await enqueue({
+      tenantId,
+      channel,
+      jobType,
+      triggeredBy: 'manual',
+      triggeredByUserId: userId,
+      payload: { masterSkuId: String(body.masterSkuId) },
+    });
+    return toJobDto(job);
   }
   const job = await enqueue({
     tenantId,
@@ -101,6 +119,23 @@ async function listJobs(tenantId) {
     .limit(100)
     .setOptions({ skipTenantFilter: true });
   return rows.map(toJobDto);
+}
+
+async function listPlatformJobs({ failedOnly = false, limit = 100 } = {}) {
+  const Tenant = require('../models/Tenant');
+  const filter = failedOnly ? { status: 'failed' } : {};
+  const rows = await IntegrationJob.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .setOptions({ skipTenantFilter: true });
+  const ids = [...new Set(rows.map((row) => String(row.tenantId)))];
+  const tenants = await Tenant.find({ _id: { $in: ids } }).select('name').setOptions({ skipTenantFilter: true });
+  const names = new Map(tenants.map((tenant) => [String(tenant._id), tenant.name]));
+  return rows.map((row) => ({
+    ...toJobDto(row),
+    tenantId: String(row.tenantId),
+    tenantName: names.get(String(row.tenantId)) || '',
+  }));
 }
 
 async function requeueJob(tenantId, userId, id) {
@@ -142,11 +177,15 @@ async function applyOnce(job, summary) {
 }
 
 async function handleWebhook(job) {
-  await WebhookEvent.findOneAndUpdate(
+  const claimed = await WebhookEvent.findOneAndUpdate(
     { _id: job.webhookEventId, applied: { $ne: true } },
     { $set: { applied: true }, $inc: { applyCount: 1 } },
     { new: true },
   ).setOptions({ skipTenantFilter: true });
+  if (claimed) {
+    const { applyStoredWebhook } = require('./channelOrder.service');
+    await applyStoredWebhook(claimed);
+  }
   await noteCrash(job);
   await WebhookEvent.updateOne(
     { _id: job.webhookEventId },
@@ -168,6 +207,10 @@ function notLiveMessage(channel, jobType) {
   if (channel === 'myntra') {
     return 'Myntra orders were not pulled. Merchant Id and Secret Key are required before the Myntra API is called.';
   }
+  const meta = channelById(channel);
+  if (meta?.kind === 'partner') {
+    return `${meta.name} orders were not pulled. API host and token are required before the orders API is called.`;
+  }
   return `${channel} ${jobType} did not run. No live API is connected.`;
 }
 
@@ -181,14 +224,29 @@ async function hasLiveConnection(tenantId, channel) {
   const row = await getConnection(tenantId, channel);
   if (!row) return false;
   const creds = credsOf(row);
+  if (channel === 'shopify') return Boolean(String(creds.shopUrl || '').trim() && String(creds.adminToken || '').trim());
   if (channel === 'myntra') return Boolean(creds.merchantId && creds.secretKey);
   if (channel === 'amazon') {
     return Boolean(creds.sellerId && creds.refreshToken && creds.lwaClientId && creds.lwaClientSecret);
   }
+  if (channelById(channel)?.kind === 'partner') return Boolean(partner.baseOf(creds) && partner.tokenOf(creds));
   return false;
 }
 
 async function pullLiveOrders(job) {
+  if (job.channel === 'shopify') {
+    const shopify = require('../adapters/shopify');
+    const { ingestChannelOrders } = require('./channelOrder.service');
+    const creds = credsOf(await getConnection(job.tenantId, 'shopify'));
+    const orders = await shopify.pullOrders(creds);
+    const res = await ingestChannelOrders(job.tenantId, 'shopify', orders);
+    const summary = `Shopify ${res.fetched} orders: ${res.created} new, ${res.updated} updated, ${res.unchanged} unchanged.`;
+    await IntegrationJob.updateOne(
+      { _id: job._id },
+      { $set: { shortSummary: summary, recordsTotal: res.fetched, recordsProcessed: res.created + res.updated + res.unchanged } },
+    ).setOptions({ skipTenantFilter: true });
+    return;
+  }
   if (job.channel === 'amazon') {
     const { pullAmazonOrders } = require('./amazonSync.service');
     const res = await pullAmazonOrders(job.tenantId);
@@ -223,6 +281,20 @@ async function pullLiveOrders(job) {
   }
 }
 
+async function pullPartnerOrders(job) {
+  const meta = channelById(job.channel);
+  const adapter = adapterFor(job.channel);
+  const creds = credsOf(await getConnection(job.tenantId, job.channel));
+  const orders = await adapter.pullOrders(creds);
+  const { ingestChannelOrders } = require('./channelOrder.service');
+  const res = await ingestChannelOrders(job.tenantId, job.channel, orders);
+  const summary = `${meta.name} ${res.fetched} orders: ${res.created} new, ${res.updated} updated, ${res.unchanged} unchanged.`;
+  await IntegrationJob.updateOne(
+    { _id: job._id },
+    { $set: { shortSummary: summary, recordsTotal: res.fetched, recordsProcessed: res.created + res.updated + res.unchanged } },
+  ).setOptions({ skipTenantFilter: true });
+}
+
 async function pullCatalogJob(job) {
   const { pullChannel } = require('./catalogPull.service');
   try {
@@ -246,14 +318,29 @@ async function pullCatalogJob(job) {
 }
 
 async function dispatch(job) {
+  if (job.effectApplied) {
+    job.shortSummary = 'Already applied. Retry did not reserve again.';
+    return;
+  }
   if (job.jobType === 'webhook_dispatch') return handleWebhook(job);
   if (job.jobType === 'products_pull') return pullCatalogJob(job);
   if (job.jobType === 'orders_pull') {
-    if (await hasLiveConnection(job.tenantId, job.channel)) return pullLiveOrders(job);
-    throw terminalError(notLiveMessage(job.channel, job.jobType));
+    if (!(await hasLiveConnection(job.tenantId, job.channel))) {
+      throw terminalError(notLiveMessage(job.channel, job.jobType));
+    }
+    if (channelById(job.channel)?.kind === 'partner') return pullPartnerOrders(job);
+    return pullLiveOrders(job);
   }
   if (job.jobType === 'inventory_push') {
-    throw terminalError(notLiveMessage(job.channel, job.jobType));
+    const { runInventoryJob } = require('./inventoryPush.service');
+    await runInventoryJob(job);
+    return;
+  }
+  if (job.jobType === 'shipment_push') {
+    const { runShipmentJob } = require('./ship.service');
+    const result = await runShipmentJob(job);
+    job.shortSummary = `Booked ${result.booked} Delhivery AWBs in one pickup.`;
+    return;
   }
   throw terminalError(notLiveMessage(job.channel, job.jobType));
 }
@@ -287,7 +374,8 @@ async function finishJob(job) {
     fresh.durationMs = Date.now() - started;
     fresh.lastError = '';
     fresh.lockedAt = null;
-    if (job.shortSummary && !fresh.shortSummary) fresh.shortSummary = job.shortSummary;
+    if (job.effectApplied && job.shortSummary) fresh.shortSummary = job.shortSummary;
+    else if (job.shortSummary && !fresh.shortSummary) fresh.shortSummary = job.shortSummary;
     await fresh.save();
   } catch (err) {
     const fresh = await IntegrationJob.findById(job._id).setOptions({ skipTenantFilter: true });
@@ -300,6 +388,7 @@ async function finishJob(job) {
       fresh.finishedAt = new Date();
       fresh.durationMs = Date.now() - started;
       await fresh.save();
+      await notifyJobFailed(fresh);
       return;
     }
     fresh.retriesCount = (fresh.retriesCount || 0) + 1;
@@ -320,6 +409,7 @@ async function finishJob(job) {
       fresh.nextRunAt = new Date(Date.now() + retryDelayMs(fresh.retriesCount));
     }
     await fresh.save();
+    await notifyJobFailed(fresh);
     if (fresh.status === 'queued') {
       const delay = Math.max(0, new Date(fresh.nextRunAt || 0).getTime() - Date.now());
       await scheduleBull(fresh, delay);
@@ -351,7 +441,27 @@ async function recoverStuck(olderThanMs = STUCK_MS) {
   return stuck.length;
 }
 
+async function notifyJobFailed(job) {
+  if (!job?.tenantId || job.status !== 'failed') return;
+  try {
+    const { notifyEventEmail } = require('./notify.service');
+    await notifyEventEmail(job.tenantId, 'NOT-008', {
+      dedupeKey: `job.failed:${job._id}`,
+      subject: `Job failed ${job.jobType || ''}`.trim(),
+      text: `Job: ${job.jobType || 'integration'}\n${String(job.lastError || 'failed').slice(0, 180)}`,
+    });
+  } catch (err) {
+    console.error('[NOTIFY]', err.message);
+  }
+}
+
 async function processDueJobs({ limit = 20 } = {}) {
+  try {
+    const { scanOverdueDispatches } = require('./notify.service');
+    await scanOverdueDispatches();
+  } catch (err) {
+    console.error('[NOTIFY]', err.message);
+  }
   await recoverStuck();
   let processed = 0;
   for (let i = 0; i < limit; i += 1) {
@@ -442,6 +552,7 @@ module.exports = {
   enqueueManual,
   notLiveMessage,
   listJobs,
+  listPlatformJobs,
   requeueJob,
   toJobDto,
   recoverStuck,

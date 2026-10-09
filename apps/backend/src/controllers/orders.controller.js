@@ -1,6 +1,7 @@
 const Order = require('../models/Order');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
+const { pageOf } = require('../utils/page');
 const { merchantTenant } = require('./products.controller');
 const { toOrderDto } = require('../lib/orderDto');
 const { imagesBySku, paintOrder } = require('../lib/catalogImages');
@@ -30,6 +31,7 @@ function scopeToVendor(dto, names) {
     email: '',
     phone: '',
     subOrders,
+    subOrderIndexMap: Object.fromEntries(subOrders.map((sub) => [String(sub.index), sub.id])),
     items: (dto.items || []).filter((item) => skus.has(item.sku)),
     total: subOrders.reduce((sum, sub) => sum + (Number(sub.price) || 0), 0),
   };
@@ -69,10 +71,37 @@ async function decorateOne(tenantId, doc) {
 async function listOrders(req, res) {
   const tenantId = merchantTenant(req);
   const names = await vendorNamesFor(req, tenantId);
-  if (names && !names.length) return paginatedResponse(res, [], 1, 50, 0, 'Orders');
+  if (names && !names.length) return paginatedResponse(res, [], 1, 25, 0, 'Orders', { counts: { total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0 } });
   const rows = await loadOrders(tenantId, names);
   const data = (await decorateOrders(tenantId, rows)).map((row) => scopeToVendor(row, names));
-  return paginatedResponse(res, data, 1, data.length || 50, data.length, 'Orders');
+  const counts = {
+    total: data.length,
+    New: data.filter((row) => row.status === 'New').length,
+    Packed: data.filter((row) => row.status === 'Packed').length,
+    'Ready to Ship': data.filter((row) => row.status === 'Ready to Ship').length,
+    Unfulfillable: data.filter((row) => row.status === 'Unfulfillable').length,
+  };
+  let filtered = data;
+  const status = String(req.query.status || '');
+  const channel = String(req.query.channel || '');
+  const payment = String(req.query.payment || '');
+  const source = String(req.query.source || '');
+  const q = String(req.query.q || '').trim().toLowerCase();
+  if (status && status !== 'all') filtered = filtered.filter((row) => row.status === status);
+  if (channel && channel !== 'all') filtered = filtered.filter((row) => row.channel === channel);
+  if (payment && payment !== 'all') {
+    filtered = filtered.filter((row) => (payment === 'Partially Paid'
+      ? row.paymentDetail === 'Partially paid'
+      : row.paymentMode === payment));
+  }
+  if (source && source !== 'all') filtered = filtered.filter((row) => row.fulfilmentSource === source);
+  if (q) {
+    filtered = filtered.filter((row) => row.id.toLowerCase().includes(q)
+      || (row.subOrders || []).some((sub) => String(sub.id || '').toLowerCase().includes(q))
+      || String(row.customer || '').toLowerCase().includes(q));
+  }
+  const paged = pageOf(filtered, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Orders', { counts });
 }
 
 async function getOrder(req, res) {
@@ -91,22 +120,13 @@ async function generateLabel(req, res) {
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
   if (order.channel === 'Amazon' || order.channel === 'Myntra') {
-    throw new HttpError(400, `${order.channel} uses the marketplace courier. Print the channel label instead of an OMS AWB.`);
+    throw new HttpError(400, `${order.channel} uses the marketplace courier. Print the channel label instead of a Delhivery AWB.`);
   }
   const subOrderId = req.body?.subOrderId || req.query.subOrderId;
-  const nextStatus = nextProcessing(order.status);
-  // No courier API is wired yet: AWB/courier are only stored when the user enters them.
-  if (req.body?.awb) order.awb = String(req.body.awb).trim();
-  if (req.body?.courier) order.courier = String(req.body.courier).trim();
-  order.status = nextStatus;
-  order.labelGeneratedAt = new Date();
-  (order.subOrders || []).forEach((sub) => {
-    if (subOrderId && sub.id !== subOrderId) return;
-    sub.status = nextProcessing(sub.status);
-    sub.deliveryStatus = deliveryStatusFor(sub.status);
-  });
-  await order.save();
-  const dto = await decorateOne(tenantId, order);
+  const { bookShopify } = require('../services/ship.service');
+  await bookShopify(tenantId, order.orderNo);
+  const fresh = await findMaster(tenantId, order.orderNo);
+  const dto = await decorateOne(tenantId, fresh);
   return successResponse(res, {
     ...dto,
     labelHtml: labelHtml(dto, subOrderId),
@@ -121,18 +141,10 @@ async function cancelLabel(req, res) {
   if (order.channel === 'Amazon' || order.channel === 'Myntra') {
     throw new HttpError(400, `${order.channel} labels are cancelled in the seller panel.`);
   }
-  if (!order.awb && !order.labelGeneratedAt) throw new HttpError(400, 'This order has no OMS label to cancel.');
   const before = { status: order.status, awb: order.awb || '' };
-  order.awb = '';
-  order.labelGeneratedAt = null;
-  if (['Processing', 'Packed', 'Ready to Ship'].includes(order.status)) order.status = 'New';
-  (order.subOrders || []).forEach((sub) => {
-    if (['Processing', 'Packed', 'Ready to Ship'].includes(sub.status)) {
-      sub.status = 'New';
-      sub.deliveryStatus = deliveryStatusFor('New');
-    }
-  });
-  await order.save();
+  const { cancelShopifyLabel } = require('../services/ship.service');
+  await cancelShopifyLabel(tenantId, order.orderNo, { releaseReserve: false });
+  const cancelled = await findMaster(tenantId, order.orderNo);
   await recordFromReq(req, {
     tenantId,
     action: 'order.label_cancelled',
@@ -140,9 +152,19 @@ async function cancelLabel(req, res) {
     resourceId: order._id,
     resourceDisplay: order.orderNo,
     before,
-    after: { status: order.status, awb: '' },
+    after: { status: cancelled.status, awb: '' },
   });
-  return successResponse(res, await decorateOne(tenantId, order), 'Label cancelled. Order is unfulfilled and back to New. Shopify updates when that channel is connected.');
+  return successResponse(res, await decorateOne(tenantId, cancelled), 'Label cancelled. Delhivery AWB is cancelled and Shopify is unfulfilled. The stock reserve stays until the order itself is cancelled.');
+}
+
+async function markPaid(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  order.paymentStatus = 'paid';
+  await order.save();
+  return successResponse(res, await decorateOne(tenantId, order), 'Payment marked. This order is paid.');
 }
 
 async function generateInvoice(req, res) {
@@ -150,14 +172,40 @@ async function generateInvoice(req, res) {
   const tenantId = merchantTenant(req);
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
-  order.invoiceNo = order.channel === 'Shopify' ? order.orderNo : `INV-${order.orderNo}`;
+  const Tenant = require('../models/Tenant');
+  const Warehouse = require('../models/Warehouse');
+  const { buildInvoicePdf, emailInvoicePdf } = require('../lib/invoicePdf');
+  const { mailboxOf, sendMail } = require('../lib/mailer');
+  const tenant = await Tenant.findById(tenantId).setOptions({ skipTenantFilter: true });
+  const home = await Warehouse.findOne({ tenantId, code: 'WH-001' }).setOptions({ skipTenantFilter: true });
+  const warehouseState = home?.address?.state || '';
+  const kind = req.body?.kind === 'credit' ? 'credit' : 'invoice';
+  const pdf = buildInvoicePdf(order.toObject(), {
+    company: { companyName: tenant?.name || '', gstin: tenant?.legalEntity?.gstin || '' },
+    warehouseState,
+    kind,
+  });
+  order.invoiceNo = pdf.invoiceNo;
   order.invoiceGeneratedAt = new Date();
   await order.save();
+  const invoiceEmail = req.body?.email === false
+    ? { emailed: false, skipped: true, reason: 'not requested' }
+    : await emailInvoicePdf({
+      tenantId,
+      to: order.email,
+      pdf: pdf.bytes,
+      filename: `${pdf.number || 'invoice'}.pdf`,
+      subject: `${kind === 'credit' ? 'Credit note' : 'Tax invoice'} ${pdf.number}`,
+      mailboxOf,
+      sendMail,
+    });
   const dto = await decorateOne(tenantId, order);
   return successResponse(res, {
     ...dto,
-    invoiceHtml: invoiceHtml(dto),
-  }, 'Invoice generated');
+    invoiceHtml: invoiceHtml(dto, { warehouseState, kind }),
+    invoicePdf: pdf.bytes.toString('base64'),
+    invoiceEmail,
+  }, invoiceEmail.emailed ? 'Invoice emailed' : 'Invoice PDF ready. Email was not sent.');
 }
 
 async function assignSubOrder(req, res) {
@@ -188,7 +236,13 @@ async function assignSubOrder(req, res) {
   order.shopifyVendor = order.shopifyVendor || vendorName;
   if (order.fulfilmentSource !== 'Mixed') order.fulfilmentSource = 'Virtual';
   await order.save();
-  return successResponse(res, await decorateOne(tenantId, order), 'Sub-order assigned');
+  let telegram = '';
+  if (vendorName) {
+    const { notifyVendorAssigned } = require('../services/notify.service');
+    const note = await notifyVendorAssigned(tenantId, order, sub);
+    telegram = note.reason || note.telegram;
+  }
+  return successResponse(res, await decorateOne(tenantId, order), 'Sub-order assigned', 200, telegram ? { telegram } : null);
 }
 
 const VENDOR_FLOW = {
@@ -226,7 +280,21 @@ async function vendorUpdate(req, res) {
   if (req.body.price != null && !names) sub.price = Number(req.body.price);
 
   if (action === 'reject') {
-    sub.rejectReason = String(req.body.reason || '').trim().slice(0, 300);
+    const reason = String(req.body.reason || '').trim().slice(0, 300);
+    if (!reason) throw new HttpError(400, 'Reject needs a reason');
+    sub.rejectReason = reason;
+    const { releaseVendorSlice } = require('../services/ship.service');
+    const { clearVendorAssignNotice } = require('../services/notify.service');
+    await releaseVendorSlice(tenantId, order, sub);
+    await clearVendorAssignNotice(tenantId, order, sub);
+    sub.assignedVendor = '';
+    sub.vendorPhone = '';
+    sub.vendorEmail = '';
+    sub.vendorLocation = '';
+    sub.assignedDate = '';
+    sub.vendorStatus = '';
+    const namesLeft = [...new Set((order.subOrders || []).map((row) => row.assignedVendor).filter(Boolean))];
+    order.assignedVendor = namesLeft.join(', ');
   }
   if (action === 'dispatch') {
     if (!sub.trackingNumber || !sub.courier) throw new HttpError(400, 'Tracking number and courier are required to dispatch');
@@ -239,7 +307,8 @@ async function vendorUpdate(req, res) {
     sub.status = 'Delivered';
     sub.deliveryStatus = deliveryStatusFor('Delivered');
   }
-  if (step.to) sub.vendorStatus = step.to;
+  if (step.to && action !== 'reject') sub.vendorStatus = step.to;
+  if (action === 'reject') sub.vendorStatus = '';
 
   if (order.source !== 'channel_api' && order.source !== 'channel_push') {
     const live = order.subOrders.filter((row) => row.status !== 'Cancelled');
@@ -247,6 +316,21 @@ async function vendorUpdate(req, res) {
     else if (live.length && live.every((row) => ['Dispatched', 'Delivered'].includes(row.status))) order.status = 'Dispatched';
   }
   await order.save();
+  const { notifyEventEmail } = require('../services/notify.service');
+  if (action === 'dispatch') {
+    await notifyEventEmail(tenantId, 'NOT-003', {
+      dedupeKey: `dispatch:${order.orderNo}:${sub.id}`,
+      subject: `Dispatched ${order.orderNo}`,
+      text: `Order: ${order.orderNo}\nSKU: ${sub.sku || '—'}\nQty: ${sub.qty || 1}`,
+    }, req.notifyDeps);
+  }
+  if (action === 'deliver') {
+    await notifyEventEmail(tenantId, 'NOT-005', {
+      dedupeKey: `delivered:${order.orderNo}`,
+      subject: `Delivered ${order.orderNo}`,
+      text: `Order: ${order.orderNo}\nStatus: Delivered`,
+    }, req.notifyDeps);
+  }
   return successResponse(res, scopeToVendor(await decorateOne(tenantId, order), names), 'Line updated');
 }
 
@@ -264,6 +348,10 @@ async function patchStatus(req, res) {
   const allowed = new Set(['New', 'Processing', 'Pending', 'Packed', 'Ready to Ship', 'Dispatched', 'Delivered', 'Cancelled', 'Unfulfillable']);
   if (!allowed.has(status)) throw new HttpError(400, 'Unknown status');
   order.status = status;
+  if (status === 'Cancelled') {
+    const { releaseOrderReserve } = require('../services/ship.service');
+    await releaseOrderReserve(tenantId, order);
+  }
   (order.subOrders || []).forEach((sub) => {
     sub.status = status;
     sub.deliveryStatus = deliveryStatusFor(status);
@@ -343,6 +431,36 @@ function reversePickupHtml(order) {
 </html>`;
 }
 
+async function shipOrder(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (order.channel === 'Shopify') {
+    throw new HttpError(400, 'Shopify ships on Delhivery. Use the label action.');
+  }
+  const { bookMarketplace } = require('../services/ship.service');
+  await bookMarketplace(tenantId, order.orderNo);
+  const fresh = await findMaster(tenantId, order.orderNo);
+  return successResponse(res, await decorateOne(tenantId, fresh), `${order.channel} tracking saved. Delhivery was not called.`);
+}
+
+async function closeManifest(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const { closeDayManifest } = require('../services/ship.service');
+  const manifest = await closeDayManifest(tenantId);
+  return successResponse(res, manifest, `Pickup requested for ${manifest.count} AWB${manifest.count === 1 ? '' : 's'} at WH-001`);
+}
+
+async function bookBulkLabels(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const { queueBulkLabels } = require('../services/ship.service');
+  const job = await queueBulkLabels(tenantId, req.user?._id || req.user?.id, req.body.orderIds || req.body.orderNos);
+  return successResponse(res, { jobId: String(job._id), jobType: job.jobType }, 'One label job queued for these orders');
+}
+
 module.exports = {
-  listOrders, getOrder, generateLabel, cancelLabel, generateInvoice, assignSubOrder, vendorUpdate, patchStatus, bookReverse,
+  listOrders, getOrder, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, vendorUpdate, patchStatus, bookReverse, bookBulkLabels, shipOrder, closeManifest,
 };

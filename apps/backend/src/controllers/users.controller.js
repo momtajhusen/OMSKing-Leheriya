@@ -3,8 +3,9 @@ const User = require('../models/User');
 const Role = require('../models/Role');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
+const { pageOf } = require('../utils/page');
 const { sessionTenantId, assertSameTenant } = require('../lib/tenantAccess');
-const { sendMail, assertMailConfigured } = require('../lib/mailer');
+const { sendMail, mailboxOf } = require('../lib/mailer');
 const { accountCreatedEmail } = require('../lib/mailTemplates');
 const { recordFromReq } = require('../services/auditLog.service');
 
@@ -48,7 +49,8 @@ async function listUsers(req, res) {
   if (q) {
     data = data.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
   }
-  return paginatedResponse(res, data, 1, data.length || 50, data.length, 'Users');
+  const paged = pageOf(data, req.query);
+  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Users');
 }
 
 async function assertNotLastSuperAdmin(user, nextRoleCode, disabling = false) {
@@ -84,7 +86,9 @@ async function createUser(req, res) {
   }
   const exists = await User.findOne({ tenantId, email: email.toLowerCase() }).setOptions({ skipTenantFilter: true });
   if (exists) throw new HttpError(409, 'Email already exists on this tenant');
-  assertMailConfigured();
+  if (!(await mailboxOf(tenantId))) {
+    throw new HttpError(503, 'Save this company Gmail in Settings before inviting a user. Another company mailbox is not used.');
+  }
   const temp = password || `Invite-${Math.random().toString(36).slice(2, 10)}A1`;
   const user = await User.create({
     tenantId,
@@ -101,7 +105,7 @@ async function createUser(req, res) {
     password: temp,
     roleLabel: roleDoc.name || role,
   });
-  await sendMail({ to: email.toLowerCase(), ...mail });
+  await sendMail({ to: email.toLowerCase(), tenantId, ...mail });
   const dto = mapUser(populated);
   await recordFromReq(req, {
     tenantId,

@@ -72,6 +72,27 @@ export function labelHtml(order, subOrderId) {
 </html>`;
 }
 
+function pdfBlob(base64) {
+  const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+  return new Blob([bytes], { type: 'application/pdf' });
+}
+
+export function openPdfBase64(base64, filename) {
+  const url = URL.createObjectURL(pdfBlob(base64));
+  const opened = window.open(url, '_blank', 'noopener');
+  if (!opened) downloadPdfBase64(base64, filename);
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+export function downloadPdfBase64(base64, filename) {
+  const url = URL.createObjectURL(pdfBlob(base64));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'invoice.pdf';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function invoiceHtml(order) {
   const invoiceNo = order.invoiceNo || (order.channel === 'Shopify' ? order.id : `INV-${order.id}`);
   const rows = (order.items || []).map((item) => `
