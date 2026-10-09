@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { orders as orderSeed } from '../../mocks';
-import { formatINR, formatDate, formatDateTime, statusBadgeVariant } from '../../utils/format';
-import { useSimulatedLoad } from '../../hooks/useSimulatedLoad';
+import useOrderStore from '../../stores/orderStore';
+import { formatINR, formatDate, statusBadgeVariant } from '../../utils/format';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -11,23 +11,22 @@ import Select from '../../components/ui/Select';
 import KpiCard from '../../components/ui/KpiCard';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
-import Drawer from '../../components/ui/Drawer';
+import { ItemThumbs } from '../../components/ui/ProductThumb';
 import Modal from '../../components/ui/Modal';
-import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, Package } from 'lucide-react';
+import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, RotateCcw, CheckCircle } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
+import { isChannelManaged, packetIdOf, openMyntraDocument, pullMyntraOrders } from '../../lib/channelOrders';
+import { downloadCsv } from '../../lib/orderMetrics';
+import { apiError } from '../../lib/api';
 
 const STATUS_TABS = [
-  { id: 'all', label: 'All Orders' },
+  { id: 'Unfulfillable', label: 'Unfulfillable' },
   { id: 'New', label: 'New' },
-  { id: 'Processing', label: 'Processing' },
-  { id: 'Pending', label: 'Pending' },
   { id: 'Packed', label: 'Packed' },
-  { id: 'Ready to Ship', label: 'Ready to Ship' },
-  { id: 'Dispatched', label: 'Dispatched' },
-  { id: 'Delivered', label: 'Delivered' },
+  { id: 'Ready to Ship', label: 'Ready To Ship' },
   { id: 'Cancelled', label: 'Cancelled' },
-  { id: 'exceptions', label: 'Exceptions' },
+  { id: 'all', label: 'All Orders' },
 ];
 
 const CHANNEL_TABS = [
@@ -37,40 +36,43 @@ const CHANNEL_TABS = [
   { id: 'Myntra', label: 'Myntra' },
 ];
 
-const EXCEPTION_STATUSES = ['Return Requested', 'RTO In Transit', 'NDR', 'Unfulfillable'];
-const NEXT_STATUS = {
-  New: 'Processing',
-  Processing: 'Packed',
-  Packed: 'Ready to Ship',
-  Pending: 'Processing',
-  'Ready to Ship': 'Dispatched',
-};
+const IN_TRANSIT = ['Dispatched', 'In transit'];
 
 export default function OrdersPage() {
+  const navigate = useNavigate();
   const { can } = usePermissions();
+  const orderList = useOrderStore((s) => s.orders);
+  const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+  const generateInvoice = useOrderStore((s) => s.generateInvoice);
+  const markDelivered = useOrderStore((s) => s.markDelivered);
+  const bookReversePickup = useOrderStore((s) => s.bookReversePickup);
+  const [reverseFor, setReverseFor] = useState(null);
+  const [reverseReason, setReverseReason] = useState('Customer reverse pickup');
+  const [reverseCourier, setReverseCourier] = useState('Delhivery');
   const [activeTab, setActiveTab] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [syncing, setSyncing] = useState(false);
-  const [orderList, setOrderList] = useState(orderSeed);
-  const [selected, setSelected] = useState(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const loading = useSimulatedLoad(activeTab);
+  const loading = !useOrderStore((s) => s.loaded);
+  const loadError = useOrderStore((s) => s.error);
+
+  useEffect(() => {
+    hydrateFromApi();
+  }, [hydrateFromApi]);
 
   const filteredOrders = useMemo(() => orderList.filter((order) => {
-    const matchesTab =
-      activeTab === 'all' ||
-      (activeTab === 'exceptions'
-        ? EXCEPTION_STATUSES.includes(order.status)
-        : order.status === activeTab);
+    const matchesTab = activeTab === 'all' || order.status === activeTab;
     const matchesChannel = channelFilter === 'all' || order.channel === channelFilter;
-    const matchesPayment = paymentFilter === 'all' || order.paymentMode === paymentFilter;
+    const matchesPayment = paymentFilter === 'all'
+      || (paymentFilter === 'Partially Paid' ? order.paymentDetail === 'Partially paid' : order.paymentMode === paymentFilter);
     const matchesSource = sourceFilter === 'all' || order.fulfilmentSource === sourceFilter;
     const q = searchQuery.toLowerCase();
     const matchesSearch = !q ||
       order.id.toLowerCase().includes(q) ||
+      (order.subOrders || []).some((sub) => sub.id.toLowerCase().includes(q)) ||
       order.customer.toLowerCase().includes(q);
     return matchesTab && matchesChannel && matchesPayment && matchesSource && matchesSearch;
   }), [orderList, activeTab, channelFilter, paymentFilter, sourceFilter, searchQuery]);
@@ -78,37 +80,56 @@ export default function OrdersPage() {
   const kpiData = {
     total: orderList.length,
     newOrders: orderList.filter((o) => o.status === 'New').length,
-    processing: orderList.filter((o) => o.status === 'Processing').length,
+    packed: orderList.filter((o) => o.status === 'Packed').length,
     readyToShip: orderList.filter((o) => o.status === 'Ready to Ship').length,
-    dispatched: orderList.filter((o) => o.status === 'Dispatched').length,
+    unfulfillable: orderList.filter((o) => o.status === 'Unfulfillable').length,
   };
 
-  const syncOrders = () => {
+  const syncOrders = async () => {
     setSyncing(true);
-    setTimeout(() => {
+    try {
+      if (can(PERMISSIONS.SETTINGS_MANAGE)) {
+        const job = await pullMyntraOrders();
+        if (job.status === 'success') toast.success(job.shortSummary || 'Myntra orders synced');
+        else if (job.status === 'running') toast(job.shortSummary);
+        else toast.error(job.lastError || job.shortSummary || 'Myntra order pull failed');
+      }
+    } catch (err) {
+      if (err?.response?.status !== 400) toast.error(apiError(err, 'Myntra order pull failed'));
+    } finally {
+      await hydrateFromApi();
       setSyncing(false);
-      toast.success('Orders synced from Shopify, Amazon and Myntra');
-    }, 700);
-  };
-
-  const generateInvoice = (order) => {
-    const invoiceNo = order.channel === 'Shopify' ? order.id : `INV-${order.id}`;
-    toast.success(`Invoice ${invoiceNo} generated`);
-  };
-
-  const advanceOrder = (order) => {
-    const next = NEXT_STATUS[order.status];
-    if (!next) {
-      toast.error('No next action for this status');
-      return;
     }
-    setOrderList((prev) => prev.map((item) => (item.id === order.id ? { ...item, status: next } : item)));
-    setSelected((current) => (current?.id === order.id ? { ...current, status: next } : current));
-    toast.success(`${order.id} moved to ${next}`);
   };
+
+  const openChannelDoc = async (order, type) => {
+    try {
+      await openMyntraDocument(order, type);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const openOrder = (order) => navigate(`/orders/${encodeURIComponent(order.id)}`);
 
   const exportOrders = () => {
-    toast.success(`Exported ${filteredOrders.length} orders as CSV`);
+    if (!filteredOrders.length) {
+      toast.error('No orders in this view to export');
+      return;
+    }
+    downloadCsv(`orders-${new Date().toISOString().slice(0, 10)}.csv`,
+      ['Order', 'Channel', 'Status', 'Payment', 'Fulfil from', 'Items', 'Value', 'Date'],
+      filteredOrders.map((order) => [
+        order.id,
+        order.channel,
+        order.status,
+        order.paymentDetail ? `${order.paymentMode} (${order.paymentDetail})` : order.paymentMode,
+        order.fulfilmentSource,
+        (order.items || []).length,
+        order.total,
+        order.createdAt ? String(order.createdAt).slice(0, 10) : '',
+      ]));
+    toast.success(`Exported ${filteredOrders.length} orders`);
   };
 
   if (loading) return <PageLoader label="Loading orders..." />;
@@ -118,7 +139,7 @@ export default function OrdersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold mb-2">Orders</h1>
-          <p className="text-sm sm:text-base text-muted-foreground">One marketplace order = one Master Order. Different warehouses become fulfilment groups, not a second order.</p>
+          <p className="text-sm sm:text-base text-muted-foreground">Tabs used on the packing desk: Unfulfillable, New, Packed, Ready To Ship, Cancelled, All Orders. Delivered and in-transit orders stay under All Orders.</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={syncOrders} disabled={syncing}>
@@ -132,12 +153,16 @@ export default function OrdersPage() {
         </div>
       </div>
 
+      {loadError && (
+        <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>
+      )}
+
       <div className="kpi-grid">
         <KpiCard label="Total Orders" value={kpiData.total} icon={ShoppingCart} tone="blue" onClick={() => setActiveTab('all')} />
+        <KpiCard label="Unfulfillable" value={kpiData.unfulfillable} icon={Filter} tone="rose" onClick={() => setActiveTab('Unfulfillable')} />
         <KpiCard label="New" value={kpiData.newOrders} icon={Filter} tone="emerald" onClick={() => setActiveTab('New')} />
-        <KpiCard label="Processing" value={kpiData.processing} icon={Filter} tone="sky" onClick={() => setActiveTab('Processing')} />
-        <KpiCard label="Ready to Ship" value={kpiData.readyToShip} icon={Filter} tone="amber" onClick={() => setActiveTab('Ready to Ship')} />
-        <KpiCard label="Dispatched" value={kpiData.dispatched} icon={Filter} tone="violet" onClick={() => setActiveTab('Dispatched')} />
+        <KpiCard label="Packed" value={kpiData.packed} icon={Filter} tone="sky" onClick={() => setActiveTab('Packed')} />
+        <KpiCard label="Ready To Ship" value={kpiData.readyToShip} icon={Filter} tone="amber" onClick={() => setActiveTab('Ready to Ship')} />
       </div>
 
       <div className="flex items-center gap-2 flex-wrap overflow-x-auto pb-1">
@@ -175,7 +200,7 @@ export default function OrdersPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search by order ID or customer name..."
+                placeholder="Search by order ID, sub-order, or customer..."
                 className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -225,17 +250,32 @@ export default function OrdersPage() {
               </TableHeader>
               <TableBody>
                 {filteredOrders.map((order) => (
-                  <TableRow key={order.id} className="cursor-pointer" onClick={() => setSelected(order)}>
-                    <TableCell className="font-medium">{order.id}</TableCell>
+                  <TableRow key={order.id} className="cursor-pointer" onClick={() => openOrder(order)}>
+                    <TableCell className="font-medium">
+                      <span className="text-primary hover:underline">{order.id}</span>
+                      {(order.subOrders || []).length > 1 && (
+                        <div className="text-[11px] text-muted-foreground">{order.subOrders.length} sub-orders</div>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <div>{order.customer}</div>
                       <div className="text-xs text-muted-foreground">{order.city}</div>
                     </TableCell>
-                    <TableCell><Badge variant="outline">{order.channel}</Badge></TableCell>
-                    <TableCell>{order.items.length}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{order.channel}</Badge>
+                      {isChannelManaged(order) && (
+                        <div className="text-[11px] text-emerald-600 mt-1" title={`Myntra status ${order.channelStatus || '—'}`}>
+                          Live · {order.channelStatus || '—'}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell><ItemThumbs items={order.items} /></TableCell>
                     <TableCell>{formatINR(order.total)}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{order.fulfilmentSource}</Badge>
+                      <Badge variant="secondary">{order.mappingFailed ? 'Unmapped' : order.fulfilmentSource}</Badge>
+                      {order.routeNote && (
+                        <div className="text-xs text-muted-foreground mt-1">{order.routeNote}</div>
+                      )}
                       {order.assignedVendor && (
                         <div className="text-xs text-muted-foreground mt-1">{order.assignedVendor}</div>
                       )}
@@ -245,21 +285,63 @@ export default function OrdersPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{order.paymentMode}</Badge>
-                      {order.paymentMode === 'Partially Paid' && (
-                        <div className="text-xs text-muted-foreground mt-1">handled as COD</div>
+                      {order.paymentDetail === 'Partially paid' && (
+                        <div className="text-xs text-muted-foreground mt-1">Partially paid, handled as COD</div>
                       )}
                     </TableCell>
                     <TableCell>{formatDate(order.createdAt)}</TableCell>
                     <TableCell onClick={(event) => event.stopPropagation()}>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => setSelected(order)}>
+                        <Button variant="ghost" size="sm" onClick={() => openOrder(order)}>
                           <Eye className="w-3 h-3 mr-1" />
                           View
                         </Button>
-                        {can(PERMISSIONS.FINANCE_VIEW) && (
-                          <Button variant="ghost" size="sm" onClick={() => generateInvoice(order)}>
+                        {can(PERMISSIONS.FINANCE_VIEW) && !isChannelManaged(order) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              const next = await generateInvoice(order.id);
+                              if (next?.error) toast.error(next.error);
+                              else toast.success(`Invoice ${next.invoiceNo} opened`);
+                            }}
+                          >
                             <FileText className="w-3 h-3 mr-1" />
                             Invoice
+                          </Button>
+                        )}
+                        {isChannelManaged(order) && packetIdOf(order) && order.invoiceNo && (
+                          <Button variant="ghost" size="sm" onClick={() => openChannelDoc(order, 'invoice')}>
+                            <FileText className="w-3 h-3 mr-1" />
+                            Invoice
+                          </Button>
+                        )}
+                        {can(PERMISSIONS.ORDERS_EDIT) && IN_TRANSIT.includes(order.status) && !isChannelManaged(order) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              const next = await markDelivered(order.id);
+                              if (next?.error) { toast.error(next.error); return; }
+                              toast.success(`${order.id} marked delivered. You can book reverse pickup now.`);
+                            }}
+                          >
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            Mark delivered
+                          </Button>
+                        )}
+                        {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.status === 'Delivered' && !isChannelManaged(order) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setReverseFor(order);
+                              setReverseReason('Customer reverse pickup');
+                              setReverseCourier(order.courier || 'Delhivery');
+                            }}
+                          >
+                            <RotateCcw className="w-3 h-3 mr-1" />
+                            {order.reversePickup?.returnId ? 'Reverse booked' : 'Book reverse'}
                           </Button>
                         )}
                       </div>
@@ -271,109 +353,6 @@ export default function OrdersPage() {
           )}
         </CardContent>
       </Card>
-
-      <Drawer open={!!selected} onOpenChange={(open) => !open && setSelected(null)} title={selected ? `Order ${selected.id}` : 'Order'} size="lg">
-        {selected && (
-          <div className="space-y-5">
-            <div className="flex flex-wrap gap-2">
-              <Badge variant={statusBadgeVariant(selected.status)}>{selected.status}</Badge>
-              <Badge variant="outline">{selected.channel}</Badge>
-              <Badge variant="secondary">{selected.paymentMode}</Badge>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <p className="text-muted-foreground">Customer</p>
-                <p className="font-medium">{selected.customer}</p>
-                <p className="text-xs text-muted-foreground">{selected.phone}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Created</p>
-                <p className="font-medium">{formatDateTime(selected.createdAt)}</p>
-              </div>
-              <div className="col-span-2">
-                <p className="text-muted-foreground">Address</p>
-                <p>{selected.address || selected.city}</p>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm font-medium mb-2">Items</p>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>SKU</TableHead>
-                    <TableHead>Qty</TableHead>
-                    <TableHead>Price</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selected.items.map((item) => (
-                    <TableRow key={item.sku}>
-                      <TableCell>{item.name}</TableCell>
-                      <TableCell>{item.sku}</TableCell>
-                      <TableCell>{item.qty}</TableCell>
-                      <TableCell>{formatINR(item.price)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            <div>
-              <p className="text-sm font-medium mb-2">Reservation & fulfilment groups</p>
-              <p className="text-xs text-muted-foreground mb-2">One Master Order. Groups can split warehouse vs vendor; qty&gt;1 can split vendors.</p>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Group</TableHead>
-                    <TableHead>SKU</TableHead>
-                    <TableHead>Qty</TableHead>
-                    <TableHead>From</TableHead>
-                    <TableHead>Reserve</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selected.items.map((item, index) => (
-                    <TableRow key={`${item.sku}-fg`}>
-                      <TableCell>FG-{index + 1}</TableCell>
-                      <TableCell>{item.sku}</TableCell>
-                      <TableCell>{item.qty}</TableCell>
-                      <TableCell>{selected.fulfilmentSource === 'Virtual' ? (selected.assignedVendor || 'Vendor pending') : 'WH-001'}</TableCell>
-                      <TableCell><Badge variant="outline">locked</Badge></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            <div className="flex justify-between text-sm font-semibold border-t pt-3">
-              <span>Total</span>
-              <span>{formatINR(selected.total)}</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {NEXT_STATUS[selected.status] && can(PERMISSIONS.ORDERS_EDIT) && (
-                <Button onClick={() => advanceOrder(selected)}>
-                  <Package className="w-4 h-4 mr-2" />
-                  Move to {NEXT_STATUS[selected.status]}
-                </Button>
-              )}
-              {selected.status === 'Cancelled' && can(PERMISSIONS.ORDERS_EDIT) && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setOrderList((prev) => prev.map((item) => (item.id === selected.id ? { ...item, status: 'New' } : item)));
-                    setSelected({ ...selected, status: 'New' });
-                    toast.success(`${selected.id} unfulfilled again → New Orders`);
-                  }}
-                >
-                  Mark Unfulfilled → New
-                </Button>
-              )}
-              {can(PERMISSIONS.FINANCE_VIEW) && (
-                <Button variant="outline" onClick={() => generateInvoice(selected)}>Generate invoice</Button>
-              )}
-            </div>
-          </div>
-        )}
-      </Drawer>
 
       <Modal
         open={filtersOpen}
@@ -403,6 +382,52 @@ export default function OrdersPage() {
               <option value="all">All</option>
               <option value="Offline">Offline</option>
               <option value="Virtual">Virtual</option>
+              <option value="Mixed">Mixed</option>
+            </Select>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(reverseFor)}
+        onOpenChange={(open) => { if (!open) setReverseFor(null); }}
+        title="Book reverse pickup"
+        description={reverseFor ? `Creates a Returns row for ${reverseFor.id} and opens the reverse pickup label.` : ''}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setReverseFor(null)}>Cancel</Button>
+            <Button
+              onClick={async () => {
+                const next = await bookReversePickup(reverseFor.id, { reason: reverseReason, courier: reverseCourier });
+                if (next?.error) {
+                  toast.error(next.error);
+                  return;
+                }
+                toast.success(`Reverse pickup ${next?.reversePickup?.returnId || ''} is in Returns. Generate the reverse label there if you need another copy.`);
+                setReverseFor(null);
+              }}
+            >
+              Generate reverse label
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm font-medium">Reason</label>
+            <input
+              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Courier</label>
+            <Select value={reverseCourier} onChange={(e) => setReverseCourier(e.target.value)}>
+              <option>Delhivery</option>
+              <option>Bluedart</option>
+              <option>Xpressbees</option>
+              <option>Ecom Express</option>
             </Select>
           </div>
         </div>

@@ -4,6 +4,7 @@ const {
   listWarehouses, createWarehouse, updateWarehouse, ensureDefaultWarehouses,
   getInventoryAuthority, setInventoryAuthority,
 } = require('../services/warehouse.service');
+const { recordFromReq } = require('../services/auditLog.service');
 
 async function list(req, res) {
   const tenantId = merchantTenant(req);
@@ -41,7 +42,17 @@ async function getConfig(req, res) {
 
 async function patchConfig(req, res) {
   const tenantId = merchantTenant(req);
+  const before = await getInventoryAuthority(tenantId);
   const inventoryAuthority = await setInventoryAuthority(tenantId, req.body.inventoryAuthority);
+  await recordFromReq(req, {
+    tenantId,
+    action: 'inventory.authority_updated',
+    resourceType: 'inventory',
+    resourceId: tenantId,
+    resourceDisplay: 'Inventory source',
+    before: { inventoryAuthority: before },
+    after: { inventoryAuthority },
+  });
   return successResponse(res, { inventoryAuthority }, 'Inventory source saved');
 }
 

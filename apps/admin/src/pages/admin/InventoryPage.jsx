@@ -13,6 +13,7 @@ import Drawer from '../../components/ui/Drawer';
 import KpiCard from '../../components/ui/KpiCard';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
+import ProductThumb from '../../components/ui/ProductThumb';
 import { FormBanner } from '../../components/ui/FormBanner';
 import { Warehouse, Package, AlertTriangle, TrendingUp, Search } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
@@ -48,6 +49,8 @@ export default function InventoryPage() {
   const [reserve, setReserve] = useState({ channel: 'amazon', qty: '1', attempts: '10' });
   const [ats, setAts] = useState(null);
   const [reorderPoint, setReorderPoint] = useState('');
+  const [authority, setAuthority] = useState('oms');
+  const omsMaster = authority !== 'shopify';
 
   const load = async () => {
     setLoading(true);
@@ -58,8 +61,14 @@ export default function InventoryPage() {
         api.get('/master-skus'),
         tab === 'ledger' ? api.get('/inventory/ledger') : Promise.resolve({ data: { data: [] } }),
       ]);
-      setRows(inv.data.data?.rows || []);
+      const nextRows = inv.data.data?.rows || [];
+      setRows(nextRows);
+      setSelected((current) => {
+        if (!current) return null;
+        return nextRows.find((row) => row.masterSkuId === current.masterSkuId && row.warehouseId === current.warehouseId) || null;
+      });
       setKpis(inv.data.data?.kpis || kpis);
+      setAuthority(inv.data.data?.inventoryAuthority || wh.data.data?.inventoryAuthority || 'oms');
       setWarehouses(wh.data.data?.warehouses || []);
       setMasters(sku.data.data || []);
       setLedger(led.data.data || []);
@@ -160,11 +169,11 @@ export default function InventoryPage() {
         <div>
           <h1 className="text-3xl font-bold mb-2">Inventory</h1>
           <p className="text-muted-foreground">
-            Ledger, not overwritten qty. WH-001 is all channels; WH-002 is Shopify only. Concurrent reserves cannot go negative.
+            Ledger, not overwritten qty. WH-001 is all channels; WH-002 is Shopify only. Each Master SKU is listed at both warehouses before the first receipt.
           </p>
         </div>
         <div className="flex gap-2">
-          {canInventoryAdjust && (
+          {canInventoryAdjust && omsMaster && (
             <Button onClick={() => {
               setStockIn({
                 masterSkuId: masters[0]?.id || '',
@@ -191,7 +200,9 @@ export default function InventoryPage() {
               <p className="font-medium">Available to sell</p>
               <p className="text-sm text-muted-foreground">
                 Shopify = WH-001 + WH-002. Amazon = WH-001 only. Myntra = WH-001 only.
-                Example: 4 physical + 1000 virtual → Shopify 1004, Amazon 4, Myntra 4.
+                {omsMaster
+                  ? ' Stock in and adjust write a ledger row. They do not replace the balance in place.'
+                  : ' Shopify is inventory master, so sellable quantity is read-only in OMS.'}
               </p>
             </div>
           </div>
@@ -262,7 +273,12 @@ export default function InventoryPage() {
                   {ledger.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="text-xs">{row.at ? formatDateTime(row.at) : '—'}</TableCell>
-                      <TableCell className="font-medium">{row.sku}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <ProductThumb name={row.productName || row.sku} src={row.imageUrl} />
+                          <span className="font-medium">{row.sku}</span>
+                        </div>
+                      </TableCell>
                       <TableCell>{row.warehouse}</TableCell>
                       <TableCell>{row.qty}</TableCell>
                       <TableCell>{row.after}</TableCell>
@@ -277,9 +293,11 @@ export default function InventoryPage() {
             )
           ) : rows.length === 0 ? (
             <EmptyState
-              title="No stock rows"
-              description="Seed opening stock or use Stock in. make seed loads WH-001 / WH-002 for Leheriya SKUs."
-              action={canInventoryAdjust && <Button onClick={() => setInOpen(true)}>Stock in</Button>}
+              title={tab === 'all' ? 'No Master SKUs' : 'Nothing in this view'}
+              description={tab === 'all'
+                ? 'Create a Master SKU first. Stock then appears here at WH-001 and WH-002 with zero on hand until you post a receipt.'
+                : 'This filter only shows rows that already have reserved, available, or low stock.'}
+              action={tab === 'all' && canInventoryAdjust && omsMaster && <Button onClick={() => setInOpen(true)}>Stock in</Button>}
             />
           ) : (
             <Table>
@@ -292,14 +310,22 @@ export default function InventoryPage() {
                   <TableHead>On hand</TableHead>
                   <TableHead>Reserved</TableHead>
                   <TableHead>Available</TableHead>
+                  <TableHead>Shopify ATS</TableHead>
+                  <TableHead>Amazon ATS</TableHead>
+                  <TableHead>Myntra ATS</TableHead>
                   <TableHead>Status</TableHead>
-                  {canInventoryAdjust && <TableHead />}
+                  {canInventoryAdjust && omsMaster && <TableHead />}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((item) => (
                   <TableRow key={item.id} className="cursor-pointer" onClick={() => setSelected(item)}>
-                    <TableCell className="font-medium">{item.sku}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2 font-medium">
+                        <ProductThumb name={item.productName || item.sku} src={item.imageUrl} />
+                        {item.sku}
+                      </div>
+                    </TableCell>
                     <TableCell>{item.productName}</TableCell>
                     <TableCell>
                       <Badge variant="outline">{item.warehouse}</Badge>
@@ -309,14 +335,19 @@ export default function InventoryPage() {
                     <TableCell>{item.stock}</TableCell>
                     <TableCell>{item.reserved}</TableCell>
                     <TableCell className="font-medium">{item.available}</TableCell>
+                    <TableCell>{item.ats?.shopify ?? 0}</TableCell>
+                    <TableCell>{item.ats?.amazon ?? 0}</TableCell>
+                    <TableCell>{item.ats?.myntra ?? 0}</TableCell>
                     <TableCell>
-                      {item.low ? (
+                      {!item.tracked ? (
+                        <Badge variant="outline">Not received</Badge>
+                      ) : item.low ? (
                         <Badge variant="destructive"><AlertTriangle className="w-3 h-3 mr-1" />Low (≤{item.reorderPoint})</Badge>
                       ) : (
-                        <Badge variant="outline">Normal</Badge>
+                        <Badge variant="outline">In stock</Badge>
                       )}
                     </TableCell>
-                    {canInventoryAdjust && (
+                    {canInventoryAdjust && omsMaster && (
                       <TableCell onClick={(event) => event.stopPropagation()}>
                         <Button variant="ghost" size="sm" onClick={() => { setSelected(item); setAdjust({ direction: 'in', qty: '10', reason: '' }); setBanner(''); setAdjustOpen(true); }}>
                           Adjust
@@ -347,7 +378,7 @@ export default function InventoryPage() {
                 <p>Shopify {ats.shopify} · Amazon {ats.amazon} · Myntra {ats.myntra}</p>
               </div>
             )}
-            {canInventoryAdjust && (
+            {canInventoryAdjust && omsMaster && (
               <div className="space-y-2">
                 <label className="text-muted-foreground">Low-stock threshold</label>
                 <div className="flex gap-2">

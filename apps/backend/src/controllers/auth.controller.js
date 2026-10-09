@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const { hashPassword } = require('../lib/password');
 const crypto = require('crypto');
 const User = require('../models/User');
 const Tenant = require('../models/Tenant');
@@ -7,6 +8,7 @@ const RefreshSession = require('../models/RefreshSession');
 const PasswordReset = require('../models/PasswordReset');
 const { HttpError } = require('../utils/httpError');
 const { successResponse } = require('../utils/response');
+const { recordFromReq } = require('../services/auditLog.service');
 const { publicUser, accessPayload } = require('../lib/userDto');
 const {
   hashToken, signAccessToken, signRefreshToken, verifyRefresh,
@@ -139,10 +141,22 @@ async function me(req, res) {
 async function patchMe(req, res) {
   const user = await User.findById(req.user.id).setOptions({ skipTenantFilter: true });
   if (!user) throw new HttpError(401, 'User not found');
-  if (typeof req.body.twoFactorEnabled === 'boolean') {
+  if (typeof req.body.twoFactorEnabled === 'boolean' && user.twoFactorEnabled !== req.body.twoFactorEnabled) {
+    const before = { twoFactorEnabled: Boolean(user.twoFactorEnabled) };
     user.twoFactorEnabled = req.body.twoFactorEnabled;
+    await user.save();
+    await recordFromReq(req, {
+      tenantId: user.tenantId,
+      action: 'auth.two_factor_updated',
+      resourceType: 'users',
+      resourceId: user._id,
+      resourceDisplay: user.email,
+      before,
+      after: { twoFactorEnabled: user.twoFactorEnabled },
+    });
+  } else {
+    await user.save();
   }
-  await user.save();
   const fresh = await loadUserById(user._id);
   return successResponse(res, publicUser(fresh, fresh.tenantId), 'Profile updated');
 }
@@ -191,7 +205,7 @@ async function resetPassword(req, res) {
     await row.save();
     throw new HttpError(400, 'Too many attempts. Request a new OTP.');
   }
-  user.passwordHash = await bcrypt.hash(password, 10);
+  user.passwordHash = await hashPassword(password);
   user.refreshTokenVersion += 1;
   await user.save();
   row.usedAt = new Date();

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Menu,
   Bell,
@@ -17,7 +17,9 @@ import {
   FileText,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { inboxNotifications } from '../../mocks';
+import api from '../../lib/api';
+import useOrderStore from '../../stores/orderStore';
+import { relativeTime } from '../../lib/orderMetrics';
 import { cn } from '../../lib/utils';
 import useThemeStore from '../../stores/themeStore';
 import useUIStore from '../../stores/uiStore';
@@ -55,10 +57,56 @@ function AdminHeader() {
   const { toggleSidebar, breadcrumbs, mobileOpen, setMobileOpen, activeRole } = useUIStore();
   const { logout, user, effectiveRole } = useAuth();
   const { canOpenPath } = usePermissions();
-  const [inbox, setInbox] = useState(inboxNotifications);
+  const orders = useOrderStore((s) => s.orders);
+  const [events, setEvents] = useState([]);
+  const [readIds, setReadIds] = useState(() => new Set());
 
-  const displayName = user?.name || 'Momtaj Husen';
-  const displayEmail = user?.email || 'thecodersalpha@gmail.com';
+  useEffect(() => {
+    if (!user || user.role === 'vendor') return undefined;
+    let alive = true;
+    Promise.all([
+      api.get('/integrations/jobs').then(({ data }) => data.data || []).catch(() => []),
+      api.get('/inventory/alerts').then(({ data }) => data.data || []).catch(() => []),
+    ]).then(([jobs, low]) => {
+      if (!alive) return;
+      const failed = jobs.filter((job) => job.status === 'failed').slice(0, 3).map((job) => ({
+        id: `job-${job.id}`,
+        title: `${job.channel} ${String(job.jobType).replace(/_/g, ' ')} failed`,
+        detail: job.lastError || job.shortSummary,
+        at: job.finishedAt || job.createdAt,
+        type: 'alert',
+        href: '/integrations',
+      }));
+      const stock = low.length ? [{
+        id: `low-${low.length}`,
+        title: `${low.length} SKU${low.length === 1 ? '' : 's'} low on stock`,
+        detail: low.slice(0, 3).map((row) => `${row.sku} (${row.available})`).join(', '),
+        type: 'inventory',
+        href: '/inventory',
+      }] : [];
+      setEvents([...failed, ...stock]);
+    });
+    return () => { alive = false; };
+  }, [user]);
+
+  const inbox = useMemo(() => {
+    const fresh = orders.filter((order) => order.status === 'New');
+    const newOrders = fresh.length ? [{
+      id: `new-${fresh.length}`,
+      title: `${fresh.length} new order${fresh.length === 1 ? '' : 's'} to process`,
+      detail: fresh.slice(0, 3).map((order) => order.id).join(', '),
+      type: 'order',
+      href: '/orders',
+    }] : [];
+    return [...newOrders, ...events].map((item) => ({
+      ...item,
+      time: item.at ? relativeTime(item.at) : '',
+      unread: !readIds.has(item.id),
+    }));
+  }, [orders, events, readIds]);
+
+  const displayName = user?.name || user?.email || 'User';
+  const displayEmail = user?.email || '';
   const initials = displayName
     .split(' ')
     .map((part) => part[0])
@@ -73,7 +121,7 @@ function AdminHeader() {
   };
 
   const openNotification = (item) => {
-    setInbox((prev) => prev.map((n) => (n.id === item.id ? { ...n, unread: false } : n)));
+    setReadIds((prev) => new Set([...prev, item.id]));
     navigate(item.href);
   };
 
@@ -149,7 +197,7 @@ function AdminHeader() {
                 className="text-xs font-medium text-[hsl(var(--color-primary-blue))] hover:underline"
                 onClick={(event) => {
                   event.stopPropagation();
-                  setInbox((prev) => prev.map((item) => ({ ...item, unread: false })));
+                  setReadIds((prev) => new Set([...prev, ...inbox.map((item) => item.id)]));
                 }}
               >
                 Mark all read
@@ -158,6 +206,9 @@ function AdminHeader() {
           </div>
 
           <div className="max-h-[360px] overflow-y-auto py-1">
+            {inbox.length === 0 && (
+              <p className="px-4 py-6 text-center text-sm text-muted-foreground">No alerts right now.</p>
+            )}
             {inbox.map((item) => {
               const Icon = NOTIFICATION_ICONS[item.type] || Bell;
               const tone = NOTIFICATION_TONES[item.type] || 'bg-muted text-muted-foreground';

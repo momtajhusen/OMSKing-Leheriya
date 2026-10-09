@@ -17,12 +17,12 @@ function Modal({ open, onOpenChange, title, description, children, footer, class
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div
         className="fixed inset-0 bg-background/80 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
       />
-      <div className={cn('relative z-50 w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg', className)}>
+      <div className={cn('relative z-[70] max-h-[min(90vh,720px)] w-full max-w-lg overflow-y-auto rounded-lg border bg-background p-6 shadow-lg', className)}>
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-lg font-semibold">{title}</h2>

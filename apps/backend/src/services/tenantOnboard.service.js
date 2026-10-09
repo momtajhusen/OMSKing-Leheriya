@@ -1,4 +1,4 @@
-const bcrypt = require('bcryptjs');
+const { hashPassword } = require('../lib/password');
 const { ROLE_DEFAULT_PERMISSIONS, TENANT_ROLE_SEED } = require('../constants/permissions');
 const Tenant = require('../models/Tenant');
 const Role = require('../models/Role');
@@ -56,7 +56,7 @@ async function provisionMerchant({
 
   const roles = await cloneTenantRoles(tenant._id);
   const superRole = roles.find((r) => r.code === 'super_admin');
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await hashPassword(password);
   const owner = await User.create({
     tenantId: tenant._id,
     fullName: ownerName,

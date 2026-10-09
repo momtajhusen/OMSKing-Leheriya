@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CHANNEL_CATALOG } from '../mocks/channels';
+import { CHANNEL_CATALOG } from '../constants/channelCatalog';
 
 const emptyCreds = (channel) =>
   Object.fromEntries((channel.fields || []).map((f) => [f.key, '']));

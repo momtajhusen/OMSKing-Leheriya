@@ -103,7 +103,6 @@ export const ROUTE_PERMISSION = Object.freeze({
   '/ui/showcase': P.SETTINGS_MANAGE,
   '/vendor/dashboard': P.ORDERS_VIEW,
   '/vendor/orders': P.ORDERS_VIEW,
-  '/vendor/shipping': P.SHIPPING_GENERATE,
   '/vendor/returns': P.ORDERS_VIEW,
   '/vendor/products': P.ORDERS_EDIT,
   '/vendor/settings': null,

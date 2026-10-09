@@ -2,6 +2,7 @@ const Product = require('../models/Product');
 const MasterSku = require('../models/MasterSku');
 const SkuMapping = require('../models/SkuMapping');
 const { HttpError } = require('../utils/httpError');
+const { firstImage } = require('../lib/catalogImages');
 const {
   generateMasterCode,
   normalizeSkuCode,
@@ -10,6 +11,18 @@ const {
 } = require('./skuIdentity.service');
 
 const IMPORT_ORDER = ['shopify', 'myntra', 'amazon'];
+
+async function shopifyOwnsCatalog(tenantId) {
+  const ChannelConnection = require('../models/ChannelConnection');
+  const shopify = await ChannelConnection.findOne({ tenantId, channel: 'shopify' }).setOptions({ skipTenantFilter: true });
+  if (shopify?.status === 'connected') return true;
+  const listings = await SkuMapping.countDocuments({
+    tenantId,
+    channel: 'shopify',
+    masterSkuId: { $ne: null },
+  }).setOptions({ skipTenantFilter: true });
+  return listings > 0;
+}
 
 function attrsObject(mapLike) {
   if (!mapLike) return {};
@@ -23,6 +36,7 @@ function mapMaster(row, mappings = []) {
     id: String(row._id),
     productId: row.productId ? String(row.productId._id || row.productId) : null,
     productName: row.productId?.name || row.name,
+    imageUrl: firstImage(row.productId?.images),
     code: row.code,
     name: row.name,
     variantAttributes: attrsObject(row.variantAttributes),
@@ -68,7 +82,9 @@ function mapMapping(row) {
     id: String(row._id),
     masterSkuId: row.masterSkuId ? String(row.masterSkuId._id || row.masterSkuId) : null,
     masterSku: master?.code || null,
+    masterBarcode: master?.barcode || row.barcode || '',
     productName: master?.name || row.channelTitle,
+    imageUrl: firstImage(master?.productId?.images),
     channel: row.channel,
     channelSku: row.channelSkuCode,
     channelProductId: row.channelProductId,
@@ -80,6 +96,14 @@ function mapMapping(row) {
     error: row.lastSyncError || '',
     isActive: row.isActive,
   };
+}
+
+async function rememberBarcode(master, barcode) {
+  const bar = normalizeBarcode(barcode);
+  if (!master || !bar || master.barcode) return master;
+  master.barcode = bar;
+  await master.save();
+  return master;
 }
 
 async function findAutoMaster(tenantId, { channelSkuCode, barcode }) {
@@ -117,6 +141,7 @@ function listingExtras(row) {
       ...(row.fabric ? { fabric: row.fabric } : {}),
     },
     barcode: row.barcode,
+    image: row.image || row.imageUrl || '',
     sellingPrice: row.price != null && row.price !== '' ? Number(row.price) : undefined,
     mrp: row.mrp != null && row.mrp !== '' ? Number(row.mrp) : undefined,
   };
@@ -143,6 +168,7 @@ async function ingestListing(tenantId, userId, row, options = {}) {
     let master = null;
     if (existing.masterSkuId) {
       master = await MasterSku.findById(existing.masterSkuId).setOptions({ skipTenantFilter: true });
+      if (master) await rememberBarcode(master, row.barcode);
     }
     return { action: 'exists', mapping: existing, master };
   }
@@ -168,6 +194,7 @@ async function ingestListing(tenantId, userId, row, options = {}) {
     auto.codeLocked = true;
     await auto.save();
   }
+  if (auto) await rememberBarcode(auto, row.barcode);
   if (!auto && createMaster) {
     const created = await createMasterForListing(tenantId, userId, mapping, listingExtras(row));
     return { action: 'created', mapping: created.mapping, master: created.master };
@@ -188,32 +215,43 @@ async function findOrCreateProduct(tenantId, userId, mapping, extras = {}) {
       const siblingMaster = await MasterSku.findById(sibling.masterSkuId).setOptions({ skipTenantFilter: true });
       if (siblingMaster?.productId) {
         const shared = await Product.findById(siblingMaster.productId).setOptions({ skipTenantFilter: true });
-        if (shared) return shared;
+        if (shared) return rememberImage(shared, extras.image);
       }
     }
   }
   const name = extras.name || mapping.channelTitle || mapping.channelSkuCode;
   const existing = await Product.findOne({ tenantId, name }).setOptions({ skipTenantFilter: true });
-  if (existing) return existing;
+  if (existing) return rememberImage(existing, extras.image);
+  const image = firstImage([extras.image]);
   return Product.create({
     tenantId,
     name,
     category: extras.category || '',
     hsnCode: extras.hsnCode || '',
     gstRatePercent: extras.gstRatePercent ?? 5,
+    images: image ? [image] : [],
     status: 'active',
     createdBy: userId,
   });
+}
+
+async function rememberImage(product, image) {
+  const url = firstImage([image]);
+  if (!product || !url || firstImage(product.images)) return product;
+  product.images = [url];
+  await product.save();
+  return product;
 }
 
 async function createMasterForListing(tenantId, userId, mapping, extras = {}) {
   if (mapping.masterSkuId) throw new HttpError(400, 'Listing is already mapped');
   const product = await findOrCreateProduct(tenantId, userId, mapping, extras);
   const attrs = extras.variantAttributes || {};
+  const requested = extras.code === null ? undefined : (extras.code || mapping.channelSkuCode);
   const code = await generateMasterCode(tenantId, {
     productName: product.name,
     variantAttributes: attrs,
-    requested: extras.code,
+    requested,
   });
   const master = await MasterSku.create({
     tenantId,
@@ -310,7 +348,8 @@ function parseCsv(text) {
 
 async function importChannel(tenantId, userId, channel, rows) {
   const ch = normalizeChannel(channel);
-  const createMaster = ch === 'shopify';
+  const shopifyFirst = await shopifyOwnsCatalog(tenantId);
+  const createMaster = ch === 'shopify' || (ch === 'myntra' && !shopifyFirst);
   const results = [];
   for (const raw of rows) {
     try {
@@ -318,6 +357,7 @@ async function importChannel(tenantId, userId, channel, rows) {
       results.push({
         sku: raw.channelSkuCode || raw.sku,
         title: raw.channelTitle || raw.title,
+        image: raw.image || raw.imageUrl || '',
         channel: ch,
         result: out.action,
         masterSku: out.master?.code || undefined,
@@ -326,6 +366,7 @@ async function importChannel(tenantId, userId, channel, rows) {
       results.push({
         sku: raw.channelSkuCode || raw.sku,
         title: raw.channelTitle || raw.title,
+        image: raw.image || raw.imageUrl || '',
         channel: ch,
         result: 'failed',
         error: err.message,
@@ -389,6 +430,7 @@ async function retryFailedMapping(tenantId, userId, mapping) {
 
 module.exports = {
   IMPORT_ORDER,
+  shopifyOwnsCatalog,
   mapMaster,
   mapProduct,
   mapMapping,

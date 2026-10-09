@@ -199,7 +199,7 @@ export default function HomePage() {
       <section className="bg-gradient-to-b from-white to-emerald-50 py-16">
         <div className="mx-auto flex max-w-3xl flex-col items-center px-4 text-center sm:px-6">
           <h2 className="text-3xl font-bold text-slate-900">Open the Leheriya tenant</h2>
-          <p className="mt-3 text-slate-600">Start your own merchant trial, or walk the dummy desk we already built for Leheriya.</p>
+          <p className="mt-3 text-slate-600">Start your own merchant trial, or sign in to the Leheriya workspace.</p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <MarketingCta to="/auth/register">Start a merchant trial</MarketingCta>
             <MarketingCta to="/contact" variant="outline">Talk to us</MarketingCta>

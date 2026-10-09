@@ -8,8 +8,8 @@ function vendorScope(resource) {
   return function vendorScopeMiddleware(req, res, next) {
     if (req.user?.role !== 'vendor') return next();
     const assigned = (req.user.assignedVendorIds || []).map(String);
-    req.vendorScope = { resource, assignedVendorIds: assigned };
-    const rawId = req.params.vendorId || req.body?.vendorId;
+    req.vendorScope = { resource: resource || null, assignedVendorIds: assigned, active: true };
+    const rawId = req.params.vendorId || req.body?.vendorId || req.query?.vendorId;
     if (rawId && !assigned.includes(String(rawId))) {
       return next(new HttpError(404, 'Not found'));
     }
@@ -17,4 +17,10 @@ function vendorScope(resource) {
   };
 }
 
-module.exports = { vendorScope };
+function vendorOwnerFilter(req, field = 'vendorId') {
+  if (req.user?.role !== 'vendor') return {};
+  const assigned = (req.vendorScope?.assignedVendorIds || req.user.assignedVendorIds || []).map(String);
+  return { [field]: { $in: assigned } };
+}
+
+module.exports = { vendorScope, vendorOwnerFilter };

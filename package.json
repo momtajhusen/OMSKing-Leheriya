@@ -17,6 +17,7 @@
     "start:admin": "wait-on tcp:5002 -t 60000 && pnpm --filter @omsking/admin run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "test": "pnpm --filter @omsking/backend test",
     "clean": "turbo run clean && rm -rf node_modules .turbo",
     "stop": "lsof -ti:5001,5173 | xargs kill -9 2>/dev/null || true"
   },

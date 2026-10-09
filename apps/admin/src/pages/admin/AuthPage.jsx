@@ -22,14 +22,10 @@ export default function AuthPage({ scope = 'tenant' }) {
   const [sessionList, setSessionList] = useState([]);
   const [directory, setDirectory] = useState([]);
   const [resets, setResets] = useState([]);
-  const [apiKeys, setApiKeys] = useState([
-    { id: 'KEY-001', label: 'Shopify Webhook', prefix: 'shp_live_••••4f2a', scope: 'Orders, Inventory', createdAt: '2026-06-02', lastUsed: '5 min ago', status: 'Active' },
-    { id: 'KEY-002', label: 'Amazon SP-API', prefix: 'amz_live_••••91cd', scope: 'Orders, Reports', createdAt: '2026-06-02', lastUsed: '22 min ago', status: 'Active' },
-    { id: 'KEY-003', label: 'Myntra Partner API', prefix: 'myn_live_••••7b30', scope: 'Orders, Labels', createdAt: '2026-06-05', lastUsed: '1 hr ago', status: 'Active' },
-    { id: 'KEY-004', label: 'Legacy Import Script', prefix: 'int_test_••••0ae1', scope: 'Products', createdAt: '2025-11-18', lastUsed: '3 months ago', status: 'Inactive' },
-  ]);
+  const [apiKeys, setApiKeys] = useState([]);
   const [keyOpen, setKeyOpen] = useState(false);
   const [keyLabel, setKeyLabel] = useState('');
+  const [issuedSecret, setIssuedSecret] = useState('');
   const [twoFa, setTwoFa] = useState(Boolean(user?.twoFactorEnabled));
   const [loading, setLoading] = useState(true);
 
@@ -38,15 +34,18 @@ export default function AuthPage({ scope = 'tenant' }) {
     (async () => {
       setLoading(true);
       try {
-        const [sess, resetRes, usersRes] = await Promise.all([
+        const jobs = [
           api.get('/sessions'),
           api.get('/auth/password-resets'),
           isPlatform ? Promise.resolve({ data: { data: [] } }) : api.get('/users'),
-        ]);
+        ];
+        if (!isPlatform) jobs.push(api.get('/settings/api-keys'));
+        const [sess, resetRes, usersRes, keysRes] = await Promise.all(jobs);
         if (cancelled) return;
         setSessionList(sess.data.data || []);
         setResets(resetRes.data.data || []);
         setDirectory(usersRes.data.data || []);
+        setApiKeys(keysRes?.data?.data || []);
         setTwoFa(Boolean(user?.twoFactorEnabled));
       } catch (err) {
         toast.error(apiError(err, 'Could not load auth data'));
@@ -271,7 +270,7 @@ export default function AuthPage({ scope = 'tenant' }) {
               <CardTitle>API keys</CardTitle>
               <CardDescription>Full secret is shown once at creation.</CardDescription>
             </div>
-            <Button size="sm" onClick={() => { setKeyLabel(''); setKeyOpen(true); }}>
+            <Button size="sm" onClick={() => { setKeyLabel(''); setIssuedSecret(''); setKeyOpen(true); }}>
               <Plus className="w-4 h-4 mr-2" />
               New key
             </Button>
@@ -302,9 +301,14 @@ export default function AuthPage({ scope = 'tenant' }) {
                           variant="ghost"
                           size="sm"
                           className="text-destructive"
-                          onClick={() => {
-                            setApiKeys((prev) => prev.map((item) => (item.id === key.id ? { ...item, status: 'Inactive' } : item)));
-                            toast.success(`${key.label} revoked`);
+                          onClick={async () => {
+                            try {
+                              await api.post(`/settings/api-keys/${key.id}/revoke`);
+                              setApiKeys((prev) => prev.map((item) => (item.id === key.id ? { ...item, status: 'Inactive' } : item)));
+                              toast.success(`${key.label} revoked`);
+                            } catch (err) {
+                              toast.error(apiError(err, 'Could not revoke key'));
+                            }
                           }}
                         >
                           Revoke
@@ -354,17 +358,19 @@ export default function AuthPage({ scope = 'tenant' }) {
           <>
             <Button variant="outline" onClick={() => setKeyOpen(false)}>Cancel</Button>
             <Button
-              onClick={() => {
+              onClick={async () => {
                 if (!keyLabel.trim()) {
                   toast.error('Enter a label');
                   return;
                 }
-                setApiKeys((prev) => [
-                  { id: `KEY-${String(prev.length + 1).padStart(3, '0')}`, label: keyLabel, prefix: 'oms_live_••••new1', scope: 'Read', createdAt: '2026-09-08', lastUsed: 'Never', status: 'Active' },
-                  ...prev,
-                ]);
-                toast.success('Key created — copy it now. It will not be shown again.');
-                setKeyOpen(false);
+                try {
+                  const { data } = await api.post('/settings/api-keys', { label: keyLabel.trim() });
+                  setApiKeys((prev) => [data.data, ...prev.filter((item) => item.id !== data.data.id)]);
+                  setIssuedSecret(data.data.secret || '');
+                  toast.success('Key created — copy it now. It will not be shown again.');
+                } catch (err) {
+                  toast.error(apiError(err, 'Could not create key'));
+                }
               }}
             >
               Create
@@ -373,6 +379,21 @@ export default function AuthPage({ scope = 'tenant' }) {
         }
       >
         <Input placeholder="Label" value={keyLabel} onChange={(e) => setKeyLabel(e.target.value)} />
+        {issuedSecret && (
+          <div className="mt-3 space-y-2">
+            <p className="text-sm text-muted-foreground">Copy this secret. It is stored only as a hash.</p>
+            <Input readOnly value={issuedSecret} onFocus={(e) => e.target.select()} />
+            <Button
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard?.writeText(issuedSecret);
+                toast.success('Copied');
+              }}
+            >
+              Copy
+            </Button>
+          </div>
+        )}
       </Modal>
     </>
   );

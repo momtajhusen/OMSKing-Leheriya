@@ -8,6 +8,10 @@ const tenantSchema = new mongoose.Schema({
     email: String,
     phone: String,
     gstin: String,
+    pan: String,
+    address: String,
+    city: String,
+    district: String,
   },
   status: { type: String, enum: ['active', 'suspended', 'trial'], default: 'trial' },
   plan: { type: String, default: 'growth' },
@@ -18,6 +22,19 @@ const tenantSchema = new mongoose.Schema({
     channels: { type: [String], default: [] },
     skuPrefix: { type: String, default: '' },
     inventoryAuthority: { type: String, enum: ['oms', 'shopify'], default: 'oms' },
+    taxGst: {
+      configured: { type: Boolean, default: false },
+      defaultGstRate: { type: Number, default: 18 },
+      categories: [{
+        name: { type: String, default: '' },
+        gstRate: { type: Number, default: 0 },
+      }],
+      hsnMaster: [{
+        hsn: { type: String, default: '' },
+        description: { type: String, default: '' },
+        gstRate: { type: Number, default: null },
+      }],
+    },
   },
   onboardedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });

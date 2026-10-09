@@ -4,6 +4,7 @@ const Tenant = require('../models/Tenant');
 const { HttpError } = require('../utils/httpError');
 const { successResponse } = require('../utils/response');
 const { sessionTenantId, assertSameTenant } = require('../lib/tenantAccess');
+const { recordFromReq } = require('../services/auditLog.service');
 
 async function listSessions(req, res) {
   const tenantId = sessionTenantId(req);
@@ -43,8 +44,18 @@ async function revokeSession(req, res) {
   if (!(req.user?.role === 'platform_admin' && !req.user?.impersonating)) {
     assertSameTenant(req, session.tenantId);
   }
+  const before = { status: session.revokedAt ? 'Revoked' : 'Active' };
   session.revokedAt = new Date();
   await session.save();
+  await recordFromReq(req, {
+    tenantId: session.tenantId,
+    action: 'session.revoked',
+    resourceType: 'sessions',
+    resourceId: session._id,
+    resourceDisplay: 'Session',
+    before,
+    after: { status: 'Revoked' },
+  });
   return successResponse(res, null, 'Session revoked');
 }
 

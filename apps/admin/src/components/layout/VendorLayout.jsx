@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
-  Package, ShoppingCart, Truck, RotateCcw, Settings, LayoutDashboard, LogOut, Sun, Moon, Menu, X,
+  Package, ShoppingCart, RotateCcw, Settings, LayoutDashboard, LogOut, Sun, Moon, Menu, X,
 } from 'lucide-react';
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
@@ -13,7 +13,6 @@ import BrandLogo from '../brand/BrandLogo';
 const vendorRoutes = [
   { path: '/vendor/dashboard', label: 'Home', icon: LayoutDashboard },
   { path: '/vendor/orders', label: 'Orders', icon: ShoppingCart },
-  { path: '/vendor/shipping', label: 'Ship', icon: Truck },
   { path: '/vendor/returns', label: 'Returns', icon: RotateCcw },
   { path: '/vendor/products', label: 'Stock', icon: Package },
   { path: '/vendor/settings', label: 'Settings', icon: Settings },
@@ -49,7 +48,7 @@ function VendorLayout() {
           className={cn('sidebar-item mx-2 mb-1', isActive ? 'sidebar-item-active' : 'sidebar-item-inactive')}
         >
           <Icon className="h-4 w-4 shrink-0" />
-          {route.label === 'Home' ? 'Dashboard' : route.label === 'Ship' ? 'Shipping' : route.label === 'Stock' ? 'Products' : route.label}
+          {route.label === 'Home' ? 'Dashboard' : route.label === 'Stock' ? 'Products' : route.label}
         </Link>
       );
     });
@@ -105,7 +104,7 @@ function VendorLayout() {
               </button>
               <BrandLogo className="h-8 w-8 lg:hidden" />
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{current.label === 'Home' ? 'Dashboard' : current.label === 'Ship' ? 'Shipping' : current.label === 'Stock' ? 'Products' : current.label}</p>
+                <p className="truncate text-sm font-semibold">{current.label === 'Home' ? 'Dashboard' : current.label === 'Stock' ? 'Products' : current.label}</p>
                 <p className="truncate text-[11px] text-muted-foreground">Fill the sheet. One Master Order per line.</p>
               </div>
             </div>
@@ -118,7 +117,7 @@ function VendorLayout() {
               </button>
             </div>
           </header>
-          <main className="flex-1 overflow-y-auto pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-0">
+          <main className="min-w-0 flex-1 overflow-y-auto pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-0">
             <PageFade>
               <Outlet />
             </PageFade>

@@ -12,7 +12,8 @@ import Modal from '../../components/ui/Modal';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { FormBanner } from '../../components/ui/FormBanner';
-import { Barcode, Pencil, Plus, Search } from 'lucide-react';
+import ProductThumb from '../../components/ui/ProductThumb';
+import { Pencil, Plus, Search } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -159,7 +160,7 @@ export default function MasterSkuPage() {
                   <TableRow key={sku.id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        <Barcode className="w-4 h-4 text-muted-foreground" />
+                        <ProductThumb name={sku.name || sku.code} src={sku.imageUrl} />
                         {sku.code}
                       </div>
                     </TableCell>

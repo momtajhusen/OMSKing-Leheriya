@@ -16,6 +16,7 @@ const PlatformAuthPage = lazy(() => import('../pages/platform/PlatformAuthPage')
 const TenantMgmtPage = lazy(() => import('../pages/admin/TenantMgmtPage'));
 const PlatformOpsPage = lazy(() => import('../pages/platform/PlatformOpsPage'));
 const PlatformStaffPage = lazy(() => import('../pages/platform/PlatformStaffPage'));
+const OrderDetailPage = lazy(() => import('../pages/admin/OrderDetailPage'));
 
 // Route definitions - single source of truth for sidebar and router
 export const ROUTE_DEFS = {
@@ -266,11 +267,6 @@ export const ROUTE_DEFS = {
       component: lazy(() => import('../pages/vendor/VendorOrdersPage')),
     },
     {
-      path: '/vendor/shipping',
-      label: 'Shipping',
-      component: lazy(() => import('../pages/vendor/VendorShippingPage')),
-    },
-    {
       path: '/vendor/returns',
       label: 'Returns',
       component: lazy(() => import('../pages/vendor/VendorReturnsPage')),
@@ -440,6 +436,14 @@ const router = createBrowserRouter([
           </Suspense>
         ),
       })),
+      {
+        path: '/orders/:orderId',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <OrderDetailPage />
+          </Suspense>
+        ),
+      },
       { path: '/integration-mgmt', element: <Navigate to="/integrations" replace /> },
       { path: '/tenant-mgmt', element: <Navigate to="/platform/tenants" replace /> },
     ],
@@ -454,14 +458,17 @@ const router = createBrowserRouter([
         </Suspense>
       </ProtectedRoute>
     ),
-    children: ROUTE_DEFS.vendor.map((route) => ({
-      path: route.path.replace('/vendor/', ''),
-      element: (
-        <Suspense fallback={<LoadingFallback />}>
-          <route.component />
-        </Suspense>
-      ),
-    })),
+    children: [
+      ...ROUTE_DEFS.vendor.map((route) => ({
+        path: route.path.replace('/vendor/', ''),
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <route.component />
+          </Suspense>
+        ),
+      })),
+      { path: 'shipping', element: <Navigate to="/vendor/orders" replace /> },
+    ],
   },
   // 404 catch-all
   {

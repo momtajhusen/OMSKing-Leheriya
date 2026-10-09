@@ -8,6 +8,7 @@ import Button from '../../components/ui/Button';
 import Select from '../../components/ui/Select';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
+import ProductThumb from '../../components/ui/ProductThumb';
 import { GitCompare, Link, Search, Unlink } from 'lucide-react';
 import api, { apiError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -92,6 +93,18 @@ export default function SkuMappingPage() {
       load(activeTab);
     } catch (err) {
       toast.error(apiError(err));
+    }
+  };
+
+  const saveBarcode = async (sku, value) => {
+    const barcode = value.trim();
+    if (barcode === (sku.barcode || '')) return;
+    try {
+      await api.patch(`/master-skus/${sku.id}`, { barcode });
+      setMasters((rows) => rows.map((row) => (row.id === sku.id ? { ...row, barcode } : row)));
+      toast.success(`${sku.code} barcode saved`);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not save barcode'));
     }
   };
 
@@ -180,7 +193,7 @@ export default function SkuMappingPage() {
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <input
-              className="h-8 pl-7 pr-2 border rounded-lg text-sm bg-[hsl(var(--color-card-bg))]"
+              className="h-8 pl-7 pr-2 rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] text-sm text-foreground placeholder:text-muted-foreground"
               placeholder="Search SKU / title"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -230,12 +243,16 @@ export default function SkuMappingPage() {
                   <TableRow key={row.id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
+                        <ProductThumb name={row.productName || row.channelTitle || row.channelSku} src={row.imageUrl} />
                         {row.masterSku ? <Link className="w-4 h-4 text-green-600" /> : <Unlink className="w-4 h-4 text-destructive" />}
                         {row.channelSku}
                       </div>
                     </TableCell>
                     <TableCell><Badge variant="outline">{row.channel}</Badge></TableCell>
-                    <TableCell>{row.masterSku || '—'}</TableCell>
+                    <TableCell>
+                      <div className="font-medium">{row.masterSku || '—'}</div>
+                      <div className="text-xs text-muted-foreground">{row.masterBarcode || row.barcode || 'No barcode'}</div>
+                    </TableCell>
                     <TableCell>{row.productName || row.channelTitle}</TableCell>
                     <TableCell>
                       <Badge variant={row.status === 'error' || row.status === 'Error' ? 'destructive' : 'secondary'}>{row.status}</Badge>
@@ -252,7 +269,7 @@ export default function SkuMappingPage() {
                       <TableCell>
                         <div className="flex flex-wrap gap-2">
                           <input
-                            className="w-36 px-2 py-1 border rounded text-sm"
+                            className="h-8 w-36 rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-2 text-sm text-foreground placeholder:text-muted-foreground"
                             list="master-codes"
                             placeholder="Master SKU code"
                             value={mappingInput[row.id] || ''}
@@ -276,14 +293,14 @@ export default function SkuMappingPage() {
 
       <datalist id="master-codes">
         {masters.map((sku) => (
-          <option key={sku.id} value={sku.code}>{sku.name}</option>
+          <option key={sku.id} value={sku.code}>{sku.barcode ? `${sku.name} · ${sku.barcode}` : sku.name}</option>
         ))}
       </datalist>
 
       <Card>
         <CardHeader>
           <CardTitle>Master SKU reference</CardTitle>
-          <CardDescription>Type these codes in the Map box, or pick from the suggestion list</CardDescription>
+          <CardDescription>These codes and barcodes are the Master SKU match. A barcode saved here is used when the next channel imports the same EAN.</CardDescription>
         </CardHeader>
         <CardContent>
           {masters.length === 0 ? (
@@ -300,9 +317,25 @@ export default function SkuMappingPage() {
               <TableBody>
                 {masters.map((sku) => (
                   <TableRow key={sku.id}>
-                    <TableCell className="font-medium">{sku.code}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <ProductThumb name={sku.name || sku.code} src={sku.imageUrl} />
+                        {sku.code}
+                      </div>
+                    </TableCell>
                     <TableCell>{sku.name}</TableCell>
-                    <TableCell>{sku.barcode || '—'}</TableCell>
+                    <TableCell>
+                      <input
+                        key={`${sku.id}-${sku.barcode || ''}`}
+                        defaultValue={sku.barcode || ''}
+                        placeholder="Barcode / EAN"
+                        className="h-8 w-40 rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-2 font-mono text-sm text-foreground placeholder:text-muted-foreground"
+                        onBlur={(e) => saveBarcode(sku, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                        }}
+                      />
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

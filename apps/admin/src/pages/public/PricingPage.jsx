@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { MarketingCta, MktCard } from '../../components/marketing/MarketingCta';
-import { SUBSCRIPTION_PLANS } from '../../mocks';
+import { SUBSCRIPTION_PLANS } from '../../constants/channelCatalog';
 
 const faqs = [
   { q: 'Is there a trial?', a: 'Yes. Register a merchant trial — you become that company’s Super Admin.' },

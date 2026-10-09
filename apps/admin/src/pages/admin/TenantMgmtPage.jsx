@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { CHANNEL_CATALOG, SUBSCRIPTION_PLANS } from '../../mocks';
+import { CHANNEL_CATALOG, SUBSCRIPTION_PLANS } from '../../constants/channelCatalog';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { emailSchema } from '../../lib/validation';
 import { FormBanner } from '../../components/ui/FormBanner';

@@ -11,9 +11,10 @@ import Select from '../../components/ui/Select';
 import Modal from '../../components/ui/Modal';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
+import ProductThumb from '../../components/ui/ProductThumb';
 import { FormBanner } from '../../components/ui/FormBanner';
 import KpiCard from '../../components/ui/KpiCard';
-import { Package, Plus, Search, Pencil } from 'lucide-react';
+import { Package, Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -105,9 +106,44 @@ export default function ProductsPage() {
         hsnCode: edit.hsnCode,
         gstRatePercent: Number(edit.gstRatePercent),
         status: edit.status,
+        images: String(edit.imagesText ?? (edit.images || []).join('\n'))
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean),
       });
       toast.success('Product updated');
       setEditOpen(false);
+      load();
+    } catch (err) {
+      setBanner(apiFormError(err).message);
+    }
+  };
+
+  const removeProduct = async (product) => {
+    if (!window.confirm(`Delete ${product.name}? Stock or channel mappings archive it instead of removing it.`)) return;
+    try {
+      const { data } = await api.delete(`/products/${product.id}`);
+      toast.success(data.message || 'Product updated');
+      load();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not delete product'));
+    }
+  };
+
+  const uploadImage = async (file) => {
+    if (!edit?.id || !file) return;
+    const body = new FormData();
+    body.append('image', file);
+    setBanner('');
+    try {
+      const { data } = await api.post(`/products/${edit.id}/images`, body);
+      const next = data.data;
+      setEdit({
+        ...edit,
+        ...next,
+        imagesText: (next.images || []).join('\n'),
+      });
+      toast.success('Image uploaded');
       load();
     } catch (err) {
       setBanner(apiFormError(err).message);
@@ -212,9 +248,14 @@ export default function ProductsPage() {
                 {rows.map((product) => (
                   <TableRow key={product.id}>
                     <TableCell>
-                      <div className="font-medium">{product.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {[product.brand, product.category].filter(Boolean).join(' · ') || '—'}
+                      <div className="flex items-center gap-2">
+                        <ProductThumb name={product.name} src={(product.images || [])[0]} size="lg" />
+                        <div>
+                          <div className="font-medium">{product.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {[product.brand, product.category].filter(Boolean).join(' · ') || '—'}
+                          </div>
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -236,7 +277,11 @@ export default function ProductsPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => { setEdit(product); setBanner(''); setEditOpen(true); }}
+                            onClick={() => {
+                              setEdit({ ...product, imagesText: (product.images || []).join('\n') });
+                              setBanner('');
+                              setEditOpen(true);
+                            }}
                           >
                             <Pencil className="w-3 h-3 mr-1" />
                             Edit
@@ -252,6 +297,10 @@ export default function ProductsPage() {
                             }}
                           >
                             Add variant
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => removeProduct(product)}>
+                            <Trash2 className="w-3 h-3 mr-1" />
+                            Delete
                           </Button>
                         </div>
                       </TableCell>
@@ -378,6 +427,26 @@ export default function ProductsPage() {
                 <option value="draft">draft</option>
                 <option value="archived">archived</option>
               </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Image URLs (one per line)</label>
+              <textarea
+                className="w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={edit.imagesText ?? (edit.images || []).join('\n')}
+                onChange={(e) => setEdit({ ...edit, imagesText: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Upload image</label>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  uploadImage(file);
+                }}
+              />
             </div>
           </div>
         )}

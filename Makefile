@@ -5,6 +5,7 @@
 # ============================================================
 
 .PHONY: help install install-ci mongo-start mongo-stop mongo-status ensure-mongo \
+	redis-status ensure-redis \
 	run dev all backend admin build stop clean status test seed
 
 SHELL := /bin/bash
@@ -70,6 +71,23 @@ mongo-status: ## Check MongoDB connectivity
 	  echo "❌ MongoDB: NOT RUNNING on :27017. Start with 'make mongo-start'"; \
 	fi
 
+redis-status: ## Check Redis connectivity
+	@if nc -z localhost 6379 2>/dev/null; then \
+	  echo "✅ Redis: running on tcp://localhost:6379"; \
+	else \
+	  echo "❌ Redis: NOT RUNNING on :6379. Start with 'brew services start redis'"; \
+	fi
+
+ensure-redis: ## Auto-start Redis if not running
+	@if nc -z localhost 6379 2>/dev/null; then \
+	  echo "✅ Redis already running on tcp://localhost:6379"; \
+	else \
+	  echo "🚀 Starting Redis..."; \
+	  brew services start redis 2>/dev/null || redis-server --daemonize yes; \
+	  sleep 1; \
+	  $(MAKE) --no-print-directory redis-status; \
+	fi
+
 ensure-mongo: ## Auto-start MongoDB if not running
 	@if nc -z localhost 27017 2>/dev/null; then \
 	  echo "✅ MongoDB already running on tcp://localhost:27017"; \
@@ -96,7 +114,7 @@ ensure-mongo: ## Auto-start MongoDB if not running
 # ============================================================
 run: dev ## ⭐ Default — start everything together (mongo-check + backend + admin)
 dev: all ## Alias for 'make all'
-all: ensure-mongo ## Start backend + admin together (concurrently, color-coded). Ctrl+C to stop all.
+all: ensure-mongo ensure-redis ## Start backend + admin together (concurrently, color-coded). Ctrl+C to stop all.
 	@echo ""
 	@echo "╔═══════════════════════════════════════════════════╗"
 	@echo "║  OMSKing — Starting all services                  ║"
@@ -113,7 +131,7 @@ all: ensure-mongo ## Start backend + admin together (concurrently, color-coded).
 	@echo ""
 	@pnpm run dev:all
 
-backend: ensure-mongo ## Only run backend (port 5002)
+backend: ensure-mongo ensure-redis ## Only run backend (port 5002)
 	@pnpm run dev:backend
 
 admin: ensure-mongo ## Only run frontend (port 5173) — public + admin, waits for backend
@@ -133,8 +151,9 @@ clean: ## Remove node_modules + dist + build artifacts
 	@pnpm run clean
 	@echo "✅ Cleaned build artifacts and node_modules."
 
-status: ## Quick status — mongo, ports
+status: ## Quick status — mongo, redis, ports
 	@$(MAKE) --no-print-directory mongo-status
+	@$(MAKE) --no-print-directory redis-status
 	@if nc -z localhost 5002 2>/dev/null; then echo "✅ Backend : running on http://localhost:5002"; else echo "◻️  Backend : not running on :5002"; fi
 	@if nc -z localhost 5173 2>/dev/null; then echo "✅ App     : running on http://localhost:5173"; else echo "◻️  App     : not running on :5173"; fi
 

@@ -48,7 +48,7 @@ export function VendorSheet({ children }) {
 
 export function VendorBulkBar({ children }) {
   return (
-    <div className="sticky top-0 z-10 rounded-2xl border border-emerald-200/80 bg-emerald-50/95 p-3 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/80">
+    <div className="sticky top-0 z-10 min-w-0 w-full rounded-2xl border border-emerald-200/80 bg-emerald-50/95 p-3 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/80">
       {children}
     </div>
   );

@@ -11,6 +11,12 @@ const skuMappingsRoutes = require('./skuMappings.routes');
 const channelsRoutes = require('./channels.routes');
 const warehousesRoutes = require('./warehouses.routes');
 const inventoryRoutes = require('./inventory.routes');
+const settingsRoutes = require('./settings.routes');
+const integrationsRoutes = require('./integrations.routes');
+const ordersRoutes = require('./orders.routes');
+const returnsRoutes = require('./returns.routes');
+const vendorsRoutes = require('./vendors.routes');
+const auditLogsRoutes = require('./audit-logs.routes');
 
 const router = express.Router();
 
@@ -27,5 +33,11 @@ router.use('/sku-mappings', skuMappingsRoutes);
 router.use('/channels', channelsRoutes);
 router.use('/warehouses', warehousesRoutes);
 router.use('/inventory', inventoryRoutes);
+router.use('/settings', settingsRoutes);
+router.use('/integrations', integrationsRoutes);
+router.use('/orders', ordersRoutes);
+router.use('/returns', returnsRoutes);
+router.use('/vendors', vendorsRoutes);
+router.use('/audit-logs', auditLogsRoutes);
 
 module.exports = router;

@@ -22,12 +22,20 @@ const ProtectedRoute = ({ children, requiredRole = null, requiredRoles = null, r
   }
 
   const granted = attachPermissions(user)?.permissions || [];
-  const pathKey = requiredPermission ?? ROUTE_PERMISSION[location.pathname];
+  const pathKey = requiredPermission ?? permissionForPath(location.pathname);
   if (pathKey && !hasPermission(granted, pathKey)) {
     return <Navigate to={homePathForRole(effectiveRole)} replace />;
   }
 
   return children;
 };
+
+function permissionForPath(pathname) {
+  if (ROUTE_PERMISSION[pathname]) return ROUTE_PERMISSION[pathname];
+  const match = Object.keys(ROUTE_PERMISSION)
+    .filter((path) => path !== '/' && pathname.startsWith(`${path}/`))
+    .sort((a, b) => b.length - a.length)[0];
+  return match ? ROUTE_PERMISSION[match] : null;
+}
 
 export default ProtectedRoute;

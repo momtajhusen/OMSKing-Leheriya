@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { returns } from '../../mocks';
+import useReturnsStore from '../../stores/returnsStore';
+import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate, statusBadgeVariant } from '../../utils/format';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
@@ -8,6 +9,7 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import { RotateCcw, Package, CheckCircle, XCircle, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ItemThumbs } from '../../components/ui/ProductThumb';
 
 export default function ReturnsPage() {
   const [activeTab, setActiveTab] = useState('all');
@@ -15,20 +17,47 @@ export default function ReturnsPage() {
   const [receiveFor, setReceiveFor] = useState(null);
   const [receiveWarehouse, setReceiveWarehouse] = useState('WH-001');
   const [receiveAction, setReceiveAction] = useState('restock');
+  const returns = useReturnsStore((s) => s.returns);
+  const approveReturn = useReturnsStore((s) => s.approveReturn);
+  const rejectReturn = useReturnsStore((s) => s.rejectReturn);
+  const markReceived = useReturnsStore((s) => s.markReceived);
+  const printReverseLabel = useReturnsStore((s) => s.printReverseLabel);
+  const syncFromOrders = useReturnsStore((s) => s.syncFromOrders);
+  const orders = useOrderStore((s) => s.orders);
+  const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+
+  useEffect(() => {
+    hydrateFromApi();
+  }, [hydrateFromApi]);
+
+  useEffect(() => {
+    syncFromOrders(orders);
+  }, [orders, syncFromOrders]);
 
   const handleRestockChange = (returnId, destination) => {
-    setSelectedReturns(prev => ({
+    setSelectedReturns((prev) => ({
       ...prev,
-      [returnId]: destination
+      [returnId]: destination,
     }));
   };
 
-  const handleApproveReturn = (returnId) => {
-    toast.success(`Return ${returnId} approved — wait for Received to restock`);
+  const handleApproveReturn = async (returnId) => {
+    const dest = selectedReturns[returnId] || 'All';
+    const next = await approveReturn(returnId, dest);
+    if (next?.error) {
+      toast.error(next.error);
+      return;
+    }
+    toast.success(
+      dest === 'None'
+        ? `Return ${returnId} approved — no restock`
+        : `Return ${returnId} approved. Qty added to Offline WH-001.`
+    );
   };
 
   const confirmReceived = () => {
     if (!receiveFor) return;
+    markReceived(receiveFor.id, { warehouse: receiveWarehouse, action: receiveAction });
     toast.success(
       receiveAction === 'none'
         ? `${receiveFor.id} received — no restock (hold/dispose)`
@@ -38,20 +67,21 @@ export default function ReturnsPage() {
   };
 
   const handleRejectReturn = (returnId) => {
-    console.log('Rejecting return:', returnId);
+    rejectReturn(returnId);
+    toast.success(`Return ${returnId} rejected`);
   };
 
   const statusTabs = ['all', 'pending', 'approved', 'rejected', 'completed'];
 
-  const filteredReturns = returns.filter(ret => {
-    return activeTab === 'all' || ret.status.toLowerCase() === activeTab;
-  });
+  const filteredReturns = useMemo(() => returns.filter((ret) => (
+    activeTab === 'all' || ret.status.toLowerCase() === activeTab
+  )), [returns, activeTab]);
 
   const kpiData = {
     total: returns.length,
-    pending: returns.filter(r => r.status === 'Pending').length,
-    approved: returns.filter(r => r.status === 'Approved').length,
-    rejected: returns.filter(r => r.status === 'Rejected').length,
+    pending: returns.filter((r) => r.status === 'Pending').length,
+    approved: returns.filter((r) => r.status === 'Approved').length,
+    rejected: returns.filter((r) => r.status === 'Rejected').length,
   };
 
   return (
@@ -60,9 +90,9 @@ export default function ReturnsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Returns</h1>
-          <p className="text-muted-foreground">Customer returns on a Master Order. Restock destination is chosen at QC.</p>
+          <p className="text-muted-foreground">Customer returns and reverse pickups. Approve adds qty to Offline WH-001 and the same ATS goes to Amazon and Myntra.</p>
         </div>
-        <Button variant="outline">
+        <Button variant="outline" onClick={async () => { await hydrateFromApi(); toast.success('Returns refreshed from orders'); }}>
           <RefreshCw className="w-4 h-4 mr-2" />
           Sync Returns
         </Button>
@@ -157,6 +187,7 @@ export default function ReturnsPage() {
               <TableRow>
                 <TableHead>Return ID</TableHead>
                 <TableHead>Order ID</TableHead>
+                <TableHead>Items</TableHead>
                 <TableHead>Customer</TableHead>
                 <TableHead>Reason</TableHead>
                 <TableHead>Requested</TableHead>
@@ -167,11 +198,22 @@ export default function ReturnsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {filteredReturns.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={10} className="py-10 text-center text-muted-foreground">
+                    No returns yet. A return shows here when a reverse pickup is booked on an order or a channel sends a return.
+                  </TableCell>
+                </TableRow>
+              )}
               {filteredReturns.map((ret) => {
                 return (
                   <TableRow key={ret.id}>
-                    <TableCell className="font-medium">{ret.id}</TableCell>
+                    <TableCell className="font-medium">
+                      <div>{ret.id}</div>
+                      {ret.type === 'reverse_pickup' && <Badge variant="outline">Reverse pickup</Badge>}
+                    </TableCell>
                     <TableCell>{ret.orderId}</TableCell>
+                    <TableCell><ItemThumbs items={ret.items} /></TableCell>
                     <TableCell>{ret.customer}</TableCell>
                     <TableCell>{ret.reason}</TableCell>
                     <TableCell>{formatDate(ret.requestDate)}</TableCell>
@@ -190,7 +232,7 @@ export default function ReturnsPage() {
                                 type="radio"
                                 name={`restock-${ret.id}`}
                                 value={dest}
-                                checked={selectedReturns[ret.id] === dest}
+                                checked={(selectedReturns[ret.id] || 'All') === dest}
                                 onChange={() => handleRestockChange(ret.id, dest)}
                                 className="w-4 h-4"
                               />
@@ -211,7 +253,6 @@ export default function ReturnsPage() {
                             variant="outline" 
                             size="sm"
                             onClick={() => handleApproveReturn(ret.id)}
-                            disabled={!selectedReturns[ret.id]}
                           >
                             <CheckCircle className="w-4 h-4 mr-1" />
                             Approve
@@ -229,13 +270,17 @@ export default function ReturnsPage() {
                       )}
                       {ret.status === 'Approved' && (
                         <div className="flex flex-col gap-2">
-                          <Badge variant="outline">QC / inbound</Badge>
+                          <Badge variant="outline">{ret.type === 'reverse_pickup' ? 'Reverse pickup' : 'QC / inbound'}</Badge>
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => toast.success(`Return label generated for ${ret.id}`)}
+                            onClick={() => {
+                              const order = useOrderStore.getState().getById(ret.orderId);
+                              printReverseLabel(ret, order);
+                              toast.success(`${ret.type === 'reverse_pickup' ? 'Reverse pickup' : 'Return'} label opened for ${ret.id}`);
+                            }}
                           >
-                            Return label
+                            {ret.type === 'reverse_pickup' ? 'Generate reverse label' : 'Return label'}
                           </Button>
                           <Button
                             size="sm"
@@ -271,7 +316,7 @@ export default function ReturnsPage() {
               <CheckCircle className="w-4 h-4 text-green-600 mt-0.5" />
               <div>
                 <p className="font-medium">All</p>
-                <p className="text-muted-foreground">Restock to all available warehouses</p>
+                <p className="text-muted-foreground">Add qty to Offline WH-001. Amazon and Myntra ATS use the same warehouse, so both marketplaces get the stock.</p>
               </div>
             </div>
             <div className="flex items-start gap-2">

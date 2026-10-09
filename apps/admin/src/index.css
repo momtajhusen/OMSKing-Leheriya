@@ -299,7 +299,7 @@
   }
 
   .vendor-page {
-    @apply space-y-5 p-4 sm:p-6;
+    @apply min-w-0 space-y-5 p-4 sm:p-6;
   }
 
   .vendor-sheet {

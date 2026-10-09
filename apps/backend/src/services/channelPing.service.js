@@ -45,7 +45,7 @@ function httpPost(url, { headers = {}, body = '', timeoutMs = 20000 } = {}) {
 
 function myntraBases(creds) {
   const extra = String(creds.apiBaseUrl || '').trim().replace(/\/$/, '');
-  const ordered = [extra, 'https://api.pretr.com', 'https://pretr.com', 'https://www.pretr.com'];
+  const ordered = [extra, 'https://api-integration.myntra.com', 'https://api.pretr.com'];
   return [...new Set(ordered.filter(Boolean))];
 }
 
@@ -113,7 +113,7 @@ async function pingMyntra(creds) {
   return {
     ok: false,
     incomplete: true,
-    message: `Myntra credentials are saved. Live ping cannot resolve Pretr (api.pretr.com has no DNS). Paste the current host from Myntra in “Pretr API host” if they gave you one. ${describeErr(lastNetErr)}`,
+    message: `Myntra credentials are saved. Live token host did not respond. Use https://api-integration.myntra.com in Pretr API host. ${describeErr(lastNetErr)}`,
   };
 }
 

@@ -1,5 +1,5 @@
 require('dotenv').config();
-const bcrypt = require('bcryptjs');
+const { hashPassword } = require('../lib/password');
 const mongoose = require('mongoose');
 const config = require('../config');
 const Tenant = require('../models/Tenant');
@@ -7,15 +7,14 @@ const Role = require('../models/Role');
 const User = require('../models/User');
 const { ROLE_DEFAULT_PERMISSIONS } = require('../constants/permissions');
 const { provisionMerchant } = require('../services/tenantOnboard.service');
-const { seedLeheriyaCatalog } = require('./phase3Catalog');
 const { seedLeheriyaChannels } = require('./phase3Channels');
-const { seedLeheriyaInventory } = require('./phase4Inventory');
+const { ensureDefaultWarehouses } = require('../services/warehouse.service');
 
 const PASSWORD = 'password123';
 
 async function seed() {
   await mongoose.connect(config.mongodbUri);
-  const passwordHash = await bcrypt.hash(PASSWORD, 10);
+  const passwordHash = await hashPassword(PASSWORD);
 
   let platform = await Tenant.findOne({ slug: 'omsking-platform' });
   if (!platform) {
@@ -109,14 +108,12 @@ async function seed() {
     { $addToSet: { permissions: 'vendors.manage' } },
   ).setOptions({ skipTenantFilter: true });
 
-  await seedLeheriyaCatalog(leheriya._id);
   await seedLeheriyaChannels(leheriya._id);
-  await seedLeheriyaInventory(leheriya._id);
+  await ensureDefaultWarehouses(leheriya._id);
   console.log('[SEED] Channel credentials loaded from .env (Shopify + Amazon + Myntra) — test from /channels');
 
   console.log('[SEED] Phase 2 accounts (password: password123)');
-  console.log('[SEED] Phase 3 Leheriya catalog (Master SKU + mappings)');
-  console.log('[SEED] Phase 4 warehouses WH-001 / WH-002 + opening stock');
+  console.log('[SEED] Warehouses WH-001 / WH-002. Catalog, stock and orders come from channel sync, not seeds.');
   console.log('  platform@omsking.com → /platform');
   console.log('  superadmin@omsking.com → /dashboard (Leheriya)');
   console.log('  ops@leheriya.com → /dashboard');

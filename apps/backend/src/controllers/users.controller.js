@@ -1,4 +1,4 @@
-const bcrypt = require('bcryptjs');
+const { hashPassword } = require('../lib/password');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const { HttpError } = require('../utils/httpError');
@@ -6,6 +6,16 @@ const { successResponse, paginatedResponse } = require('../utils/response');
 const { sessionTenantId, assertSameTenant } = require('../lib/tenantAccess');
 const { sendMail, assertMailConfigured } = require('../lib/mailer');
 const { accountCreatedEmail } = require('../lib/mailTemplates');
+const { recordFromReq } = require('../services/auditLog.service');
+
+function userSnap(row) {
+  return {
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    status: row.status,
+  };
+}
 
 function statusLabel(status) {
   if (status === 'disabled') return 'Inactive';
@@ -80,7 +90,7 @@ async function createUser(req, res) {
     tenantId,
     fullName: name,
     email: email.toLowerCase(),
-    passwordHash: await bcrypt.hash(temp, 10),
+    passwordHash: await hashPassword(temp),
     roleId: roleDoc._id,
     status: password ? 'active' : 'invited',
   });
@@ -92,6 +102,16 @@ async function createUser(req, res) {
     roleLabel: roleDoc.name || role,
   });
   await sendMail({ to: email.toLowerCase(), ...mail });
+  const dto = mapUser(populated);
+  await recordFromReq(req, {
+    tenantId,
+    action: 'user.created',
+    resourceType: 'users',
+    resourceId: populated._id,
+    resourceDisplay: dto.email,
+    before: null,
+    after: userSnap(dto),
+  });
   return successResponse(res, {
     ...mapUser(populated),
     temporaryPassword: password ? undefined : temp,
@@ -103,6 +123,8 @@ async function updateUser(req, res) {
   const user = await User.findById(req.params.id).populate('roleId').setOptions({ skipTenantFilter: true });
   if (!user) throw new HttpError(404, 'User not found');
   assertSameTenant(req, user.tenantId);
+  const before = userSnap(mapUser(user));
+  let roleChanged = false;
   if (req.body.role) {
     const roleDoc = await Role.findOne({ tenantId: user.tenantId, code: req.body.role }).setOptions({ skipTenantFilter: true });
     if (!roleDoc) throw new HttpError(400, 'Unknown role');
@@ -114,11 +136,22 @@ async function updateUser(req, res) {
     }
     await assertNotLastSuperAdmin(user, req.body.role);
     user.roleId = roleDoc._id;
+    roleChanged = true;
   }
   if (req.body.name) user.fullName = req.body.name;
   if (req.body.email) user.email = req.body.email.toLowerCase();
   await user.save();
   const populated = await User.findById(user._id).populate(['roleId', 'tenantId']).setOptions({ skipTenantFilter: true });
+  const after = userSnap(mapUser(populated));
+  await recordFromReq(req, {
+    tenantId: user.tenantId,
+    action: roleChanged ? 'user.role_changed' : 'user.updated',
+    resourceType: 'users',
+    resourceId: user._id,
+    resourceDisplay: after.email,
+    before,
+    after,
+  });
   return successResponse(res, mapUser(populated), 'User updated');
 }
 
@@ -126,12 +159,23 @@ async function patchUserStatus(req, res) {
   const user = await User.findById(req.params.id).populate('roleId').setOptions({ skipTenantFilter: true });
   if (!user) throw new HttpError(404, 'User not found');
   assertSameTenant(req, user.tenantId);
+  const before = userSnap(mapUser(user));
   if (String(user._id) === String(req.user.id)) throw new HttpError(400, 'Cannot disable yourself');
   const nextStatus = req.body.status === 'disabled' || req.body.status === 'Inactive' ? 'disabled' : 'active';
   if (nextStatus === 'disabled') await assertNotLastSuperAdmin(user, null, true);
   user.status = nextStatus;
   await user.save();
   const populated = await User.findById(user._id).populate(['roleId', 'tenantId']).setOptions({ skipTenantFilter: true });
+  const after = userSnap(mapUser(populated));
+  await recordFromReq(req, {
+    tenantId: user.tenantId,
+    action: 'user.status_updated',
+    resourceType: 'users',
+    resourceId: user._id,
+    resourceDisplay: after.email,
+    before,
+    after,
+  });
   return successResponse(res, mapUser(populated), 'Status updated');
 }
 

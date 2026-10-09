@@ -7,7 +7,5 @@
 			"path": "."
 		}
 	],
-	"settings": {
-		"java.configuration.updateBuildConfiguration": "disabled"
-	}
+	"settings": {}
 }

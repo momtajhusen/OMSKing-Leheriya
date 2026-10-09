@@ -106,7 +106,7 @@ function AdminSidebar() {
                   </div>
                   {routes.map((route) => {
                     const Icon = iconMap[route.icon] || Box;
-                    const isActive = location.pathname === route.path;
+                    const isActive = location.pathname === route.path || (route.path !== '/' && location.pathname.startsWith(`${route.path}/`));
                     
                     return (
                       <Link
@@ -165,7 +165,7 @@ function AdminSidebar() {
               )}
               {routes.map((route) => {
                 const Icon = iconMap[route.icon] || Box;
-                const isActive = location.pathname === route.path;
+                const isActive = location.pathname === route.path || (route.path !== '/' && location.pathname.startsWith(`${route.path}/`));
                 
                 return (
                   <Link

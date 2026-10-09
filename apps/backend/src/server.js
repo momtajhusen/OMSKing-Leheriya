@@ -1,10 +1,15 @@
 const app = require('./app');
 const config = require('./config');
 const connectDB = require('./db/connect');
+const { startJobWorker } = require('./services/jobQueue.service');
+const { startChannelScheduler } = require('./services/channelScheduler.service');
 
 const startServer = async () => {
   await connectDB();
   const host = process.env.HOST || '0.0.0.0';
+  const queue = await startJobWorker();
+  console.log(`[SERVER] Job queue: ${queue}`);
+  startChannelScheduler();
   app.listen(config.port, host, () => {
     console.log(`[SERVER] OMSKing backend listening on ${host}:${config.port}`);
     console.log(`[SERVER] Environment: ${config.nodeEnv}`);

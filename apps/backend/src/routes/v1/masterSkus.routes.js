@@ -4,11 +4,12 @@ const { validate } = require('../../middleware/validate');
 const { authMiddleware } = require('../../middleware/auth');
 const { tenantMiddleware } = require('../../middleware/tenant');
 const { requirePermission } = require('../../middleware/requirePermission');
+const { vendorScope } = require('../../middleware/vendorScope');
 const masterSkus = require('../../controllers/masterSkus.controller');
 
 const router = require('express').Router();
-const view = [authMiddleware, tenantMiddleware, requirePermission('catalog.view')];
-const edit = [authMiddleware, tenantMiddleware, requirePermission('catalog.edit')];
+const view = [authMiddleware, tenantMiddleware, vendorScope('catalog'), requirePermission('catalog.view')];
+const edit = [authMiddleware, tenantMiddleware, vendorScope('catalog'), requirePermission('catalog.edit')];
 
 router.get('/', ...view, asyncHandler(masterSkus.listMasterSkus));
 router.get('/:id', ...view, asyncHandler(masterSkus.getMasterSku));

@@ -4,12 +4,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'react-hot-toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
-import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import Input from '../../components/ui/Input';
 import { Building, Link, Truck, FileText, Save, CheckCircle, Settings as SettingsIcon, Building2, Mail, Phone, MapPin, Globe, Warehouse } from 'lucide-react';
 import ChannelSetup from '../../components/channels/ChannelSetup';
+import CourierSettings from '../../components/settings/CourierSettings';
+import TaxSettings from '../../components/settings/TaxSettings';
 import api, { apiError } from '../../lib/api';
 
 const companySchema = z.object({
@@ -28,35 +27,60 @@ export default function SettingsPage() {
   const [saveStatus, setSaveStatus] = useState(null);
   const [inventoryAuthority, setInventoryAuthority] = useState('oms');
   const [authorityBusy, setAuthorityBusy] = useState(false);
+  const [companyBusy, setCompanyBusy] = useState(false);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm({
+    resolver: zodResolver(companySchema),
+    defaultValues: {
+      companyName: '',
+      gstin: '',
+      pan: '',
+      address: '',
+      city: '',
+      district: '',
+      supportEmail: '',
+      supportPhone: '',
+    },
+  });
 
   useEffect(() => {
     api.get('/warehouses/config').then(({ data }) => {
       if (data.data?.inventoryAuthority) setInventoryAuthority(data.data.inventoryAuthority);
     }).catch(() => {});
-  }, []);
+    api.get('/settings/company').then(({ data }) => {
+      const company = data.data || {};
+      reset({
+        companyName: company.companyName || '',
+        gstin: company.gstin || '',
+        pan: company.pan || '',
+        address: company.address || '',
+        city: company.city || '',
+        district: company.district || '',
+        supportEmail: company.supportEmail || '',
+        supportPhone: company.supportPhone || '',
+      });
+    }).catch((err) => {
+      toast.error(apiError(err, 'Could not load company details'));
+    });
+  }, [reset]);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm({
-    resolver: zodResolver(companySchema),
-    defaultValues: {
-      companyName: 'Leheriya Creations',
-      gstin: '27AAPFU0939G1ZV',
-      pan: 'AAPFU0939G',
-      address: '123 Fashion Street',
-      city: 'Jaipur',
-      district: 'Rajasthan',
-      supportEmail: 'support@leheriya.com',
-      supportPhone: '+919876543210',
-    },
-  });
-
-  const onSubmit = (data) => {
-    setSaveStatus('success');
-    toast.success('Settings saved successfully');
-    setTimeout(() => setSaveStatus(null), 3000);
+  const onSubmit = async (data) => {
+    setCompanyBusy(true);
+    try {
+      await api.patch('/settings/company', data);
+      setSaveStatus('success');
+      toast.success('Company details saved');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not save company details'));
+    } finally {
+      setCompanyBusy(false);
+    }
   };
 
   const tabs = [
@@ -65,13 +89,6 @@ export default function SettingsPage() {
     { id: 'couriers', label: 'Courier Settings', icon: Truck },
     { id: 'tax', label: 'Tax & GST', icon: FileText },
     { id: 'inventory', label: 'Inventory source', icon: Warehouse },
-  ];
-
-  const couriers = [
-    { name: 'Delhivery', status: 'Active', priority: 1, rate: 85, pincode: 'All-India (excl. NE remote)' },
-    { name: 'Bluedart', status: 'Active', priority: 2, rate: 120, pincode: 'Metro + tier 1' },
-    { name: 'Ecom Express', status: 'Active', priority: 3, rate: 95, pincode: 'All-India' },
-    { name: 'Xpressbees', status: 'Inactive', priority: 4, rate: 78, pincode: 'Paused' },
   ];
 
   return (
@@ -248,9 +265,9 @@ export default function SettingsPage() {
             </div>
 
             <div className="pt-6 border-t border-[hsl(var(--color-border-premium))]">
-              <button type="submit" className="premium-button">
+              <button type="submit" className="premium-button" disabled={companyBusy}>
                 <Save className="w-4 h-4 mr-2" />
-                Save Changes
+                {companyBusy ? 'Saving…' : 'Save Changes'}
               </button>
             </div>
           </form>
@@ -271,40 +288,7 @@ export default function SettingsPage() {
 
       {activeTab === 'couriers' && (
         <div className="premium-card p-8">
-          <div className="mb-6">
-            <h2 className="text-xl font-semibold mb-1">Courier Settings</h2>
-            <p className="text-sm text-muted-foreground">Configure shipping partners</p>
-          </div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Courier</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Rate (0.5kg)</TableHead>
-                <TableHead>Serviceability</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {couriers.map((courier) => (
-                <TableRow key={courier.name}>
-                  <TableCell className="font-medium">{courier.name}</TableCell>
-                  <TableCell>
-                    <Badge variant={courier.status === 'Active' ? 'outline' : 'secondary'}>
-                      {courier.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{courier.priority}</TableCell>
-                  <TableCell>₹{courier.rate}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{courier.pincode}</TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm">Configure</Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <CourierSettings />
         </div>
       )}
 
@@ -312,47 +296,9 @@ export default function SettingsPage() {
         <div className="premium-card p-8">
           <div className="mb-6">
             <h2 className="text-xl font-semibold mb-1">Tax & GST Settings</h2>
-            <p className="text-sm text-muted-foreground">Configure tax rates and GST settings</p>
+            <p className="text-sm text-muted-foreground">Default rate, category slabs, and the HSN master used on products</p>
           </div>
-          <div className="space-y-6">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-foreground">Default GST Rate (%)</label>
-              <input defaultValue="12" className="premium-input" />
-            </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-foreground">HSN Code Master Upload</label>
-              <Button variant="outline">Upload HSN Master File</Button>
-            </div>
-            <div className="pt-6 border-t border-[hsl(var(--color-border-premium))]">
-              <h3 className="font-medium mb-4">Tax Rates by Category</h3>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Category</TableHead>
-                    <TableHead>GST Rate</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow>
-                    <TableCell>Clothing (Below ₹1000)</TableCell>
-                    <TableCell>5%</TableCell>
-                    <TableCell><Button variant="ghost" size="sm">Edit</Button></TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>Clothing (Above ₹1000)</TableCell>
-                    <TableCell>12%</TableCell>
-                    <TableCell><Button variant="ghost" size="sm">Edit</Button></TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>Premium Textiles</TableCell>
-                    <TableCell>18%</TableCell>
-                    <TableCell><Button variant="ghost" size="sm">Edit</Button></TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          </div>
+          <TaxSettings />
         </div>
       )}
 

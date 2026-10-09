@@ -15,7 +15,7 @@ import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { inviteUserSchema } from '../../lib/validation';
 import { FormBanner } from '../../components/ui/FormBanner';
-import { Users, Shield, Plus, Search, Check, X, Copy } from 'lucide-react';
+import { Users, Shield, Plus, Search, Check, X, Copy, Pencil } from 'lucide-react';
 
 const emptyUser = { name: '', email: '', role: ROLES.OPERATIONS };
 const MATRIX_ROLES = MERCHANT_ASSIGNABLE_ROLES.filter((role) => role !== ROLES.ADMIN);
@@ -33,6 +33,9 @@ export default function UsersRolesPage() {
   const [formBanner, setFormBanner] = useState('');
   const [inviteSecret, setInviteSecret] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [roleEdit, setRoleEdit] = useState(null);
+  const [rolePerms, setRolePerms] = useState([]);
+  const [roleBusy, setRoleBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -109,17 +112,40 @@ export default function UsersRolesPage() {
     }
   };
 
+  const saveRolePermissions = async (role, next) => {
+    const locked = role.code === ROLES.SUPER_ADMIN && !next.includes('users.manage')
+      ? [...next, 'users.manage']
+      : next;
+    try {
+      await api.patch(`/roles/${role.id}`, { permissions: locked });
+      setRoles((prev) => prev.map((r) => (r.id === role.id ? { ...r, permissions: locked } : r)));
+      toast.success(`${ROLE_LABELS[role.code] || role.name} permissions saved`);
+      return true;
+    } catch (err) {
+      toast.error(apiError(err));
+      return false;
+    }
+  };
+
   const togglePerm = async (role, key) => {
-    if (role.code === 'super_admin') return;
+    if (role.code === ROLES.SUPER_ADMIN && key === 'users.manage' && role.permissions.includes(key)) {
+      toast.error('Merchant Super Admin must keep Manage users');
+      return;
+    }
     const next = role.permissions.includes(key)
       ? role.permissions.filter((p) => p !== key)
       : [...role.permissions, key];
-    try {
-      await api.patch(`/roles/${role.id}`, { permissions: next });
-      setRoles((prev) => prev.map((r) => (r.id === role.id ? { ...r, permissions: next } : r)));
-    } catch (err) {
-      toast.error(apiError(err));
+    await saveRolePermissions(role, next);
+  };
+
+  const openRoleEdit = (code) => {
+    const role = roles.find((r) => r.code === code);
+    if (!role) {
+      toast.error('Role is not seeded on this tenant yet');
+      return;
     }
+    setRoleEdit(role);
+    setRolePerms([...(role.permissions || [])]);
   };
 
   if (loading) return <PageLoader label="Loading users & roles..." />;
@@ -224,7 +250,7 @@ export default function UsersRolesPage() {
           <Card>
             <CardHeader>
               <CardTitle>Permission matrix</CardTitle>
-              <CardDescription>APIs must call requirePermission(key). Role names never grant access by themselves.</CardDescription>
+              <CardDescription>Click a check to grant or revoke, or Edit on a role to change every permission at once.</CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               <Table>
@@ -232,7 +258,19 @@ export default function UsersRolesPage() {
                   <TableRow>
                     <TableHead className="whitespace-nowrap">Permission</TableHead>
                     {MATRIX_ROLES.map((role) => (
-                      <TableHead key={role} className="text-center whitespace-nowrap text-xs">{ROLE_LABELS[role]}</TableHead>
+                      <TableHead key={role} className="text-center whitespace-nowrap text-xs">
+                        <div>{ROLE_LABELS[role]}</div>
+                        {canUsers && (
+                          <button
+                            type="button"
+                            className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                            onClick={() => openRoleEdit(role)}
+                          >
+                            <Pencil className="h-3 w-3" />
+                            Edit
+                          </button>
+                        )}
+                      </TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
@@ -250,8 +288,9 @@ export default function UsersRolesPage() {
                         <TableCell key={code} className="text-center">
                           <button
                             type="button"
-                            className="mx-auto block"
-                            disabled={!canUsers || code === ROLES.SUPER_ADMIN}
+                            className="mx-auto block rounded p-1 hover:bg-muted disabled:opacity-40"
+                            title={canUsers ? 'Click to grant or revoke' : 'View only'}
+                            disabled={!canUsers || (code === ROLES.SUPER_ADMIN && perm.key === 'users.manage')}
                             onClick={() => role && togglePerm(role, perm.key)}
                           >
                             {hasPermission(granted, perm.key)
@@ -282,6 +321,60 @@ export default function UsersRolesPage() {
           </Card>
         </div>
       )}
+
+      <Modal
+        open={Boolean(roleEdit)}
+        onOpenChange={(isOpen) => { if (!isOpen) setRoleEdit(null); }}
+        title={roleEdit ? `Edit ${ROLE_LABELS[roleEdit.code] || roleEdit.name}` : 'Edit role'}
+        description="These keys are what APIs check. Saving updates everyone with this role."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setRoleEdit(null)}>Cancel</Button>
+            <Button
+              disabled={roleBusy}
+              onClick={async () => {
+                if (!roleEdit) return;
+                setRoleBusy(true);
+                const ok = await saveRolePermissions(roleEdit, rolePerms);
+                setRoleBusy(false);
+                if (ok) setRoleEdit(null);
+              }}
+            >
+              {roleBusy ? 'Saving…' : 'Save permissions'}
+            </Button>
+          </>
+        }
+      >
+        {roleEdit && (
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+            {PERMISSION_CATALOG.map((perm) => {
+              const locked = roleEdit.code === ROLES.SUPER_ADMIN && perm.key === 'users.manage';
+              const checked = rolePerms.includes(perm.key);
+              return (
+                <label key={perm.key} className="flex items-start gap-3 rounded-md border px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={checked}
+                    disabled={locked}
+                    onChange={() => {
+                      setRolePerms((prev) => (
+                        prev.includes(perm.key)
+                          ? prev.filter((key) => key !== perm.key)
+                          : [...prev, perm.key]
+                      ));
+                    }}
+                  />
+                  <span>
+                    <span className="font-medium">{perm.label}</span>
+                    <code className="mt-0.5 block text-[11px] text-muted-foreground">{perm.key}</code>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={open}

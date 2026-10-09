@@ -1,76 +1,121 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { invoices, orders } from '../../mocks';
+import api from '../../lib/api';
+import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate } from '../../utils/format';
+import { isChannelManaged, packetIdOf, openMyntraDocument } from '../../lib/channelOrders';
+import { lineTax, downloadCsv, isCancelled } from '../../lib/orderMetrics';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import BrandLogo from '../../components/brand/BrandLogo';
-import { FileText, Download, Printer, Send, Upload, Edit, QrCode } from 'lucide-react';
+import KpiCard from '../../components/ui/KpiCard';
+import PageLoader from '../../components/ui/PageLoader';
+import EmptyState from '../../components/ui/EmptyState';
+import { FileText, Download, AlertTriangle, Receipt } from 'lucide-react';
 
-const MASTER_HSN = {
-  6202: 12,
-  6203: 12,
-  6204: 12,
-  6209: 12,
-  6214: 5,
-};
+const TABS = [
+  { id: 'invoiced', label: 'Tax invoices' },
+  { id: 'pending', label: 'Shipped, no invoice' },
+  { id: 'notes', label: 'Credit notes needed' },
+];
 
-const orderChannel = Object.fromEntries(orders.map((o) => [o.id, o.channel]));
+function invoiceNoOf(order) {
+  return order.invoiceNo || (order.channelLines || []).find((line) => line.invoiceNumber)?.invoiceNumber || '';
+}
 
-function invoiceNumber(invoice) {
-  return orderChannel[invoice.orderId] === 'Shopify' ? invoice.orderId : invoice.invoiceNo;
+function orderTax(order) {
+  return (order.items || []).reduce((acc, item) => {
+    const tax = lineTax(item);
+    acc.taxable += tax.taxable;
+    acc.gst += tax.cgst + tax.sgst + tax.igst;
+    acc.gross += tax.gross;
+    return acc;
+  }, { taxable: 0, gst: 0, gross: 0 });
 }
 
 export default function GstInvoicePage() {
-  const [selectedInvoice, setSelectedInvoice] = useState(invoices[0]);
-  const [editMode, setEditMode] = useState(false);
-  const [lineEdits, setLineEdits] = useState({});
-  const [docTab, setDocTab] = useState('invoices');
+  const navigate = useNavigate();
+  const orders = useOrderStore((s) => s.orders);
+  const loaded = useOrderStore((s) => s.loaded);
+  const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+  const generateInvoice = useOrderStore((s) => s.generateInvoice);
+  const [company, setCompany] = useState(null);
+  const [tab, setTab] = useState('invoiced');
+  const [busy, setBusy] = useState('');
 
-  const handleEditHSN = () => {
-    setEditMode(!editMode);
+  useEffect(() => {
+    hydrateFromApi();
+    api.get('/settings/company').then(({ data }) => setCompany(data.data)).catch(() => setCompany(null));
+  }, [hydrateFromApi]);
+
+  const rows = useMemo(() => orders.map((order) => ({
+    order,
+    invoiceNo: invoiceNoOf(order),
+    tax: orderTax(order),
+  })).sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt))), [orders]);
+
+  const groups = useMemo(() => ({
+    invoiced: rows.filter((row) => row.invoiceNo && !isCancelled(row.order)),
+    pending: rows.filter((row) => !row.invoiceNo && ['Dispatched', 'Delivered'].includes(row.order.status)),
+    notes: rows.filter((row) => row.invoiceNo && isCancelled(row.order)),
+  }), [rows]);
+
+  const hsnSummary = useMemo(() => {
+    const map = new Map();
+    groups.invoiced.forEach(({ order }) => (order.items || []).forEach((item) => {
+      const key = `${item.hsn || '—'}|${item.gst ?? '—'}`;
+      const tax = lineTax(item);
+      const row = map.get(key) || { hsn: item.hsn || '—', rate: item.gst, qty: 0, taxable: 0, gst: 0 };
+      row.qty += Number(item.qty) || 1;
+      row.taxable += tax.taxable;
+      row.gst += tax.cgst + tax.sgst + tax.igst;
+      map.set(key, row);
+    }));
+    return [...map.values()].sort((a, b) => b.taxable - a.taxable);
+  }, [groups.invoiced]);
+
+  const totals = groups.invoiced.reduce((acc, row) => ({
+    taxable: acc.taxable + row.tax.taxable,
+    gst: acc.gst + row.tax.gst,
+  }), { taxable: 0, gst: 0 });
+
+  const openInvoice = async (order) => {
+    setBusy(order.id);
+    try {
+      if (isChannelManaged(order)) {
+        await openMyntraDocument(order, 'invoice');
+      } else {
+        const next = await generateInvoice(order.id);
+        if (next?.error) toast.error(next.error);
+      }
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy('');
+    }
   };
 
-  const handleUploadMasterHSN = () => {
-    console.log('Uploading master HSN file');
-    toast.success('Master HSN list uploaded. GST % is taken from HSN.');
+  const exportRegister = () => {
+    const list = groups[tab];
+    if (!list.length) {
+      toast.error('Nothing to export in this tab');
+      return;
+    }
+    const lines = list.flatMap(({ order, invoiceNo }) => (order.items || []).map((item) => {
+      const tax = lineTax(item);
+      return [invoiceNo, order.createdAt ? String(order.createdAt).slice(0, 10) : '', order.id, order.channel, order.customer,
+        item.sku, item.name, item.hsn || '', item.gst ?? '', item.qty, tax.taxable.toFixed(2), (tax.cgst + tax.sgst + tax.igst).toFixed(2), tax.gross.toFixed(2)];
+    }));
+    downloadCsv(`gst-${tab}-${new Date().toISOString().slice(0, 10)}.csv`,
+      ['Invoice No', 'Date', 'Order', 'Channel', 'Customer', 'SKU', 'Item', 'HSN', 'GST %', 'Qty', 'Taxable', 'GST', 'Total'], lines);
+    toast.success(`${lines.length} invoice lines exported`);
   };
 
-  const displayNo = invoiceNumber(selectedInvoice);
+  if (!loaded) return <PageLoader label="Loading invoices..." />;
 
-  const handleDownloadPDF = () => {
-    console.log('Downloading PDF for invoice:', displayNo);
-    toast.success(`Downloading ${displayNo}`);
-  };
-
-  const handlePrint = () => {
-    console.log('Printing invoice:', displayNo);
-    toast.success(`Print queued for ${displayNo}`);
-  };
-
-  const handleSendWhatsApp = () => {
-    console.log('Sending invoice via WhatsApp:', displayNo);
-    toast.success(`Invoice ${displayNo} sent on WhatsApp`);
-  };
-
-  const handleSendEmail = () => {
-    console.log('Sending invoice via email:', displayNo);
-    toast.success(`Invoice ${displayNo} emailed to customer`);
-  };
-
-  const generateAll = () => {
-    console.log('[GST] Generate invoices for all orders', orders.map((o) => o.id));
-    toast.success(`Invoice generated for ${orders.length} orders`);
-  };
-
-  const hsnValue = (item, index) => lineEdits[index]?.hsn ?? item.hsn;
-  const gstValue = (item, index) => {
-    const hsn = hsnValue(item, index);
-    if (MASTER_HSN[hsn] != null) return MASTER_HSN[hsn];
-    return lineEdits[index]?.gstPercent ?? item.gstPercent;
-  };
+  const list = groups[tab];
 
   return (
     <div className="p-6 space-y-6">
@@ -78,305 +123,132 @@ export default function GstInvoicePage() {
         <div>
           <h1 className="text-3xl font-bold mb-2">GST Invoice</h1>
           <p className="text-muted-foreground">
-            Invoices can be generated for every order. For Shopify, invoice number is the Order ID.
+            Myntra and Amazon issue the tax invoice for their orders; open it from here. Shopify and manual orders are invoiced by OMSKing (invoice no. = Order ID for Shopify).
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={handleUploadMasterHSN}>
-            <Upload className="w-4 h-4 mr-2" />
-            Upload Master HSN
-          </Button>
-          <Button variant="outline" onClick={handleEditHSN}>
-            <Edit className="w-4 h-4 mr-2" />
-            {editMode ? 'View Mode' : 'Edit Details'}
-          </Button>
-          <Button onClick={generateAll}>
-            <FileText className="w-4 h-4 mr-2" />
-            Generate for All Orders
-          </Button>
-          <Button variant="outline" onClick={() => toast.success('GST JSON exported for Tally / Busy')}>
-            Export Tally / Busy
-          </Button>
-        </div>
+        <Button variant="outline" onClick={exportRegister}>
+          <Download className="w-4 h-4 mr-2" />
+          Export register (CSV)
+        </Button>
       </div>
 
-      <div className="flex gap-2">
-        <Button size="sm" variant={docTab === 'invoices' ? 'default' : 'outline'} onClick={() => setDocTab('invoices')}>Tax invoices</Button>
-        <Button size="sm" variant={docTab === 'notes' ? 'default' : 'outline'} onClick={() => setDocTab('notes')}>Credit / debit notes</Button>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <KpiCard label="Tax invoices" value={groups.invoiced.length} icon={Receipt} onClick={() => setTab('invoiced')} />
+        <KpiCard label="Taxable value" value={formatINR(Math.round(totals.taxable))} icon={FileText} />
+        <KpiCard label="GST" value={formatINR(Math.round(totals.gst))} icon={FileText} />
+        <KpiCard label="Credit notes needed" value={groups.notes.length} icon={AlertTriangle} onClick={() => setTab('notes')} />
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Supplier</CardTitle>
+          <CardDescription>From Settings → Company. Tax is split from the GST-inclusive selling price using each item's GST %.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm">
+          {company ? (
+            <div className="grid gap-1 sm:grid-cols-3">
+              <div><span className="text-muted-foreground">Name:</span> {company.companyName || '—'}</div>
+              <div><span className="text-muted-foreground">GSTIN:</span> {company.gstin || <span className="text-destructive">not set</span>}</div>
+              <div><span className="text-muted-foreground">City:</span> {company.city || '—'}</div>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">Company details need Settings access. <button type="button" className="text-primary hover:underline" onClick={() => navigate('/settings')}>Open Settings</button></p>
+          )}
+        </CardContent>
+      </Card>
 
-      {docTab === 'notes' && (
+      <div className="flex gap-2 flex-wrap">
+        {TABS.map((item) => (
+          <Button key={item.id} size="sm" variant={tab === item.id ? 'default' : 'outline'} onClick={() => setTab(item.id)}>
+            {item.label} ({groups[item.id].length})
+          </Button>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{TABS.find((item) => item.id === tab).label}</CardTitle>
+          {tab === 'notes' && <CardDescription>These orders were cancelled after the invoice was issued. Issue a credit note — never delete the original invoice. Marketplace orders get the note from the marketplace.</CardDescription>}
+        </CardHeader>
+        <CardContent>
+          {list.length === 0 ? (
+            <EmptyState title="Nothing here" description={tab === 'pending' ? 'Every shipped order has an invoice.' : 'No invoices in this view yet.'} />
+          ) : (
+            <div className="overflow-x-auto">
+              <Table className="min-w-[960px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Invoice No</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Channel</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead className="text-right">Taxable</TableHead>
+                    <TableHead className="text-right">GST</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {list.map(({ order, invoiceNo, tax }) => (
+                    <TableRow key={order.id}>
+                      <TableCell className="font-medium font-mono text-xs">{invoiceNo || '—'}</TableCell>
+                      <TableCell>{order.createdAt ? formatDate(order.createdAt) : '—'}</TableCell>
+                      <TableCell>
+                        <button type="button" className="text-primary hover:underline" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>{order.id}</button>
+                      </TableCell>
+                      <TableCell><Badge variant="outline">{order.channel}</Badge></TableCell>
+                      <TableCell>{order.customer}</TableCell>
+                      <TableCell className="text-right">{formatINR(Math.round(tax.taxable))}</TableCell>
+                      <TableCell className="text-right">{formatINR(Math.round(tax.gst))}</TableCell>
+                      <TableCell className="text-right font-medium">{formatINR(order.total)}</TableCell>
+                      <TableCell>
+                        {(isChannelManaged(order) ? packetIdOf(order) : true) && (
+                          <Button variant="ghost" size="sm" disabled={busy === order.id} onClick={() => openInvoice(order)}>
+                            {isChannelManaged(order) ? `${order.channel} invoice` : invoiceNo ? 'Print' : 'Generate'}
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {tab === 'invoiced' && hsnSummary.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Credit / debit notes</CardTitle>
-            <CardDescription>Cancel or return must issue a note — never delete the original invoice.</CardDescription>
+            <CardTitle>HSN summary</CardTitle>
+            <CardDescription>For GSTR-1 table 12. Lines without HSN need it set on Products.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Note</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Against invoice</TableHead>
-                  <TableHead>Order</TableHead>
-                  <TableHead>Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow>
-                  <TableCell className="font-medium">CN-65215</TableCell>
-                  <TableCell>Credit</TableCell>
-                  <TableCell>INV-65215-LEH</TableCell>
-                  <TableCell>65215-LEH</TableCell>
-                  <TableCell>{formatINR(10079)}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell className="font-medium">DN-65208</TableCell>
-                  <TableCell>Debit</TableCell>
-                  <TableCell>INV-65208-LEH</TableCell>
-                  <TableCell>65208-LEH</TableCell>
-                  <TableCell>{formatINR(120)}</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {docTab === 'invoices' && (
-        <>
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Invoices</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Invoice No</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Order ID</TableHead>
-                <TableHead>Channel</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {invoices.slice(0, 10).map((invoice) => (
-                <TableRow 
-                  key={invoice.invoiceNo}
-                  className={selectedInvoice.invoiceNo === invoice.invoiceNo ? 'bg-primary/5' : ''}
-                  onClick={() => setSelectedInvoice(invoice)}
-                >
-                  <TableCell className="font-medium">{invoiceNumber(invoice)}</TableCell>
-                  <TableCell>{formatDate(invoice.invoiceDate)}</TableCell>
-                  <TableCell>{invoice.orderId}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{orderChannel[invoice.orderId] || '—'}</Badge>
-                  </TableCell>
-                  <TableCell>{invoice.customerName}</TableCell>
-                  <TableCell>{formatINR(invoice.grandTotal)}</TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm">View</Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      {/* Invoice Preview */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Invoice Preview - {displayNo}</CardTitle>
-          <CardDescription>
-            {orderChannel[selectedInvoice.orderId] === 'Shopify'
-              ? 'Shopify rule: Invoice Number = Order ID.'
-              : 'GST invoice with HSN-based tax. GST % is taken from the Master HSN list.'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="border rounded-lg p-6 bg-white dark:bg-gray-900">
-            {/* Invoice Header */}
-            <div className="grid grid-cols-3 gap-6 mb-6 pb-6 border-b">
-              <div>
-                <h3 className="font-bold text-lg mb-2">Supplier</h3>
-                <p className="font-medium">Leheriya Creations</p>
-                <p className="text-sm text-muted-foreground">GSTIN: 27AAPFU0939G1ZV</p>
-                <p className="text-sm text-muted-foreground">PAN: AAPFU0939G</p>
-                <p className="text-sm text-muted-foreground">Jaipur, Rajasthan</p>
-              </div>
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-primary mb-2">TAX INVOICE</h2>
-                <p className="text-sm text-muted-foreground">{displayNo}</p>
-                <p className="text-sm text-muted-foreground">Date: {formatDate(selectedInvoice.invoiceDate)}</p>
-              </div>
-              <div className="text-right">
-                <h3 className="font-bold text-lg mb-2">Bill To / Ship To</h3>
-                <p className="font-medium">{selectedInvoice.customerName}</p>
-                <p className="text-sm text-muted-foreground">{selectedInvoice.customerAddress}</p>
-                <p className="text-sm text-muted-foreground">
-                  {selectedInvoice.customerAddress?.includes('Mumbai') ? 'B2B · GSTIN 27AAPFU0000Z1Z' : 'B2C · no GSTIN'}
-                </p>
-                <p className="text-sm text-muted-foreground">State: Rajasthan</p>
-                <p className="text-sm text-muted-foreground">Code: 27</p>
-              </div>
-            </div>
-
-            {/* Invoice Items Table */}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Description</TableHead>
                   <TableHead>HSN</TableHead>
                   <TableHead>GST %</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Unit Price</TableHead>
-                  <TableHead className="text-right">Taxable Value</TableHead>
-                  <TableHead className="text-right">CGST</TableHead>
-                  <TableHead className="text-right">SGST</TableHead>
-                  <TableHead className="text-right">IGST</TableHead>
-                  <TableHead className="text-right">Discount</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-right">Taxable</TableHead>
+                  <TableHead className="text-right">GST</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {selectedInvoice.items.map((item, index) => (
-                  <TableRow key={index}>
-                    <TableCell>
-                      <div className="font-medium">{item.product}</div>
-                      <div className="text-xs text-muted-foreground">{item.sku}</div>
-                    </TableCell>
-                    <TableCell>
-                      {editMode ? (
-                        <input
-                          type="text"
-                          value={hsnValue(item, index)}
-                          onChange={(e) =>
-                            setLineEdits((prev) => ({
-                              ...prev,
-                              [index]: { ...prev[index], hsn: e.target.value },
-                            }))
-                          }
-                          className="w-20 px-2 py-1 border rounded text-sm"
-                        />
-                      ) : (
-                        item.hsn
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {editMode ? (
-                        <input
-                          type="number"
-                          value={gstValue(item, index)}
-                          onChange={(e) =>
-                            setLineEdits((prev) => ({
-                              ...prev,
-                              [index]: { ...prev[index], gstPercent: Number(e.target.value) },
-                            }))
-                          }
-                          className="w-16 px-2 py-1 border rounded text-sm"
-                        />
-                      ) : (
-                        `${gstValue(item, index)}%`
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">{item.qty}</TableCell>
-                    <TableCell className="text-right">{formatINR(item.unitPrice)}</TableCell>
-                    <TableCell className="text-right">{formatINR(item.taxableValue)}</TableCell>
-                    <TableCell className="text-right">{formatINR(item.cgst)}</TableCell>
-                    <TableCell className="text-right">{formatINR(item.sgst)}</TableCell>
-                    <TableCell className="text-right">{formatINR(item.igst)}</TableCell>
-                    <TableCell className="text-right">{formatINR(item.discount)}</TableCell>
-                    <TableCell className="text-right font-medium">{formatINR(item.total)}</TableCell>
+                {hsnSummary.map((row) => (
+                  <TableRow key={`${row.hsn}-${row.rate}`}>
+                    <TableCell className="font-mono">{row.hsn}</TableCell>
+                    <TableCell>{row.rate != null ? `${row.rate}%` : '—'}</TableCell>
+                    <TableCell className="text-right">{row.qty}</TableCell>
+                    <TableCell className="text-right">{formatINR(Math.round(row.taxable))}</TableCell>
+                    <TableCell className="text-right">{formatINR(Math.round(row.gst))}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-
-            {/* Invoice Totals */}
-            <div className="mt-6 flex justify-end">
-              <div className="w-64 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total Taxable Value:</span>
-                  <span className="font-medium">{formatINR(selectedInvoice.totalTaxableValue)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total CGST:</span>
-                  <span className="font-medium">{formatINR(selectedInvoice.totalCGST)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total SGST:</span>
-                  <span className="font-medium">{formatINR(selectedInvoice.totalSGST)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total IGST:</span>
-                  <span className="font-medium">{formatINR(selectedInvoice.totalIGST)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total Discount:</span>
-                  <span className="font-medium">{formatINR(selectedInvoice.totalDiscount)}</span>
-                </div>
-                <div className="flex justify-between text-lg font-bold border-t pt-2">
-                  <span>Grand Total:</span>
-                  <span>{formatINR(selectedInvoice.grandTotal)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Amount in Words */}
-            <div className="mt-6 p-4 bg-muted/50 rounded">
-              <p className="text-sm">
-                <span className="font-medium">Amount in words:</span> {selectedInvoice.totalInWords}
-              </p>
-            </div>
-
-            {/* QR Code Placeholder */}
-            <div className="mt-6 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="p-4 bg-white border rounded-lg">
-                  <QrCode className="w-16 h-16 text-gray-800" />
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  <p>Scan for GST compliance</p>
-                  <p className="text-xs">e-Invoice enabled</p>
-                </div>
-              </div>
-              <div className="text-right text-sm text-muted-foreground">
-                <div className="mb-2 flex justify-end">
-                  <BrandLogo className="h-10 w-10" />
-                </div>
-                <p>Generated by OMSKing</p>
-                <p>Leheriya Creations Pvt Ltd</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex gap-2 mt-6">
-            <Button variant="outline" onClick={handleDownloadPDF}>
-              <Download className="w-4 h-4 mr-2" />
-              Download PDF
-            </Button>
-            <Button variant="outline" onClick={handlePrint}>
-              <Printer className="w-4 h-4 mr-2" />
-              Print
-            </Button>
-            <Button variant="outline" onClick={handleSendWhatsApp}>
-              <Send className="w-4 h-4 mr-2" />
-              Send via WhatsApp
-            </Button>
-            <Button variant="outline" onClick={handleSendEmail}>
-              <FileText className="w-4 h-4 mr-2" />
-              Email to Customer
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-        </>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

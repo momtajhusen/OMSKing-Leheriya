@@ -1,103 +1,189 @@
-import { auditLogs } from '../../mocks';
-import { formatDate } from '../../utils/format';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
+import { useEffect, useMemo, useState } from 'react';
+import api, { apiError } from '../../lib/api';
+import { formatDateTime } from '../../utils/format';
+import { downloadCsv } from '../../lib/orderMetrics';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import { FileText, Search, Download, Filter } from 'lucide-react';
+import PageLoader from '../../components/ui/PageLoader';
+import EmptyState from '../../components/ui/EmptyState';
+import ProductThumb from '../../components/ui/ProductThumb';
+import { Search, Download } from 'lucide-react';
+
+function showValue(value) {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function changeText(changes) {
+  return (changes || []).map((change) => `${change.field}: ${showValue(change.before)} → ${showValue(change.after)}`).join('; ');
+}
 
 export default function AuditLogsPage() {
+  const [rows, setRows] = useState(null);
+  const [ledger, setLedger] = useState([]);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/audit-logs', { params: { limit: 300 } }),
+      api.get('/inventory/ledger', { params: { limit: 300 } }),
+    ]).then(([auditRes, ledgerRes]) => {
+      setRows(auditRes.data.data || []);
+      setLedger(ledgerRes.data.data || []);
+    }).catch((err) => {
+      setError(apiError(err, 'Could not load the audit log'));
+      setRows([]);
+    });
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows || [];
+    return (rows || []).filter((row) => [row.actorName, row.actorRole, row.action, row.resourceDisplay, changeText(row.changes)]
+      .some((value) => String(value || '').toLowerCase().includes(q)));
+  }, [rows, query]);
+
+  const filteredLedger = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return ledger;
+    return ledger.filter((row) => [row.sku, row.productName, row.type, row.reason, row.referenceId, row.performedBy, row.warehouse]
+      .some((value) => String(value || '').toLowerCase().includes(q)));
+  }, [ledger, query]);
+
+  const exportRows = () => downloadCsv(`audit-${new Date().toISOString().slice(0, 10)}.csv`,
+    ['When', 'Who', 'Role', 'Action', 'Record', 'Changes'],
+    filtered.map((row) => [row.at, row.actorName || 'System', row.actorRole, row.action, row.resourceDisplay, changeText(row.changes)]));
+
+  if (rows === null) return <PageLoader label="Loading audit log..." />;
+
   return (
     <div className="p-6 space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold mb-2">Audit Logs</h1>
-          <p className="text-muted-foreground">Who changed what inside this tenant. Platform Admin has a separate audit on the SaaS side.</p>
+          <p className="text-muted-foreground">Who changed company, tax, users, roles, channels, catalog and order status, with the value before and after. The log is append-only.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline">
-            <Filter className="w-4 h-4 mr-2" />
-            Filter
-          </Button>
-          <Button variant="outline">
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </Button>
-        </div>
+        <Button variant="outline" onClick={exportRows} disabled={!filtered.length}>
+          <Download className="w-4 h-4 mr-2" />
+          Export
+        </Button>
       </div>
 
-      {/* Search */}
+      {error && <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+
       <Card>
         <CardContent className="pt-6">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search logs by user, action, or IP address..."
-              className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20 focus:border-[hsl(var(--color-primary-blue))] transition-all"
-              style={{
-                backgroundColor: 'hsl(var(--color-card-bg))',
-                color: 'hsl(var(--color-foreground))'
-              }}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by person, action, order or field..."
+              className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm"
             />
           </div>
         </CardContent>
       </Card>
 
-      {/* Audit Logs Table */}
       <Card>
         <CardHeader>
-          <CardTitle>System Activity Log ({auditLogs.length})</CardTitle>
+          <CardTitle>Record changes ({filtered.length})</CardTitle>
+          <CardDescription>Latest 300 changes. Secrets are not stored.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Timestamp</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>IP Address</TableHead>
-                <TableHead>Before</TableHead>
-                <TableHead>After</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {auditLogs.slice(0, 20).map(log => (
-                <TableRow key={log.id}>
-                  <TableCell className="font-medium">{formatDate(log.timestamp)}</TableCell>
-                  <TableCell>
-                    <div>
-                      <div className="font-medium">{log.userName}</div>
-                      <div className="text-xs text-muted-foreground">{log.userId}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{log.action}</Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-sm">{log.ipAddress}</TableCell>
-                  <TableCell>
-                    {log.before ? (
-                      <pre className="text-xs bg-muted p-2 rounded overflow-hidden max-w-xs">
-                        {JSON.stringify(log.before, null, 2)}
-                      </pre>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {log.after ? (
-                      <pre className="text-xs bg-muted p-2 rounded overflow-hidden max-w-xs">
-                        {JSON.stringify(log.after, null, 2)}
-                      </pre>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          {filtered.length === 0 ? (
+            <EmptyState title="No record changes yet" description="Saving company, tax, a user, a role, a channel or an order status writes a before/after row here." />
+          ) : (
+            <div className="overflow-x-auto">
+              <Table className="min-w-[960px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>When</TableHead>
+                    <TableHead>Who</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Record</TableHead>
+                    <TableHead>Before → after</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell className="whitespace-nowrap text-sm">{formatDateTime(row.at)}</TableCell>
+                      <TableCell>
+                        <div>{row.actorName || 'System'}</div>
+                        <div className="text-xs text-muted-foreground">{row.actorRole}</div>
+                      </TableCell>
+                      <TableCell><Badge variant="outline">{String(row.action || '').replace(/_/g, ' ')}</Badge></TableCell>
+                      <TableCell>
+                        <div>{row.resourceDisplay || '—'}</div>
+                        <div className="text-xs text-muted-foreground">{row.resourceType}</div>
+                      </TableCell>
+                      <TableCell className="max-w-md text-xs">{changeText(row.changes) || '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Stock ledger ({filteredLedger.length})</CardTitle>
+          <CardDescription>Every stock movement with the balance after. This ledger stays separate from the record log.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {filteredLedger.length === 0 ? (
+            <EmptyState title="No stock movements yet" description="Stock-in, adjustments, reservations and restocks show here." />
+          ) : (
+            <div className="overflow-x-auto">
+              <Table className="min-w-[960px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>When</TableHead>
+                    <TableHead>By</TableHead>
+                    <TableHead>Movement</TableHead>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Warehouse</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">After</TableHead>
+                    <TableHead>Reference</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredLedger.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell className="whitespace-nowrap text-sm">{formatDateTime(row.at)}</TableCell>
+                      <TableCell>{row.performedBy || 'System'}</TableCell>
+                      <TableCell><Badge variant="outline">{String(row.type || '').replace(/_/g, ' ')}</Badge></TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <ProductThumb name={row.productName || row.sku} src={row.imageUrl} />
+                          <div>
+                            <div className="font-mono text-xs">{row.sku}</div>
+                            <div className="text-xs text-muted-foreground">{row.productName}</div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>{row.warehouse}</TableCell>
+                      <TableCell className={`text-right font-medium ${row.qty < 0 ? 'text-destructive' : 'text-green-600'}`}>{row.qty > 0 ? `+${row.qty}` : row.qty}</TableCell>
+                      <TableCell className="text-right">{row.after} <span className="text-xs text-muted-foreground">({row.availableAfter} avail.)</span></TableCell>
+                      <TableCell className="text-xs">
+                        <div>{row.referenceId || '—'}</div>
+                        <div className="text-muted-foreground">{row.reason}</div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

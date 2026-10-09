@@ -151,17 +151,19 @@ export default function WarehousesPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Channel location</TableHead>
+                <TableHead>Channel</TableHead>
+                <TableHead>Location</TableHead>
+                <TableHead>External id</TableHead>
                 <TableHead>Warehouse</TableHead>
-                <TableHead>Used by</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {maps.map((loc) => (
                 <TableRow key={loc.id}>
-                  <TableCell>{loc.label || loc.externalLocationId}</TableCell>
+                  <TableCell className="capitalize">{loc.channel}</TableCell>
+                  <TableCell>{loc.label || '—'}</TableCell>
+                  <TableCell className="font-mono text-xs">{loc.externalLocationId}</TableCell>
                   <TableCell><Badge variant="outline">{loc.warehouse}</Badge></TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{loc.usedBy}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

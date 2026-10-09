@@ -2,9 +2,23 @@ const MasterSku = require('../models/MasterSku');
 const SkuMapping = require('../models/SkuMapping');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
-const { generateMasterCode, normalizeSkuCode } = require('../services/skuIdentity.service');
+const { generateMasterCode, normalizeSkuCode, assertHsnCode } = require('../services/skuIdentity.service');
 const { mapMaster } = require('../services/catalogMapping.service');
 const { merchantTenant } = require('./products.controller');
+const { recordFromReq } = require('../services/auditLog.service');
+
+function skuSnap(sku) {
+  return {
+    code: sku.code,
+    name: sku.name,
+    barcode: sku.barcode || '',
+    hsnCode: sku.hsnCode || '',
+    gstRatePercent: sku.gstRatePercent,
+    mrp: sku.mrp,
+    sellingPrice: sku.sellingPrice,
+    status: sku.status,
+  };
+}
 
 async function listMasterSkus(req, res) {
   const tenantId = merchantTenant(req);
@@ -50,10 +64,19 @@ async function createMasterSku(req, res) {
     costPrice: req.body.costPrice || 0,
     mrp: req.body.mrp || 0,
     sellingPrice: req.body.sellingPrice || 0,
-    hsnCode: req.body.hsnCode || '',
+    hsnCode: assertHsnCode(req.body.hsnCode),
     gstRatePercent: req.body.gstRatePercent ?? null,
     status: 'active',
     createdBy: req.user.id,
+  });
+  await recordFromReq(req, {
+    tenantId,
+    action: 'sku.created',
+    resourceType: 'master_skus',
+    resourceId: sku._id,
+    resourceDisplay: sku.code,
+    before: null,
+    after: skuSnap(sku),
   });
   return successResponse(res, mapMaster(sku, []), 'Master SKU created', 201);
 }
@@ -62,19 +85,30 @@ async function updateMasterSku(req, res) {
   const tenantId = merchantTenant(req);
   const sku = await MasterSku.findOne({ _id: req.params.id, tenantId }).populate('productId').setOptions({ skipTenantFilter: true });
   if (!sku) throw new HttpError(404, 'Master SKU not found');
+  const before = skuSnap(sku);
   if (req.body.code && normalizeSkuCode(req.body.code) !== sku.code) {
     if (sku.codeLocked) throw new HttpError(400, 'Master SKU code is locked after first mapping');
     sku.code = await generateMasterCode(tenantId, { requested: req.body.code });
   }
-  ['name', 'barcode', 'hsnCode', 'status'].forEach((key) => {
+  ['name', 'barcode', 'status'].forEach((key) => {
     if (req.body[key] != null) sku[key] = req.body[key];
   });
+  if (req.body.hsnCode != null) sku.hsnCode = assertHsnCode(req.body.hsnCode);
   ['costPrice', 'mrp', 'sellingPrice', 'weightKg', 'gstRatePercent'].forEach((key) => {
     if (req.body[key] != null) sku[key] = req.body[key];
   });
   if (req.body.variantAttributes) sku.variantAttributes = req.body.variantAttributes;
   sku.updatedBy = req.user.id;
   await sku.save();
+  await recordFromReq(req, {
+    tenantId,
+    action: 'sku.updated',
+    resourceType: 'master_skus',
+    resourceId: sku._id,
+    resourceDisplay: sku.code,
+    before,
+    after: skuSnap(sku),
+  });
   const maps = await SkuMapping.find({ tenantId, masterSkuId: sku._id }).setOptions({ skipTenantFilter: true });
   return successResponse(res, mapMaster(sku, maps), 'Master SKU updated');
 }

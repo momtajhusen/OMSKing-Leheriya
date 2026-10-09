@@ -1,24 +1,24 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import { ArrowRight, Download, Upload } from 'lucide-react';
+import { ArrowRight, Download, RefreshCw, Upload } from 'lucide-react';
+import ProductThumb from '../../components/ui/ProductThumb';
 import api, { apiError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
 
 const STEPS = [
-  { id: 'shopify', name: 'Shopify', hint: 'Import first. Each new row creates a Master SKU (same channelProductId stays one product).' },
-  { id: 'myntra', name: 'Myntra', hint: 'Second. Same seller SKU or barcode auto-maps. No match → Unmapped.' },
-  { id: 'amazon', name: 'Amazon', hint: 'Last. Unmatched rows stay Unmapped until you Map or Create as new.' },
+  { id: 'shopify', name: 'Shopify' },
+  { id: 'myntra', name: 'Myntra' },
+  { id: 'amazon', name: 'Amazon' },
 ];
 
 const SAMPLE_CSV = `channelSkuCode,channelVariantId,channelProductId,title,barcode,price,hsnCode,color,size
-LHK-BL-001,VAR-BL-001,PROD-KURTA,Leheriya Kurta,8901000000001,1899,6204,Blue,M
-LHK-BL-002,VAR-BL-002,PROD-KURTA,Leheriya Kurta,8901000000008,1899,6204,Blue,L
-NEW-DUP-009,VAR-DUP-009,PROD-DUP,Festival Dupatta,,799,6214,Red,`;
+SKU-001,VAR-001,PROD-001,Product title,8900000000001,1999,6204,Blue,M
+SKU-002,VAR-002,PROD-001,Product title,8900000000002,1999,6204,Blue,L`;
 
 function downloadTemplate() {
   const blob = new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8' });
@@ -33,16 +33,49 @@ function downloadTemplate() {
 export default function ProductImportPage() {
   const navigate = useNavigate();
   const { canCatalogEdit } = usePermissions();
+  const [masterChannel, setMasterChannel] = useState('');
   const [done, setDone] = useState({});
   const [summary, setSummary] = useState(null);
   const [results, setResults] = useState([]);
   const [busy, setBusy] = useState('');
   const fileRefs = useRef({});
 
+  useEffect(() => {
+    api.get('/sku-mappings/import-order')
+      .then(({ data }) => setMasterChannel(data.data?.masterChannel || 'myntra'))
+      .catch(() => setMasterChannel('myntra'));
+  }, []);
+
+  const hintFor = (id) => {
+    if (id === 'shopify') {
+      return 'First. Each new row creates a Master SKU. The same channelProductId stays one product.';
+    }
+    if (id === 'myntra') {
+      return masterChannel === 'shopify'
+        ? 'Same seller SKU or barcode auto-maps onto the Shopify master. No match stays Unmapped.'
+        : 'Shopify is not the catalog yet, so a new Myntra row creates a Master SKU. A matching SKU or barcode stays one master.';
+    }
+    return 'Last. A matching SKU or barcode auto-maps. No match stays Unmapped and does not create stock.';
+  };
+
   const applyResult = (channel, data) => {
     setDone((prev) => ({ ...prev, [channel]: true }));
     setSummary(data);
     setResults(data?.rows || []);
+  };
+
+  const pullLive = async (channel) => {
+    setBusy(`pull-${channel}`);
+    try {
+      const { data } = await api.post('/sku-mappings/pull', { channel });
+      applyResult(channel, data.data);
+      const row = data.data || {};
+      toast.success(`${channel}: ${row.created || 0} created, ${row.autoMapped || 0} auto-mapped, ${row.unmapped || 0} unmapped`);
+    } catch (err) {
+      toast.error(apiError(err, 'Catalog pull failed'));
+    } finally {
+      setBusy('');
+    }
   };
 
   const runFile = async (channel, file) => {
@@ -59,26 +92,14 @@ export default function ProductImportPage() {
     }
   };
 
-  const runSample = async (channel) => {
-    setBusy(channel);
-    try {
-      const { data } = await api.post('/sku-mappings/import', { channel, csv: SAMPLE_CSV });
-      applyResult(channel, data.data);
-      toast.success(`${channel} sample imported`);
-    } catch (err) {
-      toast.error(apiError(err, 'Import failed'));
-    } finally {
-      setBusy('');
-    }
-  };
-
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold mb-2">Bulk product import</h1>
           <p className="text-muted-foreground">
-            Order is locked: Shopify → Myntra → Amazon. Live marketplace pull is later — CSV is the catalog source for now.
+            Shopify first, then Myntra, then Amazon. Pull live catalog or upload CSV. The same seller SKU or barcode stays one Master SKU. Amazon never creates a new master. No import creates stock.
+            {masterChannel === 'myntra' ? ' Shopify is not connected, so Myntra rows can create the master.' : ' Shopify owns the catalog, so Myntra and Amazon only auto-map.'}
           </p>
         </div>
         <div className="flex gap-2">
@@ -103,7 +124,7 @@ export default function ProductImportPage() {
                 {index + 1}. {step.name}
                 {done[step.id] && <Badge variant="outline">Imported</Badge>}
               </CardTitle>
-              <CardDescription>{step.hint}</CardDescription>
+              <CardDescription>{hintFor(step.id)}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               <input
@@ -120,6 +141,15 @@ export default function ProductImportPage() {
               />
               <Button
                 className="w-full"
+                variant="outline"
+                disabled={!canCatalogEdit || Boolean(busy)}
+                onClick={() => pullLive(step.id)}
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                {busy === `pull-${step.id}` ? 'Pulling…' : 'Pull live catalog'}
+              </Button>
+              <Button
+                className="w-full"
                 variant={done[step.id] ? 'outline' : 'default'}
                 disabled={!canCatalogEdit || Boolean(busy)}
                 onClick={() => fileRefs.current[step.id]?.click()}
@@ -127,11 +157,6 @@ export default function ProductImportPage() {
                 <Upload className="w-4 h-4 mr-2" />
                 {busy === step.id ? 'Importing…' : 'Upload CSV'}
               </Button>
-              {canCatalogEdit && (
-                <Button className="w-full" variant="ghost" disabled={Boolean(busy)} onClick={() => runSample(step.id)}>
-                  Run sample rows
-                </Button>
-              )}
             </CardContent>
           </Card>
         ))}
@@ -167,7 +192,7 @@ export default function ProductImportPage() {
         </CardHeader>
         <CardContent>
           {results.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Upload a CSV or run sample rows.</p>
+            <p className="text-sm text-muted-foreground">Upload a CSV to import. Nothing is written until you do.</p>
           ) : (
             <Table>
               <TableHeader>
@@ -182,7 +207,12 @@ export default function ProductImportPage() {
               <TableBody>
                 {rowsSafe(results).map((row, i) => (
                   <TableRow key={`${row.channel}-${row.sku}-${i}`}>
-                    <TableCell className="font-medium">{row.sku}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <ProductThumb name={row.title || row.sku} src={row.image} />
+                        {row.sku}
+                      </div>
+                    </TableCell>
                     <TableCell>{row.title}</TableCell>
                     <TableCell>{row.channel}</TableCell>
                     <TableCell className="font-mono text-xs">{row.masterSku || '—'}</TableCell>

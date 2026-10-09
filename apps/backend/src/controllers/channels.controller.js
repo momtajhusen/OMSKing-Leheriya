@@ -5,6 +5,20 @@ const {
   getConnection, upsertConnection, credsOf, toDto, recordTest,
 } = require('../services/channelConnection.service');
 const { pingChannel } = require('../services/channelPing.service');
+const shopify = require('../adapters/shopify');
+const { recordFromReq } = require('../services/auditLog.service');
+
+function channelSnap(dto) {
+  if (!dto) return null;
+  const creds = dto.credentials || {};
+  return {
+    status: dto.status,
+    warehouseCode: dto.warehouseCode || '',
+    importOrdersFrom: dto.importOrdersFrom || null,
+    credentialFields: Object.keys(creds).filter((key) => String(creds[key] || '').trim()).sort(),
+    hasSecrets: Boolean(dto.hasSecrets),
+  };
+}
 
 function merchantTenant(req) {
   const tenantId = sessionTenantId(req);
@@ -25,7 +39,21 @@ async function saveConnection(req, res) {
   if (!['shopify', 'amazon', 'myntra', 'flipkart', 'meesho', 'ajio', 'nykaa'].includes(channel)) {
     throw new HttpError(400, 'Unknown channel');
   }
+  const existing = await getConnection(tenantId, channel);
+  const before = channelSnap(toDto(existing));
   const row = await upsertConnection(tenantId, req.user.id, channel, req.body);
+  const after = channelSnap(toDto(row));
+  const touchedSecret = Object.entries(req.body?.credentials || {}).some(([, value]) => String(value || '').trim());
+  after.secretsUpdated = touchedSecret;
+  await recordFromReq(req, {
+    tenantId,
+    action: 'channel.updated',
+    resourceType: 'channels',
+    resourceId: row._id,
+    resourceDisplay: channel,
+    before: before ? { ...before, secretsUpdated: false } : null,
+    after,
+  });
   return successResponse(res, toDto(row), 'Channel saved');
 }
 
@@ -40,8 +68,31 @@ async function testConnection(req, res) {
   } catch (err) {
     result = { ok: false, message: err.message || 'Network error' };
   }
+  const before = channelSnap(toDto(row));
   await recordTest(row, result);
+  await recordFromReq(req, {
+    tenantId,
+    action: 'channel.tested',
+    resourceType: 'channels',
+    resourceId: row._id,
+    resourceDisplay: channel,
+    before,
+    after: channelSnap(toDto(row)),
+  });
   return successResponse(res, { ...toDto(row), ok: result.ok, incomplete: Boolean(result.incomplete) }, result.message);
 }
 
-module.exports = { listConnections, saveConnection, testConnection };
+async function listShopifyVendors(req, res) {
+  const tenantId = merchantTenant(req);
+  const row = await getConnection(tenantId, 'shopify');
+  if (!row) throw new HttpError(400, 'Save the Shopify shop URL and Admin API token in Settings → Channel Connections first');
+  let names;
+  try {
+    names = await shopify.listProductVendors(credsOf(row));
+  } catch (err) {
+    throw new HttpError(err.statusCode || 502, err.message || 'Could not fetch Shopify vendors');
+  }
+  return successResponse(res, names, 'Shopify vendors');
+}
+
+module.exports = { listConnections, saveConnection, testConnection, listShopifyVendors };

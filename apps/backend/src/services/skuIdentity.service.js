@@ -26,7 +26,8 @@ async function skuPrefix(tenantId) {
 
 async function generateMasterCode(tenantId, { productName, variantAttributes, requested } = {}) {
   if (requested) {
-    const code = slugPart(requested);
+    const code = normalizeSkuCode(requested).slice(0, 64);
+    if (!code) throw new HttpError(400, 'Master SKU code is empty');
     const clash = await MasterSku.findOne({ tenantId, code }).setOptions({ skipTenantFilter: true });
     if (clash) throw new HttpError(409, `Master SKU ${code} already exists`);
     return code;
@@ -56,10 +57,18 @@ function normalizeChannel(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function assertHsnCode(value) {
+  const hsn = String(value == null ? '' : value).trim();
+  if (!hsn) return '';
+  if (!/^\d{4,8}$/.test(hsn)) throw new HttpError(400, 'HSN must be 4–8 digits');
+  return hsn;
+}
+
 module.exports = {
   generateMasterCode,
   normalizeSkuCode,
   normalizeBarcode,
   normalizeChannel,
   slugPart,
+  assertHsnCode,
 };

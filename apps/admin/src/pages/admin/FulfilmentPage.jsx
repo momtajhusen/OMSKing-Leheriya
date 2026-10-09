@@ -1,76 +1,105 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { orders as orderSeed, vendors } from '../../mocks';
+import useVendorStore, { vendorReportLabel } from '../../stores/vendorStore';
+import useOrderStore from '../../stores/orderStore';
+import { isMixedFulfilment } from '../../lib/orderSubOrders';
 import { formatINR, statusBadgeVariant } from '../../utils/format';
-import { useSimulatedLoad } from '../../hooks/useSimulatedLoad';
+import { isChannelManaged } from '../../lib/channelOrders';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
+import ProductThumb, { ItemThumbs } from '../../components/ui/ProductThumb';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import Modal from '../../components/ui/Modal';
-import { Truck, Package, Store, CheckCircle, Bell } from 'lucide-react';
-
-const COMPANY_NOTIFY_NUMBER = '+91 98765 00000';
-
-function vendorLineId(orderId, index) {
-  const base = String(orderId).replace(/-LEH$/, '');
-  return `${base}-${index + 1}`;
-}
+import { Truck, Package, Store, CheckCircle, Bell, List } from 'lucide-react';
 
 function expandVendorLines(orderList) {
   return orderList.flatMap((order) => {
-    const lines = [];
-    let seq = 0;
-    order.items.forEach((item) => {
-      const qty = item.qty || 1;
-      for (let i = 0; i < qty; i += 1) {
-        lines.push({
-          key: `${order.id}-${item.sku}-${seq}`,
-          vendorOrderId: vendorLineId(order.id, seq),
-          masterOrderId: order.id,
-          customer: order.customer,
-          channel: order.channel,
-          status: order.status,
-          product: item.name,
-          sku: item.sku,
-          shopifyVendor: order.shopifyVendor || order.assignedVendor || '',
-          shopifyCost: item.cost ?? Math.round((item.price || 0) * 0.5),
-          qty: 1,
-          split: qty > 1,
-        });
-        seq += 1;
-      }
+    const qtyBySku = {};
+    (order.items || []).forEach((item) => {
+      qtyBySku[item.sku] = (qtyBySku[item.sku] || 0) + (item.qty || 1);
     });
-    return lines;
+    return (order.subOrders || []).map((sub) => ({
+      key: sub.id,
+      vendorOrderId: sub.id,
+      masterOrderId: order.id,
+      customer: order.customer,
+      channel: order.channel,
+      status: sub.status || order.status,
+      product: sub.title,
+      sku: sub.sku,
+      imageUrl: sub.imageUrl,
+      shopifyVendor: sub.assignedVendor || order.shopifyVendor || order.assignedVendor || '',
+      shopifyCost: order.items.find((item) => item.sku === sub.sku)?.cost ?? null,
+      assignedVendor: sub.assignedVendor || '',
+      vendorStatus: sub.vendorStatus || '',
+      qty: 1,
+      split: (qtyBySku[sub.sku] || 1) > 1,
+      address: sub.address || order.address,
+    }));
   });
 }
 
 export default function FulfilmentPage() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('available');
-  const [orderList, setOrderList] = useState(orderSeed);
+  const orderList = useOrderStore((s) => s.orders);
+  const setOrderStatus = useOrderStore((s) => s.setStatus);
+  const assignSubOrder = useOrderStore((s) => s.assignSubOrder);
+  const vendorUpdate = useOrderStore((s) => s.vendorUpdate);
+  const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const [assignments, setAssignments] = useState({});
   const [busyKey, setBusyKey] = useState('');
   const [holdOrder, setHoldOrder] = useState(null);
   const [holdVendor, setHoldVendor] = useState('');
   const [rejectLine, setRejectLine] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
-  const loading = useSimulatedLoad(activeTab);
+  const autoAssign = useVendorStore((s) => s.autoAssign);
+  const allVendors = useVendorStore((s) => s.vendors);
+  const loadVendors = useVendorStore((s) => s.load);
+  const activeVendors = useMemo(() => allVendors.filter((vendor) => !vendor.removed && vendor.status === 'Active'), [allVendors]);
+  const loading = !useOrderStore((s) => s.loaded);
+
+  useEffect(() => {
+    hydrateFromApi();
+    loadVendors();
+  }, [hydrateFromApi, loadVendors]);
 
   const openStatuses = ['New', 'Pending', 'Processing', 'Packed', 'Ready to Ship'];
-  const openOrders = orderList.filter((o) => openStatuses.includes(o.status));
-  const directShipOrders = openOrders.filter((o) => o.fulfilmentSource === 'Offline');
-  const vendorRoutedOrders = openOrders.filter((o) => o.fulfilmentSource === 'Virtual');
-  const onHoldOrders = orderList.filter((o) => o.status === 'Unfulfillable');
+  const openOrders = useMemo(() => orderList.filter((o) => openStatuses.includes(o.status)), [orderList]);
+  const directShipOrders = openOrders.filter((o) => !isMixedFulfilment(o) && o.fulfilmentSource === 'Offline');
+  const vendorRoutedOrders = openOrders.filter((o) => !isMixedFulfilment(o) && o.fulfilmentSource === 'Virtual');
+  const onHoldOrders = orderList.filter((o) => (
+    o.status === 'Unfulfillable'
+    || ((isMixedFulfilment(o) || o.fulfilmentSource === 'Mixed') && openStatuses.includes(o.status))
+  ));
   const vendorLines = useMemo(() => expandVendorLines(vendorRoutedOrders), [vendorRoutedOrders]);
+  const activeKey = activeVendors.map((vendor) => vendor.name).join('|');
+
+  useEffect(() => {
+    if (!autoAssign) return;
+    useOrderStore.getState().orders.forEach((order) => {
+      if (order.fulfilmentSource !== 'Virtual') return;
+      (order.subOrders || []).forEach((sub) => {
+        if (sub.assignedVendor) return;
+        const name = vendorReportLabel(order.shopifyVendor);
+        if (name === 'Unknown vendor') return;
+        const match = activeVendors.find((vendor) => vendor.name === name);
+        if (!match) return;
+        assignSubOrder(order.id, sub.id, { assignedVendor: match.name });
+      });
+    });
+  }, [autoAssign, activeKey, assignSubOrder, activeVendors]);
 
   const getAssignment = (line) =>
     assignments[line.key] || {
       vendor: line.shopifyVendor,
-      price: String(line.shopifyCost),
+      price: line.shopifyCost != null ? String(line.shopifyCost) : '',
     };
 
   const updateAssignment = (key, field, value) => {
@@ -84,54 +113,78 @@ export default function FulfilmentPage() {
     }));
   };
 
-  const packAndShip = (order) => {
+  const packAndShip = async (order) => {
+    if (isChannelManaged(order)) {
+      toast.error(`${order.id} is a ${order.channel} order. Pack and mark it ready in the ${order.channel} seller panel.`);
+      return;
+    }
     setBusyKey(order.id);
-    setTimeout(() => {
-      setOrderList((prev) => prev.map((item) => (
-        item.id === order.id ? { ...item, status: 'Ready to Ship' } : item
-      )));
-      setBusyKey('');
-      toast.success(`${order.id} packed from WH-001 Offline`);
-    }, 500);
+    const next = await setOrderStatus(order.id, 'Ready to Ship');
+    setBusyKey('');
+    if (next?.error) toast.error(next.error);
+    else toast.success(`${order.id} packed from WH-001 Offline`);
   };
 
-  const assignVendor = (line) => {
+  const assignVendor = async (line) => {
     const current = getAssignment(line);
     if (!current.vendor) {
       toast.error('Pick a vendor first');
       return;
     }
     setBusyKey(line.key);
-    setTimeout(() => {
-      setOrderList((prev) => prev.map((item) => (
-        item.id === line.masterOrderId
-          ? { ...item, assignedVendor: current.vendor, shopifyVendor: current.vendor, status: 'Processing' }
-          : item
-      )));
-      setBusyKey('');
-      toast.success(`${line.vendorOrderId} assigned to ${current.vendor}. Message sent to ${COMPANY_NOTIFY_NUMBER}`);
-    }, 450);
+    const next = await assignSubOrder(line.masterOrderId, line.vendorOrderId, {
+      assignedVendor: current.vendor,
+      price: current.price === '' ? undefined : current.price,
+    });
+    setBusyKey('');
+    if (next?.error) toast.error(next.error);
+    else toast.success(`${line.vendorOrderId} assigned to ${current.vendor}`);
   };
 
-  const reassignHold = () => {
+  const reassignHold = async () => {
     if (!holdVendor || !holdOrder) {
       toast.error('Pick a vendor first');
       return;
     }
-    setOrderList((prev) => prev.map((item) => (
-      item.id === holdOrder.id
-        ? { ...item, status: 'Processing', fulfilmentSource: 'Virtual', assignedVendor: holdVendor, shopifyVendor: holdVendor }
-        : item
-    )));
-    toast.success(`${holdOrder.id} reassigned to ${holdVendor}`);
+    for (const sub of holdOrder.subOrders || []) {
+      const next = await assignSubOrder(holdOrder.id, sub.id, { assignedVendor: holdVendor });
+      if (next?.error) {
+        toast.error(next.error);
+        return;
+      }
+    }
+    if (holdOrder.status === 'Unfulfillable' && !isChannelManaged(holdOrder)) {
+      const next = await setOrderStatus(holdOrder.id, 'Processing');
+      if (next?.error) toast.error(next.error);
+    }
+    toast.success(`${holdOrder.id} assigned to ${holdVendor}`);
     setHoldOrder(null);
     setHoldVendor('');
+  };
+
+  const saveReject = async () => {
+    if (!rejectReason.trim()) {
+      toast.error('Enter a reason');
+      return;
+    }
+    if (!rejectLine.assignedVendor) {
+      toast.error('Assign a vendor first. Reject is recorded against the vendor on the line.');
+      return;
+    }
+    const next = await vendorUpdate(rejectLine.masterOrderId, rejectLine.vendorOrderId, { action: 'reject', reason: rejectReason });
+    if (next?.error) {
+      toast.error(next.error);
+      return;
+    }
+    toast.success(`${rejectLine.vendorOrderId} rejected: ${rejectReason}. Assign another vendor to reroute it.`);
+    setRejectLine(null);
   };
 
   const tabs = [
     { id: 'available', label: 'Stock Available → Pack & Ship', icon: Package },
     { id: 'unavailable', label: 'Stock Unavailable → Vendor Routing', icon: Store },
     { id: 'onhold', label: 'On Hold', icon: CheckCircle },
+    { id: 'all', label: 'All Orders', icon: List },
   ];
 
   if (loading) return <PageLoader label="Loading fulfilment..." />;
@@ -186,14 +239,17 @@ export default function FulfilmentPage() {
                 </TableHeader>
                 <TableBody>
                   {directShipOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.id}</TableCell>
+                    <TableRow key={order.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>
+                      <TableCell className="font-medium text-primary">{order.id}</TableCell>
                       <TableCell>{order.customer}</TableCell>
-                      <TableCell>{order.items.length}</TableCell>
+                      <TableCell><ItemThumbs items={order.items} /></TableCell>
                       <TableCell>{formatINR(order.total)}</TableCell>
-                      <TableCell><Badge variant="outline">WH-001 Offline</Badge></TableCell>
-                      <TableCell><Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge></TableCell>
                       <TableCell>
+                        <Badge variant="outline">WH-001 Offline</Badge>
+                        {order.routeNote && <div className="text-xs text-muted-foreground mt-1">{order.routeNote}</div>}
+                      </TableCell>
+                      <TableCell><Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge></TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()}>
                         <Button variant="outline" size="sm" disabled={busyKey === order.id} onClick={() => packAndShip(order)}>
                           <Package className="w-4 h-4 mr-1" />
                           {busyKey === order.id ? 'Packing…' : 'Pack & Ship'}
@@ -217,7 +273,7 @@ export default function FulfilmentPage() {
             </CardTitle>
             <CardDescription>
               Vendor and cost come from Shopify. Qty more than 1 is posted as separate vendor
-              lines (for example 65234-1, 65234-2). Assigning a vendor also messages the company number.
+              lines (for example 65234-1, 65234-2). Only vendors saved on the Vendors page can be assigned.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -242,30 +298,45 @@ export default function FulfilmentPage() {
                     return (
                       <TableRow key={line.key}>
                         <TableCell className="font-medium whitespace-nowrap">
-                          {line.vendorOrderId}
+                          <button type="button" className="text-primary hover:underline" onClick={() => navigate(`/orders/${encodeURIComponent(line.vendorOrderId)}`)}>
+                            {line.vendorOrderId}
+                          </button>
                           {line.split && <div className="text-xs text-muted-foreground">split from qty</div>}
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{line.masterOrderId}</TableCell>
                         <TableCell>
-                          <div>{line.product}</div>
-                          <div className="text-xs text-muted-foreground">{line.sku}</div>
+                          <div className="flex items-center gap-2">
+                            <ProductThumb name={line.product} src={line.imageUrl} />
+                            <div>
+                              <div>{line.product}</div>
+                              <div className="text-xs text-muted-foreground">{line.sku}</div>
+                            </div>
+                          </div>
                         </TableCell>
                         <TableCell className="w-56">
                           <Select className="h-9" value={current.vendor} onChange={(e) => updateAssignment(line.key, 'vendor', e.target.value)}>
                             <option value="">Select vendor</option>
-                            {vendors.map((vendor) => (
+                            {activeVendors.map((vendor) => (
                               <option key={vendor.id} value={vendor.name}>
                                 {vendor.name}
                                 {vendor.name === line.shopifyVendor ? ' (Shopify)' : ''}
                               </option>
                             ))}
                           </Select>
+                          {line.shopifyVendor && !activeVendors.some((vendor) => vendor.name === line.shopifyVendor) && (
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              Shopify: {vendorReportLabel(line.shopifyVendor)}. Removed from the vendor list — pick another.
+                            </p>
+                          )}
                         </TableCell>
                         <TableCell className="w-36">
                           <Input className="h-9" type="number" value={current.price} onChange={(e) => updateAssignment(line.key, 'price', e.target.value)} />
-                          <div className="text-[11px] text-muted-foreground mt-1">Shopify cost {formatINR(line.shopifyCost)}</div>
+                          {line.shopifyCost != null && <div className="text-[11px] text-muted-foreground mt-1">Shopify cost {formatINR(line.shopifyCost)}</div>}
                         </TableCell>
-                        <TableCell><Badge variant={statusBadgeVariant(line.status)}>{line.status}</Badge></TableCell>
+                        <TableCell>
+                          <Badge variant={statusBadgeVariant(line.status)}>{line.status}</Badge>
+                          {line.vendorStatus && <div className="mt-1 text-[11px] text-muted-foreground">{line.assignedVendor}: {line.vendorStatus}</div>}
+                        </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
                             <Button size="sm" disabled={busyKey === line.key} onClick={() => assignVendor(line)}>
@@ -295,7 +366,7 @@ export default function FulfilmentPage() {
               On Hold Orders ({onHoldOrders.length})
             </CardTitle>
             <CardDescription>
-              Unfulfillable orders — no offline stock and no vendor able to supply
+              Mixed Offline + Virtual items wait here until both warehouse and vendor lines are assigned. Unmapped SKUs sit here too. Out of stock at WH-001 goes to vendor routing.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -309,6 +380,7 @@ export default function FulfilmentPage() {
                     <TableHead>Customer</TableHead>
                     <TableHead>Channel</TableHead>
                     <TableHead>Items</TableHead>
+                    <TableHead>Source</TableHead>
                     <TableHead>Value</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Actions</TableHead>
@@ -316,17 +388,90 @@ export default function FulfilmentPage() {
                 </TableHeader>
                 <TableBody>
                   {onHoldOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.id}</TableCell>
+                    <TableRow key={order.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>
+                      <TableCell className="font-medium text-primary">{order.id}</TableCell>
                       <TableCell>{order.customer}</TableCell>
                       <TableCell><Badge variant="outline">{order.channel}</Badge></TableCell>
-                      <TableCell>{order.items.length}</TableCell>
+                      <TableCell><ItemThumbs items={order.items} /></TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-1">
+                          {(order.items || []).map((item) => (
+                            <div key={`${order.id}-${item.sku}`} className="flex items-center gap-2">
+                              <ProductThumb name={item.name || item.sku} src={item.imageUrl} />
+                              <Badge variant="outline">{item.fulfilmentSource || 'Offline'} · {item.sku}</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </TableCell>
                       <TableCell>{formatINR(order.total)}</TableCell>
                       <TableCell><Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge></TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()}>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" disabled={busyKey === order.id} onClick={() => packAndShip(order)}>
+                            Pack Offline
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => { setHoldOrder(order); setHoldVendor(order.assignedVendor || ''); }}>
+                            Assign vendor
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'all' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <List className="w-5 h-5 text-primary" />
+              All Orders ({openOrders.length})
+            </CardTitle>
+            <CardDescription>
+              Pack and send even if the vendor has not posted the order yet. Mixed Offline + Virtual rows also appear here.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {openOrders.length === 0 ? (
+              <EmptyState title="No open orders" description="New marketplace orders will appear here." />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Items</TableHead>
+                    <TableHead>Fulfil from</TableHead>
+                    <TableHead>Value</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {openOrders.map((order) => (
+                    <TableRow key={order.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>
+                      <TableCell className="font-medium text-primary">{order.id}</TableCell>
+                      <TableCell>{order.customer}</TableCell>
+                      <TableCell><ItemThumbs items={order.items} /></TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => { setHoldOrder(order); setHoldVendor(order.assignedVendor || ''); }}>
-                          Reassign Vendor
-                        </Button>
+                        <Badge variant="secondary">{isMixedFulfilment(order) ? 'Mixed' : (order.fulfilmentSource || 'Offline')}</Badge>
+                      </TableCell>
+                      <TableCell>{formatINR(order.total)}</TableCell>
+                      <TableCell><Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge></TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()}>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" disabled={busyKey === order.id} onClick={() => packAndShip(order)}>
+                            <Package className="w-4 h-4 mr-1" />
+                            Pack & Ship
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => { setHoldOrder(order); setHoldVendor(order.assignedVendor || ''); }}>
+                            Assign vendor
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -345,8 +490,8 @@ export default function FulfilmentPage() {
               <p className="font-medium">Fulfilment Routing</p>
               <p className="text-sm text-muted-foreground">
                 Offline stock ships from the warehouse. Virtual stock is posted to the Shopify
-                vendor (dropdown can be changed). Qty 2 becomes two vendor lines. On assign,
-                a message goes to the company number {COMPANY_NOTIFY_NUMBER}.
+                vendor (dropdown can be changed). Qty 2 becomes two vendor lines. The vendor sees
+                assigned lines on their portal. Mixed Offline + Virtual orders stay on On Hold. Myntra and Amazon orders are packed in the marketplace panel.
               </p>
             </div>
           </div>
@@ -361,13 +506,13 @@ export default function FulfilmentPage() {
         footer={
           <>
             <Button variant="outline" onClick={() => setHoldOrder(null)}>Cancel</Button>
-            <Button onClick={reassignHold}>Assign & notify</Button>
+            <Button onClick={reassignHold}>Assign</Button>
           </>
         }
       >
         <Select value={holdVendor} onChange={(e) => setHoldVendor(e.target.value)}>
           <option value="">Select vendor</option>
-          {vendors.map((vendor) => (
+          {activeVendors.map((vendor) => (
             <option key={vendor.id} value={vendor.name}>{vendor.name}</option>
           ))}
         </Select>
@@ -382,14 +527,7 @@ export default function FulfilmentPage() {
           <>
             <Button variant="outline" onClick={() => setRejectLine(null)}>Cancel</Button>
             <Button
-              onClick={() => {
-                if (!rejectReason.trim()) {
-                  toast.error('Enter a reason');
-                  return;
-                }
-                toast.success(`${rejectLine.vendorOrderId} rejected: ${rejectReason}`);
-                setRejectLine(null);
-              }}
+              onClick={saveReject}
             >
               Save reject
             </Button>

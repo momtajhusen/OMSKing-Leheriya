@@ -4,10 +4,11 @@ const { validate } = require('../../middleware/validate');
 const { authMiddleware } = require('../../middleware/auth');
 const { tenantMiddleware } = require('../../middleware/tenant');
 const { requirePermission } = require('../../middleware/requirePermission');
+const { vendorScope } = require('../../middleware/vendorScope');
 const users = require('../../controllers/users.controller');
 
 const router = require('express').Router();
-const gate = [authMiddleware, tenantMiddleware, requirePermission('users.manage')];
+const gate = [authMiddleware, tenantMiddleware, vendorScope('users'), requirePermission('users.manage')];
 
 router.get('/', ...gate, asyncHandler(users.listUsers));
 router.post(

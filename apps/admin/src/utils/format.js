@@ -39,6 +39,7 @@ export const statusBadgeVariant = (status) => {
     'Return Requested': 'destructive',
     'RTO In Transit': 'destructive',
     'Unfulfillable': 'destructive',
+    'Mixed': 'secondary',
     'NDR': 'destructive',
 
     // Payment statuses

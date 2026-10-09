@@ -5,6 +5,7 @@ const {
   listBalances, channelAts, stockIn, stockOut, adjustStock, setReorderPoint,
   reserveStock, releaseReservation, consumeReservation, listLedger, lowStockAlerts, stressReserve,
 } = require('../services/inventory.service');
+const { getInventoryAuthority } = require('../services/warehouse.service');
 
 async function list(req, res) {
   const tenantId = merchantTenant(req);
@@ -25,7 +26,8 @@ async function list(req, res) {
     if (row.low) acc.low += 1;
     return acc;
   }, { totalStock: 0, reserved: 0, available: 0, stockValue: 0, low: 0 });
-  return successResponse(res, { rows, kpis }, 'Inventory');
+  const inventoryAuthority = await getInventoryAuthority(tenantId);
+  return successResponse(res, { rows, kpis, inventoryAuthority }, 'Inventory');
 }
 
 async function ats(req, res) {

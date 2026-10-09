@@ -4,7 +4,7 @@ const { HttpError } = require('../utils/httpError');
 
 const SECRET_KEYS = new Set([
   'secretKey', 'token', 'refreshToken', 'lwaClientSecret', 'adminToken',
-  'apiToken', 'applicationSecret', 'apiSecret',
+  'apiToken', 'applicationSecret', 'apiSecret', 'webhookSecret', 'accessToken',
 ]);
 
 function publicCreds(creds, reveal) {
@@ -44,6 +44,11 @@ function credsOf(row) {
   return decryptObject(row?.credentialsEnc);
 }
 
+async function patchCreds(row, patch) {
+  row.credentialsEnc = encryptObject({ ...credsOf(row), ...patch });
+  await row.save();
+}
+
 function toDto(row, { reveal = false } = {}) {
   if (!row) return null;
   const credentials = publicCreds(credsOf(row), reveal);
@@ -76,6 +81,7 @@ module.exports = {
   getConnection,
   upsertConnection,
   credsOf,
+  patchCreds,
   toDto,
   recordTest,
   HttpError,

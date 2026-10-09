@@ -4,17 +4,19 @@ const { validate } = require('../../middleware/validate');
 const { authMiddleware } = require('../../middleware/auth');
 const { tenantMiddleware } = require('../../middleware/tenant');
 const { requirePermission } = require('../../middleware/requirePermission');
+const { vendorScope } = require('../../middleware/vendorScope');
 const sku = require('../../controllers/skuMappings.controller');
 
 const router = require('express').Router();
-const view = [authMiddleware, tenantMiddleware, requirePermission('catalog.view')];
-const edit = [authMiddleware, tenantMiddleware, requirePermission('catalog.edit')];
+const view = [authMiddleware, tenantMiddleware, vendorScope('catalog'), requirePermission('catalog.view')];
+const edit = [authMiddleware, tenantMiddleware, vendorScope('catalog'), requirePermission('catalog.edit')];
 
 router.get('/', ...view, asyncHandler(sku.listMappings));
 router.get('/unlisted', ...view, asyncHandler(sku.listUnlisted));
 router.get('/summary', ...view, asyncHandler(sku.mappingSummary));
 router.get('/import-order', ...view, asyncHandler(sku.importOrderHint));
 router.post('/import', ...edit, asyncHandler(sku.importListings));
+router.post('/pull', ...edit, asyncHandler(sku.pullLiveCatalog));
 router.post('/', ...edit, asyncHandler(sku.ingest));
 router.post(
   '/:id/map',

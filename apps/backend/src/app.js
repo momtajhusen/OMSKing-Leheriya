@@ -6,6 +6,7 @@ const config = require('./config');
 const { notFoundHandler, globalErrorHandler } = require('./middleware/errorHandler');
 const { requestContext } = require('./lib/tenantContext');
 const { healthCheck } = require('./controllers/v1Health.controller');
+const { uploadsRoot } = require('./middleware/uploadImage');
 
 const v1Routes = require('./routes/v1');
 
@@ -21,7 +22,12 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify(req, res, buf) {
+    req.rawBody = buf;
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(requestContext);
@@ -29,6 +35,8 @@ app.use(requestContext);
 if (config.nodeEnv !== 'production') {
   app.use(morgan('dev'));
 }
+
+app.use('/uploads', express.static(uploadsRoot));
 
 app.get('/', (req, res) => {
   res.json({

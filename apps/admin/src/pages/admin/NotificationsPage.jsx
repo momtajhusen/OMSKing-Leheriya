@@ -1,15 +1,20 @@
 import { useState } from 'react';
-import { notifications } from '../../mocks';
+import { toast } from 'react-hot-toast';
+import { NOTIFICATION_EVENTS } from '../../constants/notificationEvents';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import { Bell, Mail, MessageSquare, Send, Lock, Save } from 'lucide-react';
 
+const STORAGE_KEY = 'omsking-notification-prefs';
+
 export default function NotificationsPage() {
-  const [notificationSettings, setNotificationSettings] = useState(
-    notifications.map(notif => ({ ...notif, localSettings: { ...notif.channels } }))
-  );
+  const [notificationSettings, setNotificationSettings] = useState(() => {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { saved = {}; }
+    return NOTIFICATION_EVENTS.map((notif) => ({ ...notif, localSettings: { ...notif.channels, ...saved[notif.id] } }));
+  });
 
   const handleToggle = (notifId, channel) => {
     setNotificationSettings(prev =>
@@ -28,8 +33,8 @@ export default function NotificationsPage() {
   };
 
   const handleSave = () => {
-    // In real app, this would save to backend
-    console.log('Saving notification settings:', notificationSettings);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(notificationSettings.map((notif) => [notif.id, notif.localSettings]))));
+    toast.success('Preferences saved in this browser');
   };
 
   const channelIcons = {
@@ -52,7 +57,7 @@ export default function NotificationsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Notifications</h1>
-          <p className="text-muted-foreground">Telegram, email, WhatsApp per Shopify / Amazon / Myntra event. Vendor Telegram on assign.</p>
+          <p className="text-muted-foreground">Telegram, email, WhatsApp per event. Vendor WhatsApp if an assigned order is not dispatched in 7 days.</p>
         </div>
         <Button onClick={handleSave}>
           <Save className="w-4 h-4 mr-2" />
@@ -66,10 +71,9 @@ export default function NotificationsPage() {
           <div className="flex items-start gap-3">
             <Bell className="w-5 h-5 text-primary mt-0.5" />
             <div>
-              <p className="font-medium">Notification Channels</p>
+              <p className="font-medium">Sending is not connected yet</p>
               <p className="text-sm text-muted-foreground">
-                Configure which events trigger notifications across different channels. 
-                Each event type can be individually enabled or disabled per channel.
+                Choose which events should notify on which channel. These choices are saved in this browser; no Telegram, email or WhatsApp message is sent until a provider is connected.
               </p>
             </div>
           </div>
@@ -193,35 +197,6 @@ export default function NotificationsPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Delivery status</CardTitle>
-          <CardDescription>queued → sent → delivered, or failed → retry. Event-driven engine.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Event</TableHead>
-                <TableHead>Channel</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow>
-                <TableCell>order.new</TableCell>
-                <TableCell>Telegram</TableCell>
-                <TableCell><Badge variant="outline">delivered</Badge></TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>label.failure</TableCell>
-                <TableCell>Email</TableCell>
-                <TableCell><Badge variant="secondary">failed → retry</Badge></TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
     </div>
   );
 }

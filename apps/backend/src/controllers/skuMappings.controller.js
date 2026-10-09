@@ -12,8 +12,11 @@ const {
   parseCsv,
   importChannel,
   IMPORT_ORDER,
+  shopifyOwnsCatalog,
 } = require('../services/catalogMapping.service');
 const { merchantTenant } = require('./products.controller');
+const { pullChannel } = require('../services/catalogPull.service');
+const { imagesBySku } = require('../lib/catalogImages');
 
 async function listMappings(req, res) {
   const tenantId = merchantTenant(req);
@@ -29,7 +32,13 @@ async function listMappings(req, res) {
     .populate('masterSkuId')
     .sort({ updatedAt: -1 })
     .setOptions({ skipTenantFilter: true });
-  let data = rows.map(mapMapping);
+  const bySku = await imagesBySku(tenantId);
+  let data = rows.map((row) => {
+    const mapped = mapMapping(row);
+    if (mapped.imageUrl) return mapped;
+    const url = bySku.get(String(mapped.masterSku || mapped.channelSku || '').trim().toLowerCase()) || '';
+    return url ? { ...mapped, imageUrl: url } : mapped;
+  });
   if (q) {
     data = data.filter((row) =>
       (row.channelSku || '').toLowerCase().includes(q)
@@ -80,6 +89,7 @@ async function listUnlisted(req, res) {
   const data = masters.filter((s) => !have.has(String(s._id))).map((s) => ({
     id: String(s._id),
     masterSku: s.code,
+    barcode: s.barcode || '',
     productName: s.name,
     channel,
     status: 'unlisted',
@@ -141,8 +151,21 @@ async function importListings(req, res) {
   return successResponse(res, summary, `Imported ${channel}`, 201);
 }
 
+async function pullLiveCatalog(req, res) {
+  const tenantId = merchantTenant(req);
+  const channel = String(req.body?.channel || '').toLowerCase();
+  if (!['shopify', 'amazon', 'myntra'].includes(channel)) throw new HttpError(400, 'Channel must be shopify, amazon, or myntra');
+  const summary = await pullChannel(tenantId, req.user.id, channel);
+  return successResponse(res, summary, `Pulled ${channel} catalog`);
+}
+
 async function importOrderHint(req, res) {
-  return successResponse(res, { order: IMPORT_ORDER }, 'Import Shopify, then Myntra, then Amazon');
+  const tenantId = merchantTenant(req);
+  const shopifyFirst = await shopifyOwnsCatalog(tenantId);
+  return successResponse(res, {
+    order: IMPORT_ORDER,
+    masterChannel: shopifyFirst ? 'shopify' : 'myntra',
+  }, 'Import Shopify, then Myntra, then Amazon');
 }
 
 module.exports = {
@@ -155,5 +178,6 @@ module.exports = {
   unmap,
   retry,
   importListings,
+  pullLiveCatalog,
   importOrderHint,
 };

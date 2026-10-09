@@ -3,6 +3,7 @@ const { HttpError } = require('../utils/httpError');
 const { successResponse } = require('../utils/response');
 const { sessionTenantId, assertSameTenant } = require('../lib/tenantAccess');
 const { PERMISSIONS } = require('../constants/permissions');
+const { recordFromReq } = require('../services/auditLog.service');
 
 const ALLOWED = new Set(Object.values(PERMISSIONS));
 
@@ -24,15 +25,28 @@ async function updateRolePermissions(req, res) {
   const role = await Role.findById(req.params.id).setOptions({ skipTenantFilter: true });
   if (!role) throw new HttpError(404, 'Role not found');
   assertSameTenant(req, role.tenantId);
-  if (role.code === 'super_admin') throw new HttpError(400, 'Super Admin permissions cannot be reduced');
   if (role.code === 'platform_admin') throw new HttpError(400, 'Platform Admin permissions are fixed');
   if (!Array.isArray(req.body.permissions)) throw new HttpError(400, 'permissions array required');
   const next = [...new Set(req.body.permissions.filter((key) => ALLOWED.has(key)))];
+  if (role.code === 'super_admin' && !next.includes(PERMISSIONS.USERS_MANAGE)) {
+    throw new HttpError(400, 'Merchant Super Admin must keep users.manage');
+  }
   if (role.code !== 'platform_admin' && next.includes(PERMISSIONS.TENANTS_MANAGE)) {
     throw new HttpError(400, 'tenants.manage is SaaS-only');
   }
+  const before = { permissions: [...(role.permissions || [])].sort() };
   role.permissions = next;
   await role.save();
+  const after = { permissions: [...role.permissions].sort() };
+  await recordFromReq(req, {
+    tenantId: role.tenantId,
+    action: 'role.permissions_updated',
+    resourceType: 'roles',
+    resourceId: role._id,
+    resourceDisplay: role.name,
+    before,
+    after,
+  });
   return successResponse(res, {
     id: String(role._id),
     code: role.code,
