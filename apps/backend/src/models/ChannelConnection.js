@@ -9,6 +9,7 @@ const channelConnectionSchema = new mongoose.Schema({
   status: { type: String, enum: ['not_configured', 'saved', 'connected', 'error'], default: 'not_configured' },
   lastTestAt: Date,
   lastTestOk: Boolean,
+  lastTestMode: { type: String, default: '' },
   lastTestMessage: { type: String, default: '' },
   importOrdersFrom: Date,
   warehouseCode: { type: String, default: '' },

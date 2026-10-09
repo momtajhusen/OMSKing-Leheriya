@@ -14,7 +14,8 @@ const WarehouseLocationMap = require('../src/models/WarehouseLocationMap');
 const { importChannel } = require('../src/services/catalogMapping.service');
 const { ingestPulledCatalog } = require('../src/services/catalogPull.service');
 const { pullCatalog, variantRows } = require('../src/adapters/shopify');
-const { listingRows } = require('../src/adapters/amazon');
+const { listingRows, pullCatalog: pullAmazonCatalog, amazonHost, probeConnection } = require('../src/adapters/amazon');
+const { upsertConnection, recordTest, credsOf } = require('../src/services/channelConnection.service');
 const myntraAdapter = require('../src/adapters/myntra');
 const { generateMasterCode, assertHsnCode } = require('../src/services/skuIdentity.service');
 
@@ -212,4 +213,52 @@ test('Shopify and Amazon payloads normalize, and Myntra catalog list is refused'
     () => pullCatalog({}),
     /Shop URL and Admin API token are missing/,
   );
+});
+
+test('amazon sandbox and live catalog calls use the environment from credentials', async () => {
+  const urls = [];
+  const request = async (_method, url) => {
+    urls.push(url);
+    if (String(url).includes('/auth/o2/token')) return { status: 200, text: JSON.stringify({ access_token: 'tok' }) };
+    return { status: 200, text: JSON.stringify({ items: [{ sku: 'GM-ZDPI-9B4E', summaries: [{ asin: 'B1', itemName: 'Bag' }] }] }) };
+  };
+  const creds = { sellerId: 'SELLER', refreshToken: 'r', lwaClientId: 'c', lwaClientSecret: 's' };
+  const sandbox = await pullAmazonCatalog({ ...creds, apiMode: 'sandbox' }, { request });
+  assert.equal(sandbox.rows[0].channelSkuCode, 'GM-ZDPI-9B4E');
+  assert.match(urls.find((url) => url.includes('/listings/')), /sandbox\.sellingpartnerapi-na\.amazon\.com/);
+  assert.match(urls.find((url) => url.includes('/listings/')), /identifiers=GM-ZDPI-9B4E/);
+  urls.length = 0;
+  await pullAmazonCatalog({ ...creds, apiMode: 'live' }, { request });
+  assert.match(urls.find((url) => url.includes('/listings/')), /sellingpartnerapi-eu\.amazon\.com/);
+  assert.doesNotMatch(urls.find((url) => url.includes('/listings/')), /identifiers=/);
+  assert.equal(amazonHost({}), 'https://sellingpartnerapi-eu.amazon.com');
+});
+
+test('a sandbox success does not stay connected after the form is saved as live', async () => {
+  const row = await run(() => upsertConnection(tenant._id, null, 'amazon', {
+    credentials: { apiMode: 'sandbox', sellerId: 'SELLER', refreshToken: 'r', lwaClientId: 'c', lwaClientSecret: 's' },
+  }));
+  await run(() => recordTest(row, { ok: true, message: 'Amazon sandbox refresh token exchanged and the sandbox orders call returned.' }));
+  const saved = await run(() => upsertConnection(tenant._id, null, 'amazon', {
+    credentials: { apiMode: 'live' },
+  }));
+  assert.equal(saved.lastTestOk, false);
+  assert.equal(saved.status, 'saved');
+  assert.match(saved.lastTestMessage, /Live is not connected/);
+  assert.equal(credsOf(saved).apiMode, 'live');
+  assert.equal(credsOf(saved).refreshToken, 'r');
+});
+
+test('amazon live test calls the live host and a sandbox token does not count as connected', async () => {
+  const urls = [];
+  const request = async (_method, url) => {
+    urls.push(url);
+    if (String(url).includes('/auth/o2/token')) return { status: 200, text: JSON.stringify({ access_token: 'tok' }) };
+    return { status: 403, text: JSON.stringify({ errors: [{ message: 'Access to requested resource is denied.' }] }) };
+  };
+  const creds = { apiMode: 'live', sellerId: 'SELLER', refreshToken: 'r', lwaClientId: 'c', lwaClientSecret: 's', marketplaceId: 'A21TJRUUN4KGV' };
+  const live = await probeConnection(creds, { request });
+  assert.equal(live.ok, false);
+  assert.match(live.message, /live API returned 403/);
+  assert.match(urls.find((url) => url.includes('/orders/')), /^https:\/\/sellingpartnerapi-eu\.amazon\.com/);
 });

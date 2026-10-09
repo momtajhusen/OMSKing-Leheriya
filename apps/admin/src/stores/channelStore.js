@@ -59,9 +59,12 @@ const useChannelStore = create((set, get) => ({
       const channel = catalog.find((c) => c.id === row.channel);
       nextConn[row.channel] = {
         status: row.status,
+        lastTestOk: Boolean(row.lastTestOk),
+        lastTestMode: row.lastTestMode || '',
         lastSync: row.lastTestAt || 'Never',
         lastTestMessage: row.lastTestMessage,
         failedJobs: 0,
+        savedSecretKeys: row.savedSecretKeys || [],
         credentials: {
           ...(channel ? Object.fromEntries(channel.fields.map((f) => [f.key, ''])) : {}),
           ...(row.credentials || {}),

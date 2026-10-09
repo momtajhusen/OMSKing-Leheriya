@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import { ROUTE_DEFS } from '../../router';
@@ -34,8 +35,24 @@ const groupLabels = {
   Admin: 'Admin',
 };
 
+function revealActiveLink(container) {
+  if (!container || container.clientHeight < 40) return;
+  const active = container.querySelector('.sidebar-item-active');
+  if (!active) return;
+  const activeRect = active.getBoundingClientRect();
+  const box = container.getBoundingClientRect();
+  const pad = 8;
+  if (activeRect.top < box.top + pad) {
+    container.scrollTop -= box.top + pad - activeRect.top;
+  } else if (activeRect.bottom > box.bottom - pad) {
+    container.scrollTop += activeRect.bottom - (box.bottom - pad);
+  }
+}
+
 function AdminSidebar() {
   const { sidebarCollapsed, toggleSidebar, mobileOpen, setMobileOpen } = useUIStore();
+  const desktopNavRef = useRef(null);
+  const mobileNavRef = useRef(null);
   const { user, effectiveRole } = useAuth();
   const location = useLocation();
   const role = effectiveRole || ROLES.SUPER_ADMIN;
@@ -53,6 +70,21 @@ function AdminSidebar() {
   const filteredRoutes = Object.fromEntries(
     GROUP_ORDER.filter((group) => groupedRoutes[group]?.length).map((group) => [group, groupedRoutes[group]])
   );
+
+  useLayoutEffect(() => {
+    let observer;
+    const navs = () => [desktopNavRef.current, mobileNavRef.current].filter(Boolean);
+    const run = () => {
+      const visible = navs().filter((node) => node.clientHeight >= 40 && node.querySelector('.sidebar-item-active'));
+      if (!visible.length) return;
+      visible.forEach(revealActiveLink);
+      observer?.disconnect();
+    };
+    run();
+    observer = new ResizeObserver(run);
+    navs().forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <>
@@ -98,32 +130,32 @@ function AdminSidebar() {
             </div>
 
             {/* Navigation */}
-            <div className="flex-1 overflow-y-auto py-4 px-2">
+            <div ref={mobileNavRef} className="flex-1 overflow-y-auto py-4 px-2">
               {Object.entries(filteredRoutes).map(([group, routes]) => (
                 <div key={group} className="mb-6">
                   <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                     {groupLabels[group] || group}
                   </div>
-                  {routes.map((route) => {
-                    const Icon = iconMap[route.icon] || Box;
-                    const isActive = location.pathname === route.path || (route.path !== '/' && location.pathname.startsWith(`${route.path}/`));
-                    
-                    return (
-                      <Link
-                        key={route.path}
-                        to={route.path}
-                        data-sidebar-link="true"
-                        onClick={() => setMobileOpen(false)}
-                        className={cn(
-                          'sidebar-item',
-                          isActive ? 'sidebar-item-active' : 'sidebar-item-inactive'
-                        )}
-                      >
-                        <Icon className="h-4 w-4 flex-shrink-0" />
-                        <span className="ml-3">{route.label}</span>
-                      </Link>
-                    );
-                  })}
+              {routes.map((route) => {
+                const Icon = iconMap[route.icon] || Box;
+                const isActive = location.pathname === route.path || (route.path !== '/' && location.pathname.startsWith(`${route.path}/`));
+                
+                return (
+                  <Link
+                    key={route.path}
+                    to={route.path}
+                    data-sidebar-link="true"
+                    onClick={() => setMobileOpen(false)}
+                    className={cn(
+                      'sidebar-item',
+                      isActive ? 'sidebar-item-active' : 'sidebar-item-inactive'
+                    )}
+                  >
+                    <Icon className="h-4 w-4 flex-shrink-0" />
+                    <span className="ml-3">{route.label}</span>
+                  </Link>
+                );
+              })}
                 </div>
               ))}
             </div>
@@ -155,7 +187,7 @@ function AdminSidebar() {
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 overflow-y-auto py-4 px-2">
+        <div ref={desktopNavRef} className="flex-1 overflow-y-auto py-4 px-2">
           {Object.entries(filteredRoutes).map(([group, routes]) => (
             <div key={group} className="mb-6">
               {!sidebarCollapsed && (

@@ -163,7 +163,7 @@ function notLiveMessage(channel, jobType) {
     return 'Shopify orders were not pulled. Shop URL and Admin API token are missing, so the Shopify orders API was not called.';
   }
   if (channel === 'amazon') {
-    return 'Amazon orders were not pulled. The Amazon orders API is not connected, so no orders were requested.';
+    return 'Amazon orders were not pulled. Seller ID, refresh token, and LWA client id + secret are required before the orders API is called.';
   }
   if (channel === 'myntra') {
     return 'Myntra orders were not pulled. Merchant Id and Secret Key are required before the Myntra API is called.';
@@ -182,10 +182,23 @@ async function hasLiveConnection(tenantId, channel) {
   if (!row) return false;
   const creds = credsOf(row);
   if (channel === 'myntra') return Boolean(creds.merchantId && creds.secretKey);
+  if (channel === 'amazon') {
+    return Boolean(creds.sellerId && creds.refreshToken && creds.lwaClientId && creds.lwaClientSecret);
+  }
   return false;
 }
 
 async function pullLiveOrders(job) {
+  if (job.channel === 'amazon') {
+    const { pullAmazonOrders } = require('./amazonSync.service');
+    const res = await pullAmazonOrders(job.tenantId);
+    const summary = `Amazon ${res.fetched} orders: ${res.created} new, ${res.updated} updated, ${res.unchanged} unchanged.`;
+    await IntegrationJob.updateOne(
+      { _id: job._id },
+      { $set: { shortSummary: summary, recordsTotal: res.fetched, recordsProcessed: res.created + res.updated + res.unchanged } },
+    ).setOptions({ skipTenantFilter: true });
+    return;
+  }
   const { pullMyntraOrders } = require('./myntraSync.service');
   const res = await pullMyntraOrders(job.tenantId, {
     from: job.payload?.from,

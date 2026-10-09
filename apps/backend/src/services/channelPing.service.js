@@ -128,26 +128,10 @@ async function pingAmazon(creds) {
     };
   }
   try {
-    const res = await httpPost('https://api.amazon.com/auth/o2/token', {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: creds.refreshToken,
-        client_id: creds.lwaClientId,
-        client_secret: creds.lwaClientSecret,
-      }).toString(),
-    });
-    if (res.status >= 200 && res.status < 300) {
-      return { ok: true, message: 'Amazon SP-API refresh token exchanged successfully' };
-    }
-    let detail = (res.text || '').replace(/\s+/g, ' ').slice(0, 180);
-    try {
-      const parsed = JSON.parse(res.text);
-      detail = parsed.error_description || parsed.error || detail;
-    } catch (_) { /* keep snippet */ }
-    return { ok: false, message: `Amazon LWA ${res.status}: ${detail}` };
+    const { probeConnection } = require('../adapters/amazon');
+    return await probeConnection(creds);
   } catch (err) {
-    return { ok: false, message: `Cannot reach Amazon LWA. ${describeErr(err)}` };
+    return { ok: false, message: err.message || `Cannot reach Amazon. ${describeErr(err)}` };
   }
 }
 
