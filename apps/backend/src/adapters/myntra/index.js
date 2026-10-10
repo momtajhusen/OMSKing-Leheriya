@@ -101,6 +101,41 @@ async function pullCatalog(creds, { client } = {}) {
   return { rows: productRows(products), locations: [] };
 }
 
+function returnRows(list) {
+  return (list || []).flatMap((row) => {
+    const orderId = String(row.orderId || '').trim();
+    const sellerOrderId = String(row.sellerOrderId || '').trim();
+    const externalOrderId = orderId || sellerOrderId;
+    const returnId = String(row.id || row.returnId || '').trim();
+    if (!externalOrderId || !returnId) return [];
+    const lines = row.items || row.orderLines || row.returnItems || [];
+    return [{
+      returnNo: `MYN-RET-${returnId}`,
+      orderNo: `MYN-${externalOrderId}`,
+      externalOrderId,
+      channel: 'Myntra',
+      reason: String(row.reason || row.returnReason || 'Customer return'),
+      items: lines.map((line) => ({
+        sku: String(line.sku || line.sellerSku || ''),
+        qty: Number(line.quantity || line.qty) || 1,
+        name: String(line.name || line.productName || ''),
+      })).filter((item) => item.sku),
+    }];
+  });
+}
+
+async function pullReturns(creds, { client, from, to } = {}) {
+  if (!String(creds?.merchantId || '').trim() || !String(creds?.secretKey || '').trim()) {
+    const err = new Error('Myntra returns were not pulled. Merchant Id and Secret Key are missing, so the return list API was not called.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const api = client || createMyntraClient(creds);
+  const rows = await api.listReturns({ from, to });
+  return returnRows(rows);
+}
+
 module.exports = {
   channel: 'myntra',
   secretOf,
@@ -112,6 +147,7 @@ module.exports = {
   productRows,
   pullCatalog,
   pullProducts: async (creds, opts) => (await pullCatalog(creds, opts)).rows,
+  pullReturns,
   pullOrders: async () => { throw later('Myntra order pull starts in Phase 3'); },
   shipOrder: async (creds, { sellerOrderId, packetId, client } = {}) => {
     if (!String(creds?.merchantId || '').trim() || !String(creds?.secretKey || '').trim()) {

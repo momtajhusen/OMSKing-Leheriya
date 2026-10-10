@@ -451,6 +451,68 @@ async function pullOrders(creds, { request = httpGet } = {}) {
   return orders;
 }
 
+function returnRowsFromOrders(orders) {
+  const rows = [];
+  for (const order of orders || []) {
+    const externalOrderId = String(order?.id || '').trim();
+    if (!externalOrderId) continue;
+    const orderNo = `SHP-${externalOrderId}`;
+    const refunds = Array.isArray(order.refunds) && order.refunds.length ? order.refunds : [null];
+    for (const refund of refunds) {
+      const lines = refund?.refund_line_items?.length
+        ? refund.refund_line_items
+        : (order.line_items || []).map((item) => ({ quantity: item.quantity, line_item: item }));
+      rows.push({
+        returnNo: `SHP-RET-${refund?.id || externalOrderId}`,
+        orderNo,
+        externalOrderId,
+        channel: 'Shopify',
+        reason: String(refund?.note || order.cancel_reason || 'Customer return'),
+        items: lines.map((line) => ({
+          sku: String(line.line_item?.sku || line.sku || ''),
+          qty: Number(line.quantity) || 1,
+          name: String(line.line_item?.title || line.title || ''),
+        })).filter((item) => item.sku),
+      });
+    }
+  }
+  return rows;
+}
+
+async function pullReturns(creds, { request = httpGet } = {}) {
+  const shop = shopOf(creds);
+  const token = String(creds?.adminToken || '').trim();
+  if (!shop || !token) {
+    const err = new Error('Shopify returns were not pulled. Shop URL and Admin API token are missing, so the orders API was not called.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const since = creds?.importOrdersFrom ? new Date(creds.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
+  const updated = Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 864e5) : since;
+  const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
+  const orders = [];
+  let url = `https://${shop}/admin/api/2024-10/orders.json?status=any&financial_status=refunded,partially_refunded&limit=50&updated_at_min=${encodeURIComponent(updated.toISOString())}`;
+  for (let page = 0; page < 5 && url; page += 1) {
+    const res = await request(url, headers);
+    if (res.status === 401 || res.status === 403) {
+      const err = new Error('Shopify rejected the Admin API token. Returns were not pulled.');
+      err.statusCode = 400;
+      err.terminal = true;
+      throw err;
+    }
+    if (res.status < 200 || res.status >= 300) {
+      const err = new Error(`Shopify returns API returned ${res.status}. Returns were not pulled.`);
+      err.statusCode = 502;
+      throw err;
+    }
+    const body = JSON.parse(res.text || '{}');
+    orders.push(...(body.orders || []));
+    url = nextPage(res.headers?.link || res.headers?.Link);
+  }
+  return returnRowsFromOrders(orders);
+}
+
 module.exports = {
   channel: 'shopify',
   secretOf,
@@ -465,6 +527,7 @@ module.exports = {
   pullProducts: (creds, opts) => pullCatalog(creds, opts).then((result) => result.rows),
   mapShopifyOrder,
   pullOrders,
+  pullReturns,
   pushInventory,
   readLocationAvailable,
   fulfillOrder,

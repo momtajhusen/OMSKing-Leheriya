@@ -1,0 +1,24 @@
+---
+description: Admin app UI and data-fetch conventions
+globs: apps/admin/**/*.{js,jsx,css}
+alwaysApply: false
+---
+
+# Admin UI
+
+React 18 function components (no class components), JSX, Tailwind (`src/index.css`), Zustand. Do not add a new UI library.
+
+## Where code goes
+
+- Screens: `src/pages/admin`, `src/pages/vendor`, `src/pages/platform`, `src/pages/auth`, `src/pages/public`, plus `src/pages/NotFoundPage.jsx`
+- Shared controls: reuse `src/components/ui` (`Button`, `Table`, `Modal`, `Input`, `Alert`) before adding one
+- HTTP: import `src/lib/api.js`. It sends `Authorization: Bearer` from `localStorage` key `token` and refreshes on 401. Nothing imports `src/services/api.js`.
+- Read `response.data.data` and `response.data.meta`. Surface failures with `apiError` / `apiFormError` (`response.data.message`, `response.data.errors`).
+- Shared session and desk state uses the Zustand stores in `src/stores/`. Page-local state stays in the component.
+
+## Behaviour
+
+- Hide actions with `usePermissions` (`src/hooks/usePermissions.js`). Keys match `packages/shared`, but the admin copy is `src/constants/permissions.js`. Update both when adding a key.
+- The API still enforces the permission. A hidden button is not the only check.
+- Keep an empty, loading, or error state on the page (`src/components/ui/EmptyState.jsx`).
+- After a UI, layout, routing, or data change, verify the affected flow in the browser, including other pages that share that state.

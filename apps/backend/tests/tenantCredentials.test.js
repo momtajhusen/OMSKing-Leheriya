@@ -158,6 +158,12 @@ test('a signup trial stores the chosen plan and blocks sign-in after 14 days', a
   await fresh.save();
   await assert.rejects(
     () => callLogin({ email, password: 'Password1', workspace: fresh.slug }),
-    /trial has ended/,
+    (err) => {
+      assert.equal(err.statusCode, 403);
+      assert.match(err.message, /This trial ended/);
+      assert.match(err.message, /bill is ₹1,000/);
+      assert.equal(err.accessToken, undefined);
+      return true;
+    },
   );
 });

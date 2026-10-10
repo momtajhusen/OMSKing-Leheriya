@@ -1,0 +1,31 @@
+---
+description: Backend route, response, and tenant conventions
+globs: apps/backend/**/*.js
+alwaysApply: false
+---
+
+# Backend API
+
+CommonJS (`apps/backend/package.json` `"type": "commonjs"`). Routes mount at `/api/v1` in `src/app.js`.
+
+## New route
+
+Protected merchant routes use this order, then `asyncHandler` (`src/routes/v1/orders.routes.js`):
+
+`authMiddleware` → `tenantMiddleware` → `vendorScope(...)` when the resource is vendor-scoped → `requirePermission('domain.action')`
+
+Public routes such as login and pricing inquiries have no auth stack (`src/routes/v1/auth.routes.js`, `pricing.routes.js`). Platform routes use `authMiddleware`, `tenantMiddleware`, and `requirePermission('tenants.manage')` and skip `vendorScope` (`src/routes/v1/tenants.routes.js`).
+
+Gate routes with a permission key. `platform_admin` is the existing role-name exception in `src/middleware/tenant.js`. Add a new key in `packages/shared/src/constants/permissions.js` and copy it into `apps/admin/src/constants/permissions.js` (the admin app does not import the shared package).
+
+## Responses and errors
+
+Return `successResponse`, `errorResponse`, or `paginatedResponse` from `src/utils/response.js`. Throw `HttpError` for expected failures; `src/middleware/errorHandler.js` turns it into `errorResponse`.
+
+## Data access
+
+- Merchant models call `schema.plugin(tenantPlugin)`. These models do not: `Tenant`, `DemoRequest`, `PlatformSetting`, `PlatformPricing`, `PricingInquiry`.
+- Merchant `tenantId` comes from the JWT via `tenantMiddleware` (`req.user.tenantId`). Do not take it from the body. The existing URL exception is `POST /pricing/subscriptions/:tenantId/payments`, and it requires `tenants.manage`.
+- `skipTenantFilter` is already used in auth, seeds, jobs, and many merchant queries that also pass an explicit `tenantId`. Do not add it on a query that has no tenant id in the filter. `allowCrossTenant` is limited to auth populate and `subscription.service.js`.
+- Put new business logic in `src/services/`. Some controllers, including `orders.controller.js`, already query models directly; match the file you are editing.
+- Tests are `node:test` files in `apps/backend/tests/*.test.js`. Database tests use `mongodb-memory-server`; `phase7.test.js`, `gstInvoice.test.js`, `orderDesk.test.js`, and `storefrontImages.test.js` do not. Run `npm test` in `apps/backend`.

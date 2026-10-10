@@ -277,6 +277,45 @@ async function closeDayManifest(tenantId, deps = {}) {
   };
 }
 
+async function waitingManifest(tenantId, now = new Date()) {
+  const start = kolkataDayStart(now);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return skip(Shipment.countDocuments({
+    tenantId,
+    courier: 'delhivery',
+    status: 'booked',
+    warehouseCode: 'WH-001',
+    pickupRequestedAt: null,
+    bookedAt: { $gte: start, $lt: end },
+  }));
+}
+
+async function runDueManifests(deps = {}) {
+  const CourierAccount = require('../models/CourierAccount');
+  const rows = await CourierAccount.find({ source: 'own', code: 'delhivery', status: 'active' })
+    .select('tenantId')
+    .setOptions({ skipTenantFilter: true });
+  const seen = new Set();
+  let requested = 0;
+  for (const row of rows) {
+    const id = String(row.tenantId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    try {
+      const creds = deps.delhiveryCreds || await delhiveryCreds(row.tenantId);
+      if (!String(creds?.apiToken || '').trim()) continue;
+      const waiting = await waitingManifest(row.tenantId);
+      if (!waiting) continue;
+      await closeDayManifest(row.tenantId, { ...deps, delhiveryCreds: creds });
+      requested += 1;
+    } catch (err) {
+      if (err.statusCode === 400) continue;
+      console.error('[PICKUP]', err.message);
+    }
+  }
+  return { requested };
+}
+
 async function shippingReadiness(tenantId) {
   const missing = [];
   const creds = await delhiveryCreds(tenantId);
@@ -317,6 +356,7 @@ module.exports = {
   releaseOrderReserve: releaseHeld,
   queueBulkLabels,
   closeDayManifest,
+  runDueManifests,
   runShipmentJob,
   shippingReadiness,
 };

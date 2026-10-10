@@ -333,11 +333,23 @@ function createMyntraClient(creds, { saveTokens, request = rawRequest, retryDela
     return call('GET', `/partner/v4/packet/${encodeURIComponent(packetId)}/getDocument/?type=invoice`, { binary: true });
   }
 
+  async function listReturns({ from, to } = {}) {
+    const end = to ? new Date(to) : new Date();
+    const start = from ? new Date(from) : new Date(end.getTime() - 10 * 864e5);
+    const qs = new URLSearchParams({
+      startDate: start.toISOString().slice(0, 10),
+      endDate: end.toISOString().slice(0, 10),
+    });
+    const json = await call('GET', `/partner/v4/return/getReturnList?${qs}`);
+    return json.data || json.returns || json.returnOrders || [];
+  }
+
   return {
     base,
     listOrderRefs,
     listProducts,
     getOrder,
+    listReturns,
     searchInventory,
     updateInventory,
     readyToDispatch,

@@ -55,19 +55,30 @@ async function applyTracking(tenantId, { orderNo, awb, status, detail, attempt, 
   await shipment.save();
 
   if (status === 'ndr') {
+    const seen = (shipment.trackingEvents || []).filter((row) => row.status === 'ndr').length;
+    const attemptNo = Math.max(seen, Number(attempt) || 0, 1);
+    const existing = await skip(NdrCase.findOne({ tenantId, orderNo }));
+    const limit = existing?.maxAttempts || 3;
+    const elevated = attemptNo >= limit || existing?.status === 'rto';
     await NdrCase.findOneAndUpdate(
       { tenantId, orderNo },
       {
         $set: {
           awb: waybill,
           reason: detail || 'Delivery attempt failed',
-          attempt: Number(attempt) || 1,
-          status: 'open',
+          attempt: attemptNo,
+          status: elevated ? 'rto' : 'open',
         },
-        $setOnInsert: { tenantId, orderNo },
+        $setOnInsert: { tenantId, orderNo, maxAttempts: limit },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     ).setOptions({ skipTenantFilter: true });
+    if (elevated) {
+      order.channelStatus = 'RTO';
+      const { restockRtoOnce } = require('./orderReserve.service');
+      await restockRtoOnce(tenantId, order);
+      await order.save();
+    }
   } else if (status === 'rto') {
     order.channelStatus = 'RTO';
     const { restockRtoOnce } = require('./orderReserve.service');

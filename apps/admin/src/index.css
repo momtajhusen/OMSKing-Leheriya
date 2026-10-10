@@ -1062,9 +1062,94 @@ html.marketing {
   margin: 12mm;
 }
 
+@keyframes admin-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes admin-notice-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes admin-nav-pop {
+  0% { transform: scale(0.86); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+.admin-shell .page-container > * > *,
+.admin-shell .premium-card {
+  animation: admin-rise 0.46s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.admin-shell .page-container > * > *:nth-child(1),
+.admin-shell .premium-card:nth-child(1) { animation-delay: 0.02s; }
+.admin-shell .page-container > * > *:nth-child(2),
+.admin-shell .premium-card:nth-child(2) { animation-delay: 0.06s; }
+.admin-shell .page-container > * > *:nth-child(3),
+.admin-shell .premium-card:nth-child(3) { animation-delay: 0.1s; }
+.admin-shell .page-container > * > *:nth-child(4),
+.admin-shell .premium-card:nth-child(4) { animation-delay: 0.14s; }
+.admin-shell .page-container > * > *:nth-child(5),
+.admin-shell .premium-card:nth-child(5) { animation-delay: 0.18s; }
+.admin-shell .page-container > * > *:nth-child(6),
+.admin-shell .premium-card:nth-child(6) { animation-delay: 0.22s; }
+.admin-shell .page-container > * > *:nth-child(n + 7),
+.admin-shell .premium-card:nth-child(n + 7) { animation-delay: 0.26s; }
+
+.admin-shell .sidebar-item svg {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.admin-shell .sidebar-item:hover svg,
+.admin-shell .sidebar-item-active svg {
+  transform: scale(1.12);
+}
+
+.admin-shell .mkt-bottom-nav a,
+.admin-shell .mkt-bottom-nav button {
+  transition: color 180ms ease, background-color 180ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.admin-shell .mkt-bottom-nav a:active,
+.admin-shell .mkt-bottom-nav button:active {
+  transform: scale(0.94);
+}
+
+.admin-shell .mkt-bottom-nav a.is-active svg {
+  animation: admin-nav-pop 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.admin-shell tbody tr {
+  transition: background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.admin-shell tbody tr:hover {
+  box-shadow: inset 3px 0 0 hsl(var(--color-primary));
+}
+
+.admin-shell .admin-notice {
+  animation: admin-notice-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.admin-shell header button:hover svg,
+.admin-shell header a:hover svg {
+  transform: scale(1.08);
+}
+
+.admin-shell header button svg,
+.admin-shell header a svg {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kpi-grid > *,
-  .marketing-site main section {
+  .marketing-site main section,
+  .admin-shell .page-container > * > *,
+  .admin-shell .premium-card,
+  .admin-shell .admin-notice,
+  .admin-shell .mkt-bottom-nav a.is-active svg {
     animation: none !important;
   }
   .contact-fab,

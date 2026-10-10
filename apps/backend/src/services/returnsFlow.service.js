@@ -14,8 +14,15 @@ async function ingestReturns(tenantId, rows = []) {
   for (const row of rows) {
     const orderNo = String(row.orderNo || '').trim();
     const returnNo = String(row.returnNo || '').trim();
-    if (!orderNo || !returnNo) continue;
-    const order = await skip(Order.findOne({ tenantId, orderNo }));
+    const externalOrderId = String(row.externalOrderId || '').trim();
+    if ((!orderNo && !externalOrderId) || !returnNo) continue;
+    const order = await skip(Order.findOne({
+      tenantId,
+      $or: [
+        ...(orderNo ? [{ orderNo }] : []),
+        ...(externalOrderId ? [{ externalOrderId }, { 'channelLines.sellerOrderId': externalOrderId }] : []),
+      ],
+    }));
     if (!order) continue;
     const existing = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
     if (existing) {
@@ -25,7 +32,7 @@ async function ingestReturns(tenantId, rows = []) {
     saved.push(await CustomerReturn.create({
       tenantId,
       returnNo,
-      orderNo,
+      orderNo: order.orderNo,
       channel: row.channel || order.channel,
       status: 'Pending',
       reason: row.reason || '',

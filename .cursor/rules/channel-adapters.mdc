@@ -1,0 +1,25 @@
+---
+description: Channel and courier adapter hosts and test doubles
+globs: apps/backend/src/adapters/**/*.js
+alwaysApply: false
+---
+
+# Channel adapters
+
+`src/adapters/` has Shopify, Amazon, Myntra, Delhivery (`couriers/delhivery`), and the partner adapter (`src/adapters/index.js` registers partner channels).
+
+## Hosts
+
+`apiModeOf` (`src/adapters/apiMode.js`) is used only by Amazon. Missing `apiMode` means `live`, and `amazonHost({})` is `https://sellingpartnerapi-eu.amazon.com`.
+
+- Shopify: `creds.shopUrl` via `shopHost` in `src/adapters/shopify/index.js`
+- Myntra: `creds.apiBaseUrl`, or `DEFAULT_BASE` `https://api-integration.myntra.com` in `src/adapters/myntra/client.js`
+- Delhivery: constant `HOST` `https://track.delhivery.com` in `src/adapters/couriers/delhivery/index.js`
+- Partner: `creds.apiBaseUrl` in `src/adapters/partner/index.js`
+
+Do not add another live host. `src/services/channelPing.service.js` already lists the Myntra hosts.
+
+## Safe changes
+
+- Do not book a live Delhivery shipment, fulfil live Shopify, ship live Amazon, or call live Myntra `readyToDispatch` (`myntra/index.js`). Tests pass a fake `request` (`tests/myntra.test.js`, `tests/partnerChannel.test.js`, `tests/catalog.test.js`).
+- Keep the return shape the calling service already uses. Do not log tokens, secrets, or webhook secrets.

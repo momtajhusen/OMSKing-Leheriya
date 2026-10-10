@@ -342,6 +342,27 @@ async function dispatch(job) {
     job.shortSummary = `Booked ${result.booked} Delhivery AWBs in one pickup.`;
     return;
   }
+  if (job.jobType === 'return_pull') {
+    if (!(await hasLiveConnection(job.tenantId, job.channel))) {
+      throw terminalError(notLiveMessage(job.channel, job.jobType));
+    }
+    const { pullChannelReturns } = require('./returnsPull.service');
+    let res;
+    try {
+      res = await pullChannelReturns(job.tenantId, job.channel, { from: job.payload?.from, to: job.payload?.to });
+    } catch (err) {
+      if (err.statusCode === 400) throw terminalError(err.message);
+      throw err;
+    }
+    if (res.createdOrder) throw new Error('Return pull created a Master Order.');
+    const summary = `${job.channel} returns: ${res.fetched} fetched, ${res.saved} on existing orders. No new Master Order.`;
+    await IntegrationJob.updateOne(
+      { _id: job._id },
+      { $set: { shortSummary: summary, recordsTotal: res.fetched, recordsProcessed: res.saved } },
+    ).setOptions({ skipTenantFilter: true });
+    job.shortSummary = summary;
+    return;
+  }
   throw terminalError(notLiveMessage(job.channel, job.jobType));
 }
 

@@ -11,13 +11,19 @@ const SkuMapping = require('../src/models/SkuMapping');
 const WarehouseLocationMap = require('../src/models/WarehouseLocationMap');
 const InventoryLedger = require('../src/models/InventoryLedger');
 const IntegrationJob = require('../src/models/IntegrationJob');
-const { stockIn } = require('../src/services/inventory.service');
+const CustomerReturn = require('../src/models/CustomerReturn');
+const Shipment = require('../src/models/Shipment');
+const CourierAccount = require('../src/models/CourierAccount');
+const { stockIn, restockReturn } = require('../src/services/inventory.service');
 const { ensureDefaultWarehouses } = require('../src/services/warehouse.service');
 const { channelQty, runInventoryJob } = require('../src/services/inventoryPush.service');
 const { upsertConnection } = require('../src/services/channelConnection.service');
 const { applyTracking, pollDelhivery, pollOpenShipments, reattemptNdr, convertNdrToRto } = require('../src/services/tracking.service');
 const { ingestReturns, approveReturn, receiveReturn } = require('../src/services/returnsFlow.service');
-const { restockReturn } = require('../src/services/inventory.service');
+const { pullChannelReturns } = require('../src/services/returnsPull.service');
+const { enqueueScheduledPulls } = require('../src/services/channelScheduler.service');
+const { runDueManifests } = require('../src/services/ship.service');
+const { encryptObject } = require('../src/lib/secretBox');
 
 let replSet;
 
@@ -289,4 +295,155 @@ test('a return label calls Delhivery only when token, pickup warehouse, and pinc
   assert.equal(booked.labelAwb, 'RETWB9');
   assert.equal(calls, 1);
   assert.match(String(body), /WH-001/);
+});
+
+test('the third NDR on the same order becomes RTO once and does not restock again', async () => {
+  const { tenant, physical } = await seller(`ndr3-${Date.now()}`);
+  const sku = await MasterSku.create({ tenantId: tenant._id, code: 'NDR-SKU', name: 'Kurta' });
+  await SkuMapping.create({
+    tenantId: tenant._id,
+    masterSkuId: sku._id,
+    channel: 'shopify',
+    channelProductId: 'p',
+    channelVariantId: 'v',
+    channelSkuCode: 'NDR-SKU',
+    channelSkuCodeNorm: 'ndr-sku',
+    syncStatus: 'synced',
+  });
+  await stockIn(String(tenant._id), null, { masterSkuId: sku._id, warehouseId: physical._id, qty: 2, reason: 'opening' });
+  const order = await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-NDR3',
+    channel: 'Shopify',
+    status: 'Dispatched',
+    awb: 'AWB-NDR3',
+    courier: 'Delhivery',
+    source: 'manual',
+    items: [{ sku: 'NDR-SKU', name: 'Kurta', qty: 1 }],
+  });
+  const before = await Order.countDocuments({ tenantId: tenant._id });
+  await applyTracking(tenant._id, { orderNo: order.orderNo, awb: order.awb, status: 'ndr', detail: 'Attempt 1', eventKey: 'n1' });
+  await applyTracking(tenant._id, { orderNo: order.orderNo, awb: order.awb, status: 'ndr', detail: 'Attempt 2', eventKey: 'n2' });
+  const third = await applyTracking(tenant._id, { orderNo: order.orderNo, awb: order.awb, status: 'ndr', detail: 'Attempt 3', eventKey: 'n3' });
+  const fresh = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-NDR3' });
+  assert.equal(third.duplicate, false);
+  assert.equal(String(fresh._id), String(order._id));
+  assert.equal(fresh.channelStatus, 'RTO');
+  assert.equal(await Order.countDocuments({ tenantId: tenant._id }), before);
+  const ledgers = await InventoryLedger.countDocuments({ tenantId: tenant._id, referenceId: 'SHP-NDR3', movementType: 'rto_restock' });
+  assert.equal(ledgers, 1);
+  await applyTracking(tenant._id, { orderNo: order.orderNo, awb: order.awb, status: 'ndr', detail: 'Attempt 4', eventKey: 'n4' });
+  assert.equal(await InventoryLedger.countDocuments({ tenantId: tenant._id, referenceId: 'SHP-NDR3', movementType: 'rto_restock' }), 1);
+  assert.equal(await Order.countDocuments({ tenantId: tenant._id }), before);
+});
+
+test('a return pull attaches one return to the existing order and a second pull does not add another', async () => {
+  const { tenant } = await seller(`retpull-${Date.now()}`);
+  await upsertConnection(tenant._id, null, 'shopify', {
+    credentials: { shopUrl: 'shop.example', adminToken: 'shpat_test', apiMode: 'live' },
+  });
+  await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-9001',
+    externalOrderId: '9001',
+    channel: 'Shopify',
+    status: 'Delivered',
+    source: 'channel_api',
+    items: [{ sku: 'KURTA', qty: 1 }],
+  });
+  const before = await Order.countDocuments({ tenantId: tenant._id });
+  const request = async (url) => {
+    assert.match(String(url), /financial_status=refunded/);
+    return {
+      status: 200,
+      text: JSON.stringify({
+        orders: [{
+          id: 9001,
+          refunds: [{
+            id: 77,
+            note: 'Size',
+            refund_line_items: [{ quantity: 1, line_item: { sku: 'KURTA', title: 'Kurta' } }],
+          }],
+        }],
+      }),
+    };
+  };
+  const first = await pullChannelReturns(tenant._id, 'shopify', { shopifyRequest: request });
+  const second = await pullChannelReturns(tenant._id, 'shopify', { shopifyRequest: request });
+  const rows = await CustomerReturn.find({ tenantId: tenant._id });
+  assert.equal(first.createdOrder, false);
+  assert.equal(second.createdOrder, false);
+  assert.equal(first.saved, 1);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].returnNo, 'SHP-RET-77');
+  assert.equal(rows[0].orderNo, 'SHP-9001');
+  assert.equal(rows[0].status, 'Pending');
+  assert.equal(await Order.countDocuments({ tenantId: tenant._id }), before);
+});
+
+test('the scheduler queues catalog and return pulls, and a Shopify-master stock pull, once', async () => {
+  const master = await Tenant.create({
+    name: 'Master shop',
+    slug: `master-${Date.now()}`,
+    kind: 'merchant',
+    settings: { inventoryAuthority: 'shopify' },
+  });
+  const oms = await Tenant.create({
+    name: 'OMS shop',
+    slug: `oms-${Date.now()}`,
+    kind: 'merchant',
+    settings: { inventoryAuthority: 'oms' },
+  });
+  const creds = { shopUrl: 'shop.example', adminToken: 'shpat_test' };
+  await upsertConnection(master._id, null, 'shopify', { credentials: creds });
+  await upsertConnection(oms._id, null, 'shopify', { credentials: creds });
+  await enqueueScheduledPulls();
+  await enqueueScheduledPulls();
+  const masterJobs = await IntegrationJob.find({ tenantId: master._id }).setOptions({ skipTenantFilter: true });
+  const types = masterJobs.map((job) => job.jobType).sort();
+  assert.deepEqual(types, ['inventory_push', 'orders_pull', 'products_pull', 'return_pull']);
+  assert.ok(masterJobs.every((job) => job.triggeredBy === 'scheduler'));
+  const omsPush = await IntegrationJob.countDocuments({ tenantId: oms._id, jobType: 'inventory_push' }).setOptions({ skipTenantFilter: true });
+  assert.equal(omsPush, 0);
+  await IntegrationJob.deleteMany({ tenantId: { $in: [master._id, oms._id] } }).setOptions({ skipTenantFilter: true });
+});
+
+test('today\'s WH-001 pickup is requested once when AWBs are waiting', async () => {
+  const { tenant } = await seller(`pick-${Date.now()}`);
+  await CourierAccount.create({
+    tenantId: tenant._id,
+    source: 'own',
+    code: 'delhivery',
+    name: 'Delhivery',
+    status: 'active',
+    credentialsEnc: encryptObject({ apiToken: 'dlv-test', pickupWarehouse: 'WH-001' }),
+  });
+  await Shipment.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-PICK',
+    channel: 'shopify',
+    courier: 'delhivery',
+    awb: 'AWB-PICK',
+    status: 'booked',
+    warehouseCode: 'WH-001',
+    bookedAt: new Date(),
+  });
+  let calls = 0;
+  const first = await runDueManifests({
+    delhiveryRequest: async () => {
+      calls += 1;
+      return { status: 200, text: '{}' };
+    },
+  });
+  const second = await runDueManifests({
+    delhiveryRequest: async () => {
+      calls += 1;
+      return { status: 200, text: '{}' };
+    },
+  });
+  const shipment = await Shipment.findOne({ tenantId: tenant._id, awb: 'AWB-PICK' });
+  assert.equal(first.requested, 1);
+  assert.equal(second.requested, 0);
+  assert.equal(calls, 1);
+  assert.ok(shipment.pickupRequestedAt);
 });

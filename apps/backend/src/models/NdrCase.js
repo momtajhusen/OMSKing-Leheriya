@@ -7,6 +7,7 @@ const ndrCaseSchema = new mongoose.Schema({
   awb: { type: String, default: '' },
   reason: { type: String, default: '' },
   attempt: { type: Number, default: 1 },
+  maxAttempts: { type: Number, default: 3 },
   phone: { type: String, default: '' },
   address: { type: String, default: '' },
   status: { type: String, enum: ['open', 'reattempt', 'rto'], default: 'open' },

@@ -32,7 +32,7 @@ function BillingNotice({ billing, onOpen, onClose }) {
     <div
       role="status"
       className={cn(
-        'relative z-30 shrink-0 border-b px-3 py-2.5 sm:px-4',
+        'admin-notice relative z-30 shrink-0 border-b px-3 py-2.5 sm:px-4',
         warn
           ? 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-700/40 dark:bg-amber-950 dark:text-amber-50'
           : 'border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-700/40 dark:bg-emerald-950 dark:text-emerald-50'
@@ -118,7 +118,7 @@ function AdminLayout() {
   };
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)]">
+    <div className="admin-shell flex h-dvh flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)]">
       {showNotice && (
         <BillingNotice
           billing={billing}

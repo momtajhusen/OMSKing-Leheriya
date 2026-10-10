@@ -246,6 +246,49 @@ async function pullOrders(creds, { request = httpsCall } = {}) {
   return orderRows(body.payload?.Orders || body.Orders || []);
 }
 
+function returnRows(list) {
+  return (list || []).flatMap((row) => {
+    const externalOrderId = String(row.orderId || row.amazonOrderId || '').trim();
+    const returnId = String(row.returnId || row.amazonRmaId || '').trim();
+    if (!externalOrderId || !returnId) return [];
+    const items = (row.returnItems || row.items || []).map((item) => ({
+      sku: String(item.merchantSku || item.sellerSku || item.sku || ''),
+      qty: Number(item.returnQuantity || item.quantity) || 1,
+      name: String(item.itemName || item.title || ''),
+    })).filter((item) => item.sku);
+    return [{
+      returnNo: `AMZ-RET-${returnId}`,
+      orderNo: `AMZ-${externalOrderId}`,
+      externalOrderId,
+      channel: 'Amazon',
+      reason: String(row.returnReason || row.merchantReturnReason || 'Customer return'),
+      items,
+    }];
+  });
+}
+
+async function pullReturns(creds, { request = httpsCall } = {}) {
+  assertAmazonCreds(creds);
+  const token = await accessToken(creds, request);
+  const since = creds?.importOrdersFrom ? new Date(creds.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
+  const start = Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 864e5) : since;
+  const qs = new URLSearchParams({
+    marketplaceId: String(creds?.marketplaceId || 'A21TJRUUN4KGV').trim(),
+    returnStartDate: start.toISOString(),
+  });
+  const res = await request('GET', `${amazonHost(creds)}/returns/2024-03-01/returns?${qs}`, {
+    headers: { 'x-amz-access-token': token, Accept: 'application/json' },
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Amazon returns API returned ${res.status}. ${lwaDetail(res.text) || 'Returns were not pulled.'}`);
+    err.statusCode = res.status === 400 || res.status === 401 || res.status === 403 ? 400 : 502;
+    if (err.statusCode === 400) err.terminal = true;
+    throw err;
+  }
+  const body = JSON.parse(res.text || '{}');
+  return returnRows(body.returns || body.payload?.returns || []);
+}
+
 async function pushInventory(creds, { sku, quantity, request = httpsCall } = {}) {
   assertAmazonCreds(creds);
   const sellerSku = String(sku || '').trim();
@@ -357,6 +400,7 @@ module.exports = {
   pullCatalog,
   pullProducts: (creds, opts) => pullCatalog(creds, opts).then((result) => result.rows),
   pullOrders,
+  pullReturns,
   probeConnection,
   pushInventory,
   confirmShipment,
