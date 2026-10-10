@@ -8,6 +8,7 @@ const { als } = require('../src/lib/tenantContext');
 const Tenant = require('../src/models/Tenant');
 const Order = require('../src/models/Order');
 const Vendor = require('../src/models/Vendor');
+const MasterSku = require('../src/models/MasterSku');
 const orders = require('../src/controllers/orders.controller');
 const { saveNotificationSettings, notifyVendorAssigned, scanOverdueDispatches } = require('../src/services/notify.service');
 
@@ -62,6 +63,7 @@ test('vendor A does not see vendor B, and both of A lines take one tracking numb
   const tenant = await Tenant.create({ name: 'Sheet shop', slug: `sheet-${Date.now()}`, kind: 'merchant' });
   const raj = await Vendor.create({ tenantId: tenant._id, name: 'Raj Prints', nameNorm: 'raj prints', phone: '919111111111' });
   const meera = await Vendor.create({ tenantId: tenant._id, name: 'Meera Looms', nameNorm: 'meera looms', phone: '919333333333' });
+  const sku = await MasterSku.create({ tenantId: tenant._id, code: 'K1', name: 'Kurta' });
   await Order.create({
     tenantId: tenant._id,
     orderNo: 'SHP-BULK',
@@ -71,14 +73,14 @@ test('vendor A does not see vendor B, and both of A lines take one tracking numb
     phone: '9000000000',
     status: 'New',
     items: [
-      { name: 'Kurta', sku: 'K1', qty: 1, price: 1000 },
-      { name: 'Dupatta', sku: 'D1', qty: 1, price: 500 },
-      { name: 'Stole', sku: 'S1', qty: 1, price: 400 },
+      { name: 'Kurta', sku: 'K1', qty: 1, price: 1000, masterSkuId: sku._id },
+      { name: 'Dupatta', sku: 'D1', qty: 1, price: 500, masterSkuId: sku._id },
+      { name: 'Stole', sku: 'S1', qty: 1, price: 400, masterSkuId: sku._id },
     ],
     subOrders: [
-      { id: 'SHP-BULK-1', index: 1, sku: 'K1', title: 'Kurta', price: 1000 },
-      { id: 'SHP-BULK-2', index: 2, sku: 'D1', title: 'Dupatta', price: 500 },
-      { id: 'SHP-BULK-3', index: 3, sku: 'S1', title: 'Stole', price: 400 },
+      { id: 'SHP-BULK-1', index: 1, sku: 'K1', title: 'Kurta', price: 1000, masterSkuId: sku._id },
+      { id: 'SHP-BULK-2', index: 2, sku: 'D1', title: 'Dupatta', price: 500, masterSkuId: sku._id },
+      { id: 'SHP-BULK-3', index: 3, sku: 'S1', title: 'Stole', price: 400, masterSkuId: sku._id },
     ],
   });
   await call(tenant, orders.assignSubOrder, { params: { orderId: 'SHP-BULK', subOrderId: 'SHP-BULK-1' }, body: { assignedVendor: 'Raj Prints' } });

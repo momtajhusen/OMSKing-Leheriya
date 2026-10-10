@@ -3,6 +3,8 @@ const { URL } = require('url');
 const { header, verifyHmac } = require('../signature');
 
 const { apiModeOf } = require('../apiMode');
+const { gatedRequest, outboundMode } = require('../liveGate');
+const { amazonLiveReady } = require('../../services/channelConnection.service');
 
 const LWA_URL = 'https://api.amazon.com/auth/o2/token';
 const LIVE_HOST = 'https://sellingpartnerapi-eu.amazon.com';
@@ -195,15 +197,32 @@ async function accessToken(creds, request) {
 }
 
 function assertAmazonCreds(creds) {
-  if (!String(creds?.sellerId || '').trim() || !creds?.refreshToken || !creds?.lwaClientId || !creds?.lwaClientSecret) {
+  const sellerId = String(creds?.sellerId || '').trim();
+  const refreshToken = String(creds?.refreshToken || '').trim();
+  const clientId = String(creds?.lwaClientId || '').trim();
+  const secret = String(creds?.lwaClientSecret || '').trim();
+  if (!sellerId || !refreshToken || !clientId || !secret) {
     const err = new Error('Amazon was not called. Seller ID, refresh token, and LWA client id + secret are required.');
     err.statusCode = 400;
+    err.terminal = true;
     throw err;
   }
 }
 
-async function pullCatalog(creds, { request = httpsCall } = {}) {
+function amazonRequest(creds, request) {
+  const injected = typeof request === 'function' && request !== httpsCall;
+  if (!injected && outboundMode(creds) === 'live' && !amazonLiveReady(creds)) {
+    const err = new Error('Live is not connected. Amazon live mode needs the production Seller ID, refresh token, and LWA client id + secret. A sandbox refresh token stays on Sandbox. The live API was not called.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  return gatedRequest(creds, request, httpsCall, { allowSandbox: true });
+}
+
+async function pullCatalog(creds, opts = {}) {
   assertAmazonCreds(creds);
+  const request = amazonRequest(creds, opts.request);
   const sellerId = String(creds.sellerId).trim();
   const token = await accessToken(creds, request);
   const sandbox = apiModeOf(creds) === 'sandbox';
@@ -231,8 +250,9 @@ async function pullCatalog(creds, { request = httpsCall } = {}) {
   return { rows, locations: [] };
 }
 
-async function pullOrders(creds, { request = httpsCall } = {}) {
+async function pullOrders(creds, opts = {}) {
   assertAmazonCreds(creds);
+  const request = amazonRequest(creds, opts.request);
   const token = await accessToken(creds, request);
   const res = await request('GET', ordersUrl(creds), {
     headers: { 'x-amz-access-token': token, Accept: 'application/json' },
@@ -267,8 +287,9 @@ function returnRows(list) {
   });
 }
 
-async function pullReturns(creds, { request = httpsCall } = {}) {
+async function pullReturns(creds, opts = {}) {
   assertAmazonCreds(creds);
+  const request = amazonRequest(creds, opts.request);
   const token = await accessToken(creds, request);
   const since = creds?.importOrdersFrom ? new Date(creds.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
   const start = Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 864e5) : since;
@@ -289,8 +310,10 @@ async function pullReturns(creds, { request = httpsCall } = {}) {
   return returnRows(body.returns || body.payload?.returns || []);
 }
 
-async function pushInventory(creds, { sku, quantity, request = httpsCall } = {}) {
+async function pushInventory(creds, opts = {}) {
   assertAmazonCreds(creds);
+  const request = amazonRequest(creds, opts.request);
+  const { sku, quantity } = opts;
   const sellerSku = String(sku || '').trim();
   if (!sellerSku) {
     const err = new Error('Amazon stock was not pushed. The seller SKU is missing.');
@@ -331,8 +354,10 @@ async function pushInventory(creds, { sku, quantity, request = httpsCall } = {})
   return { sku: sellerSku, quantity: qty };
 }
 
-async function confirmShipment(creds, { amazonOrderId, request = httpsCall } = {}) {
+async function confirmShipment(creds, opts = {}) {
   assertAmazonCreds(creds);
+  const request = amazonRequest(creds, opts.request);
+  const { amazonOrderId } = opts;
   const token = await accessToken(creds, request);
   const marketplaceId = apiModeOf(creds) === 'sandbox'
     ? 'ATVPDKIKX0DER'
@@ -363,8 +388,9 @@ async function confirmShipment(creds, { amazonOrderId, request = httpsCall } = {
   return { trackingNumber, courier: 'amazon' };
 }
 
-async function probeConnection(creds, { request = httpsCall } = {}) {
+async function probeConnection(creds, opts = {}) {
   assertAmazonCreds(creds);
+  const request = amazonRequest(creds, opts.request);
   const mode = apiModeOf(creds);
   const token = await accessToken(creds, request);
   const res = await request('GET', ordersUrl(creds), {

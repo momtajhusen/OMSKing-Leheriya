@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://omskingapi.codersalpha.com/api/v1',
+  baseURL: import.meta.env?.VITE_API_BASE_URL || 'https://omskingapi.codersalpha.com/api/v1',
   withCredentials: true,
 });
 
@@ -19,6 +19,11 @@ api.interceptors.response.use(
     const original = error.config;
     const status = error.response?.status;
     const url = original?.url || '';
+    if (status === 403 && /suspended/i.test(error.response?.data?.message || '')) {
+      const { default: useAuthStore } = await import('../stores/authStore');
+      useAuthStore.getState().logoutLocal();
+      return Promise.reject(error);
+    }
     if (status !== 401 || original?._retry || url.includes('/auth/refresh') || url.includes('/auth/login')) {
       return Promise.reject(error);
     }

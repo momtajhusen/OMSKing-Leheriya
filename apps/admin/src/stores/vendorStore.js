@@ -32,7 +32,7 @@ const useVendorStore = create(persist((set, get) => ({
   },
 
   clearCompany() {
-    set({ vendors: [], loaded: false, error: '' });
+    set({ vendors: [], loaded: false, error: '', autoAssignByTenant: {} });
   },
 
   load: async () => {

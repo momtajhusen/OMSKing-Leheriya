@@ -13,6 +13,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
+import { LEGAL_LINKS } from '../public/LegalPage';
 
 const COMPANY = {
   active: 'Active',
@@ -254,11 +255,12 @@ export default function SubscriptionPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Subscription</h1>
-          <p className="text-sm text-muted-foreground">
-            {bill.name} · {bill.periodLabel}
-            {' · '}
-            <Link to="/billing" className="font-medium text-primary hover:underline">Billing terms</Link>
-          </p>
+          <p className="text-sm text-muted-foreground">{bill.name} · {bill.periodLabel}</p>
+          <nav className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm" aria-label="Legal">
+            {LEGAL_LINKS.map((item) => (
+              <Link key={item.to} to={item.to} className="font-medium text-primary hover:underline">{item.label}</Link>
+            ))}
+          </nav>
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="outline">{planName(bill.plan)} plan</Badge>

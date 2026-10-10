@@ -6,6 +6,7 @@ import useReturnsStore from './returnsStore';
 import useChannelStore from './channelStore';
 import { ordersOnConnectedChannels } from '../lib/connectedChannels';
 import { loadConnectedChannels } from '../hooks/useConnectedChannels';
+import { activeTenantId, sameCompanySnapshot } from '../lib/companyList';
 
 function hydrate(list) {
   return (list || []).map((order) => withSubOrders(order));
@@ -22,6 +23,7 @@ const useOrderStore = create((set, get) => ({
   orders: [],
   loaded: false,
   error: '',
+  generation: 0,
 
   getById: (id) => findOrderMatch(get().orders, id),
 
@@ -160,17 +162,28 @@ const useOrderStore = create((set, get) => ({
   },
 
   clearCompany() {
-    set({ orders: [], loaded: false, error: '' });
+    set((state) => ({
+      orders: [],
+      loaded: false,
+      error: '',
+      generation: (state.generation || 0) + 1,
+    }));
   },
 
   hydrateFromApi: async () => {
+    const started = { generation: get().generation || 0, tenantId: activeTenantId() };
+    const current = () => ({ generation: get().generation || 0, tenantId: activeTenantId() });
     try {
       const { data } = await api.get('/orders');
+      if (!sameCompanySnapshot(started, current())) return get().orders;
       await loadConnectedChannels();
+      if (!sameCompanySnapshot(started, current())) return get().orders;
       const rows = ordersOnConnectedChannels(hydrate(data.data || []), useChannelStore.getState());
+      if (!sameCompanySnapshot(started, current())) return get().orders;
       set({ orders: rows, loaded: true, error: '' });
       useReturnsStore.getState().syncFromOrders(rows);
     } catch (err) {
+      if (!sameCompanySnapshot(started, current())) return get().orders;
       set({ loaded: true, error: apiError(err, 'Could not load orders') });
     }
     return get().orders;

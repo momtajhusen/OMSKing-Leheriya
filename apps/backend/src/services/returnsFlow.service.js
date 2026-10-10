@@ -117,8 +117,11 @@ async function receiveReturn(tenantId, userId, returnNo, { destination = 'All', 
   const row = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
   if (!row) throw new HttpError(404, 'Return not found');
   if (row.status === 'Pending') throw new HttpError(400, 'Approve the return before receiving it');
+  if (row.status === 'Completed') return { row, restock: null };
+  const order = row.orderNo ? await skip(Order.findOne({ tenantId, orderNo: row.orderNo })) : null;
   let restock = null;
-  if (action === 'restock' && String(destination).toLowerCase() !== 'none') {
+  // RTO already put the piece back. A later Return Received must not add it again.
+  if (!order?.rtoRestockedAt && action === 'restock' && String(destination).toLowerCase() !== 'none') {
     restock = await restockReturn(tenantId, userId, {
       items: row.items,
       referenceId: row.returnNo,

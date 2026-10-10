@@ -1,5 +1,6 @@
 const https = require('https');
 const { URL } = require('url');
+const { gatedRequest } = require('../../liveGate');
 
 const HOST = 'https://track.delhivery.com';
 
@@ -59,8 +60,10 @@ function parseJson(text) {
   try { return JSON.parse(text || '{}'); } catch { return {}; }
 }
 
-async function serviceable(creds, { pincode, paymentMode, request = httpCall } = {}) {
+async function serviceable(creds, opts = {}) {
+  const { pincode, paymentMode } = opts;
   const token = requireToken(creds);
+  const request = gatedRequest(creds, opts.request, httpCall);
   const pin = String(pincode || '').trim();
   const res = await request('GET', `${HOST}/c/api/pin-codes/json/?filter_codes=${encodeURIComponent(pin)}`, {
     headers: authHeaders(token),
@@ -77,7 +80,7 @@ async function serviceable(creds, { pincode, paymentMode, request = httpCall } =
   return { pincode: pin };
 }
 
-async function book(creds, shipment, { request = httpCall } = {}) {
+async function book(creds, shipment, opts = {}) {
   const token = requireToken(creds);
   const warehouse = String(creds.pickupWarehouse || '').trim();
   if (!warehouse) {
@@ -86,6 +89,7 @@ async function book(creds, shipment, { request = httpCall } = {}) {
     err.terminal = true;
     throw err;
   }
+  const request = gatedRequest(creds, opts.request, httpCall);
   const payload = JSON.stringify({
     shipments: [{
       name: shipment.name,
@@ -122,8 +126,9 @@ async function bookReturn(creds, shipment, opts) {
   return book(creds, { ...shipment, paymentMode: 'Pickup' }, opts);
 }
 
-async function labelPdf(creds, awb, { request = httpCall } = {}) {
+async function labelPdf(creds, awb, opts = {}) {
   const token = requireToken(creds);
+  const request = gatedRequest(creds, opts.request, httpCall);
   const res = await request('GET', `${HOST}/api/p/packing_slip?wbns=${encodeURIComponent(awb)}&pdf=true`, {
     headers: authHeaders(token),
   });
@@ -136,8 +141,10 @@ async function labelPdf(creds, awb, { request = httpCall } = {}) {
   return bytes;
 }
 
-async function requestPickup(creds, { count, request = httpCall } = {}) {
+async function requestPickup(creds, opts = {}) {
+  const { count } = opts;
   const token = requireToken(creds);
+  const request = gatedRequest(creds, opts.request, httpCall);
   const res = await request('POST', `${HOST}/fm/request/new/`, {
     headers: authHeaders(token),
     body: {
@@ -155,8 +162,9 @@ async function requestPickup(creds, { count, request = httpCall } = {}) {
   return { count };
 }
 
-async function cancelAwb(creds, awb, { request = httpCall } = {}) {
+async function cancelAwb(creds, awb, opts = {}) {
   const token = requireToken(creds);
+  const request = gatedRequest(creds, opts.request, httpCall);
   const res = await request('POST', `${HOST}/api/p/edit`, {
     headers: authHeaders(token),
     body: { waybill: awb, cancellation: 'true' },
@@ -181,8 +189,9 @@ function mapScanStatus(text) {
   return '';
 }
 
-async function trackShipment(creds, awb, { request = httpCall } = {}) {
+async function trackShipment(creds, awb, opts = {}) {
   const token = requireToken(creds);
+  const request = gatedRequest(creds, opts.request, httpCall);
   const res = await request('GET', `${HOST}/api/v1/packages/json/?waybill=${encodeURIComponent(awb)}`, {
     headers: authHeaders(token),
   });
@@ -211,8 +220,10 @@ async function trackShipment(creds, awb, { request = httpCall } = {}) {
   return events;
 }
 
-async function ndrAction(creds, { awb, act, phone, address }, { request = httpCall } = {}) {
+async function ndrAction(creds, payload, opts = {}) {
+  const { awb, act, phone, address } = payload || {};
   const token = requireToken(creds);
+  const request = gatedRequest(creds, opts.request, httpCall);
   const res = await request('POST', `${HOST}/api/p/update`, {
     headers: authHeaders(token),
     body: { data: [{ waybill: awb, act, phone: phone || '', add: address || '' }] },

@@ -257,7 +257,15 @@ async function bumpQty(tenantId, sku, warehouse, delta, session) {
     masterSkuId: sku._id,
     warehouseId: warehouse._id,
   };
-  if (delta < 0) filter.$expr = { $gte: [availableExpr, Math.abs(delta)] };
+  if (delta < 0) {
+    const n = Math.abs(delta);
+    filter.$expr = {
+      $and: [
+        { $gte: [availableExpr, n] },
+        { $gte: [{ $ifNull: [`$${field}`, 0] }, n] },
+      ],
+    };
+  }
   const balance = await exec(
     Inventory.findOneAndUpdate(filter, { $inc: { [field]: delta } }, { new: true }),
     session,
@@ -312,17 +320,38 @@ async function setChannelAvailable(tenantId, userId, { masterSkuId, warehouseId,
     const sku = await requireSku(tenantId, masterSkuId, session);
     const warehouse = await requireWarehouse(tenantId, warehouseId, session);
     await getOrCreateBalance(tenantId, sku._id, warehouse._id, session);
-    const current = await exec(Inventory.findOne({ tenantId, masterSkuId: sku._id, warehouseId: warehouse._id }), session);
-    const delta = target - availableOf(current);
-    if (delta === 0) return { balance: mapBalance(current, warehouse, sku), changed: false };
-    const balance = await exec(
+    const field = qtyField(warehouse);
+    const otherField = field === 'physicalQty' ? 'virtualQty' : 'physicalQty';
+    const before = await exec(
       Inventory.findOneAndUpdate(
         { tenantId, masterSkuId: sku._id, warehouseId: warehouse._id },
-        { $inc: { [qtyField(warehouse)]: delta } },
-        { new: true },
+        [{
+          $set: {
+            [field]: {
+              $max: [
+                0,
+                {
+                  $subtract: [
+                    { $add: [target, { $ifNull: ['$reservedQty', 0] }] },
+                    { $ifNull: [`$${otherField}`, 0] },
+                  ],
+                },
+              ],
+            },
+          },
+        }],
+        { new: false },
       ),
       session,
     );
+    if (!before) throw new HttpError(409, 'Could not set warehouse qty');
+    const previous = Number(before[field]) || 0;
+    const otherQty = Number(before[otherField]) || 0;
+    const reserved = Number(before.reservedQty) || 0;
+    const nextQty = Math.max(0, target + reserved - otherQty);
+    const delta = nextQty - previous;
+    if (delta === 0) return { balance: mapBalance(before, warehouse, sku), changed: false };
+    const balance = await exec(Inventory.findOne({ _id: before._id }), session);
     await appendLedger({
       tenantId,
       masterSkuId: sku._id,

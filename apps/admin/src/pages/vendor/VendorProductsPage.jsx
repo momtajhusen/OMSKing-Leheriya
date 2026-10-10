@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import useOrderStore from '../../stores/orderStore';
-import { vendorLines } from '../../lib/vendorLines';
+import useVendorStore from '../../stores/vendorStore';
+import { vendorCatalog } from '../../lib/vendorLines';
 import { formatINR } from '../../utils/format';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Input from '../../components/ui/Input';
@@ -14,32 +15,17 @@ export default function VendorProductsPage() {
   const orders = useOrderStore((s) => s.orders);
   const loaded = useOrderStore((s) => s.loaded);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+  const vendors = useVendorStore((s) => s.vendors);
+  const loadVendors = useVendorStore((s) => s.load);
   const [search, setSearch] = useState('');
+  const vendorNames = useMemo(() => vendors.filter((row) => !row.removed).map((row) => row.name), [vendors]);
 
   useEffect(() => {
     hydrateFromApi();
-  }, [hydrateFromApi]);
+    loadVendors();
+  }, [hydrateFromApi, loadVendors]);
 
-  const items = useMemo(() => {
-    const bySku = new Map();
-    vendorLines(orders).forEach((row) => {
-      const current = bySku.get(row.sku) || {
-        sku: row.sku,
-        product: row.product,
-        imageUrl: row.imageUrl || '',
-        lines: 0,
-        qty: 0,
-        lastPrice: 0,
-      };
-      if (!current.imageUrl && row.imageUrl) current.imageUrl = row.imageUrl;
-      current.lines += 1;
-      current.qty += Number(row.qty) || 1;
-      current.lastPrice = row.assignPrice || current.lastPrice;
-      if (row.product) current.product = row.product;
-      bySku.set(row.sku, current);
-    });
-    return [...bySku.values()].sort((a, b) => a.sku.localeCompare(b.sku));
-  }, [orders]);
+  const items = useMemo(() => vendorCatalog(orders, vendorNames), [orders, vendorNames]);
 
   const query = search.trim().toLowerCase();
   const visible = query

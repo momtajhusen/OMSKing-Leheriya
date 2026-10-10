@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const Order = require('../models/Order');
 const IntegrationJob = require('../models/IntegrationJob');
 const { ensurePricing, quoteOrders } = require('../services/pricing.service');
+const { orderPlacedMatch } = require('../services/subscription.service');
 const { listPlatformJobs, requeueJob } = require('../services/jobQueue.service');
 const platformSettings = require('../services/platformSettings.service');
 const { recordFromReq } = require('../services/auditLog.service');
@@ -38,11 +39,8 @@ function mapTenant(t, userCount = 0, bill = null, lastSync = null) {
 
 async function billsByTenant() {
   const pricing = await ensurePricing();
-  const start = new Date();
-  start.setDate(1);
-  start.setHours(0, 0, 0, 0);
   const counts = await Order.aggregate([
-    { $match: { createdAt: { $gte: start }, status: { $nin: ['Cancelled', 'cancelled'] } } },
+    { $match: { ...orderPlacedMatch(), status: { $nin: ['Cancelled', 'cancelled'] } } },
     { $group: { _id: '$tenantId', n: { $sum: 1 } } },
   ]);
   const byTenant = new Map(counts.map((row) => [String(row._id), row.n]));

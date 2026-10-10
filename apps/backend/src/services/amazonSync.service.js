@@ -1,22 +1,23 @@
-const Order = require('../models/Order');
 const { getConnection, credsOf } = require('./channelConnection.service');
 const amazon = require('../adapters/amazon');
 const { withSubOrders } = require('../lib/orderSubOrders');
 const { HttpError } = require('../utils/httpError');
+const { claimChannelOrder, finishChannelOrder } = require('./channelOrder.service');
 
-async function pullAmazonOrders(tenantId) {
+async function pullAmazonOrders(tenantId, { skipExternalIds = [], afterEach } = {}) {
   const row = await getConnection(tenantId, 'amazon');
   if (!row) throw new HttpError(400, 'Amazon is not connected for this workspace');
   const creds = credsOf(row);
   const fetched = await amazon.pullOrders(creds);
+  const skip = new Set((skipExternalIds || []).map((id) => String(id)));
   const out = { fetched: fetched.length, created: 0, updated: 0, unchanged: 0 };
   for (const order of fetched) {
+    const externalOrderId = String(order.externalOrderId || '');
+    if (externalOrderId && skip.has(externalOrderId)) {
+      out.unchanged += 1;
+      continue;
+    }
     const orderNo = `AMZ-${order.externalOrderId}`;
-    const existing = await Order.findOne({
-      tenantId,
-      channel: 'Amazon',
-      externalOrderId: order.externalOrderId,
-    }).setOptions({ skipTenantFilter: true });
     const next = withSubOrders({
       tenantId,
       orderNo,
@@ -34,30 +35,29 @@ async function pullAmazonOrders(tenantId) {
       phone: '',
       address: '',
     });
-    const { syncOrderReservations } = require('./orderReserve.service');
-    await syncOrderReservations(tenantId, next);
-    if (!existing) {
-      await Order.create(next);
-      const { notifyEventEmail } = require('./notify.service');
-      await notifyEventEmail(tenantId, 'NOT-001', {
-        dedupeKey: `order.new:${orderNo}`,
-        subject: `New order ${orderNo}`,
-        text: `Order: ${orderNo}\nChannel: Amazon`,
-      });
-      out.created += 1;
-      continue;
+    const { doc, created } = await claimChannelOrder(
+      { tenantId, channel: 'Amazon', externalOrderId: order.externalOrderId },
+      next,
+    );
+    let before = null;
+    if (!created) {
+      before = `${doc.status}|${doc.total}`;
+      doc.status = next.status;
+      doc.total = next.total;
+      doc.items = next.items;
+      doc.subOrders = next.subOrders;
+      doc.orderDate = next.orderDate || doc.orderDate;
+      doc.source = 'channel_api';
+      if (next.reserveState !== undefined) doc.reserveState = next.reserveState;
     }
-    const before = `${existing.status}|${existing.total}`;
-    existing.status = next.status;
-    existing.total = next.total;
-    existing.items = next.items;
-    existing.subOrders = next.subOrders;
-    existing.orderDate = next.orderDate || existing.orderDate;
-    existing.source = 'channel_api';
-    if (next.reserveState !== undefined) existing.reserveState = next.reserveState;
-    await existing.save();
-    if (before === `${existing.status}|${existing.total}`) out.unchanged += 1;
-    else out.updated += 1;
+    const outcome = await finishChannelOrder(tenantId, doc, {
+      created,
+      before,
+      orderNo,
+      channelName: 'Amazon',
+    });
+    out[outcome] += 1;
+    if (afterEach && externalOrderId) await afterEach(externalOrderId);
   }
   return out;
 }

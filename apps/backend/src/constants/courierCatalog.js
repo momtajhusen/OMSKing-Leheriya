@@ -70,6 +70,7 @@ const OWN = [
     capabilities: ['forward', 'ndr'],
     blurb: 'API token and the pickup warehouse name from the Delhivery seller account.',
     fields: [
+      { key: 'apiMode', label: 'API environment', type: 'text', required: false, placeholder: 'live' },
       { key: 'apiToken', label: 'API token', type: 'password', required: true, placeholder: 'Token from Delhivery One' },
       { key: 'clientName', label: 'Client name', type: 'text', required: true, placeholder: 'Registered client name' },
       { key: 'pickupWarehouse', label: 'Pickup warehouse name', type: 'text', required: true, placeholder: 'Name on the Delhivery account' },

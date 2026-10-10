@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
 import { mediaUrl } from '../account/ProfilePhoto';
-import useProductImageStore, { findProductImage } from '../../lib/productImageStore';
+import useProductImageStore, { catalogPhoto, findProductImage } from '../../lib/productImageStore';
 
 function PreviewCard({ rect, src, name, sku }) {
   const width = 240;
@@ -29,7 +29,7 @@ export default function ProductThumb({ name, src, sku, size = 'sm', className })
   const byKey = useProductImageStore((state) => state.byKey);
   const [preview, setPreview] = useState(null);
   const box = size === 'lg' ? 'h-16 w-16' : size === 'md' ? 'h-12 w-12' : 'h-10 w-10';
-  const resolved = mediaUrl(src) || mediaUrl(findProductImage(byKey, sku, name));
+  const resolved = mediaUrl(catalogPhoto(src) || findProductImage(byKey, sku, name));
   const show = (event) => {
     if (!resolved) return;
     setPreview(event.currentTarget.getBoundingClientRect());

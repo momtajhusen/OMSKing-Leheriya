@@ -11,6 +11,22 @@ function periodKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function monthBounds(date = new Date()) {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 1, 0, 0, 0, 0);
+  return { start, end };
+}
+
+function orderPlacedMatch(date = new Date()) {
+  const { start, end } = monthBounds(date);
+  return {
+    $or: [
+      { orderDate: { $gte: start, $lt: end } },
+      { orderDate: null, createdAt: { $gte: start, $lt: end } },
+    ],
+  };
+}
+
 function monthName(date = new Date()) {
   return date.toLocaleString('en-IN', { month: 'long' });
 }
@@ -71,11 +87,8 @@ function subscriptionMessage({ status, plan, planExpiresAt, orders, bill, paymen
   return due;
 }
 
-async function monthOrders(tenantId) {
-  const start = new Date();
-  start.setDate(1);
-  start.setHours(0, 0, 0, 0);
-  const docs = await Order.find({ tenantId, createdAt: { $gte: start } })
+async function monthOrders(tenantId, date = new Date()) {
+  const docs = await Order.find({ tenantId, ...orderPlacedMatch(date) })
     .select('channel status')
     .setOptions({ allowCrossTenant: true })
     .lean();
@@ -139,7 +152,7 @@ async function viewFor(tenant, pricing, paidRow) {
       channel: line.channel,
       orders: line.orders,
       cancelled: line.cancelled,
-      amount: Math.round(line.orders * quote.rate * 100) / 100,
+      amount: Math.round(line.orders * (quote.ratePaise || 0)) / 100,
     })),
     monthStatus: paid ? 'paid' : submitted ? 'submitted' : standing === 'trial' || standing === 'expired' ? 'trial' : 'due',
     paidAt: paid?.paidAt || null,
@@ -408,6 +421,7 @@ async function applyRazorpayWebhook(req) {
 }
 
 module.exports = {
+  orderPlacedMatch,
   subscriptionMessage,
   mySubscription,
   listSubscriptions,

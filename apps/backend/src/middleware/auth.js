@@ -23,13 +23,22 @@ async function authMiddleware(req, res, next) {
     if (decoded.rv !== user.refreshTokenVersion) {
       return res.status(401).json({ success: false, message: 'Session expired', data: null });
     }
+    const homeId = String(user.tenantId);
+    const claimId = decoded.tenantId ? String(decoded.tenantId) : '';
     const impersonating = Boolean(decoded.impersonating);
+    if (impersonating) {
+      if (user.roleId?.code !== 'platform_admin' || !claimId) {
+        return res.status(403).json({ success: false, message: 'Tenant does not match this session', data: null });
+      }
+    } else if (claimId && claimId !== homeId) {
+      return res.status(403).json({ success: false, message: 'Tenant does not match this session', data: null });
+    }
     req.user = {
       id: String(user._id),
       role: impersonating ? decoded.role : user.roleId.code,
       permissions: impersonating ? (decoded.permissions || []) : (user.roleId.permissions || []),
-      tenantId: decoded.tenantId || null,
-      homeTenantId: String(user.tenantId),
+      tenantId: impersonating ? claimId : (claimId || homeId),
+      homeTenantId: homeId,
       impersonating,
       assignedVendorIds: (user.assignedVendorIds || []).map(String),
     };

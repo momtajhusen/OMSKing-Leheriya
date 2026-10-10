@@ -1,5 +1,6 @@
 const https = require('https');
 const { URL } = require('url');
+const { gatedRequest } = require('../liveGate');
 
 const DEFAULT_BASE = 'https://api-integration.myntra.com';
 // Myntra access tokens live 30 days; refresh a few days early.
@@ -114,7 +115,10 @@ function chunk(list, size) {
  * creds: decrypted channel credentials.
  * saveTokens: persists { accessToken, refreshToken, tokenIssuedAt } back to the encrypted connection.
  */
-function createMyntraClient(creds, { saveTokens, request = rawRequest, retryDelayMs = 1000 } = {}) {
+function createMyntraClient(creds, { saveTokens, request, retryDelayMs = 1000 } = {}) {
+  const transport = request && request !== rawRequest
+    ? request
+    : gatedRequest(creds, undefined, rawRequest, { allowSandbox: true });
   const state = {
     accessToken: creds?.accessToken || '',
     refreshToken: creds?.refreshToken || '',
@@ -139,10 +143,13 @@ function createMyntraClient(creds, { saveTokens, request = rawRequest, retryDela
   }
 
   async function generate() {
-    if (!creds?.merchantId || !creds?.secretKey) {
-      throw new Error('Myntra Merchant Id and Secret Key are required');
+    if (!String(creds?.merchantId || '').trim() || !String(creds?.secretKey || '').trim()) {
+      const err = new Error('Myntra Merchant Id and Secret Key are required');
+      err.statusCode = 400;
+      err.terminal = true;
+      throw err;
     }
-    const res = await request('POST', `${base}/authorization/generate_token`, {
+    const res = await transport('POST', `${base}/authorization/generate_token`, {
       headers: { secret_key: creds.secretKey, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: { merchant_id: creds.merchantId },
     });
@@ -154,7 +161,7 @@ function createMyntraClient(creds, { saveTokens, request = rawRequest, retryDela
 
   async function refresh() {
     if (!state.refreshToken) return generate();
-    const res = await request('POST', `${base}/authorization/refresh_token`, {
+    const res = await transport('POST', `${base}/authorization/refresh_token`, {
       headers: { refresh_token: state.refreshToken, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: { merchant_id: creds.merchantId },
     });
@@ -170,7 +177,7 @@ function createMyntraClient(creds, { saveTokens, request = rawRequest, retryDela
 
   async function call(method, path, { body, binary = false, retried = false } = {}) {
     await ensureToken();
-    const res = await request(method, `${base}${path}`, {
+    const res = await transport(method, `${base}${path}`, {
       headers: {
         access_token: state.accessToken,
         'x-partner-store': 'myntra',

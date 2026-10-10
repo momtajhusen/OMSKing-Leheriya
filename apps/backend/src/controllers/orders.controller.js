@@ -24,12 +24,18 @@ async function vendorNamesFor(req, tenantId) {
 
 function scopeToVendor(dto, names) {
   if (!names) return dto;
-  const subOrders = (dto.subOrders || []).filter((sub) => names.includes(String(sub.assignedVendor || '').toLowerCase()));
+  const allowed = new Set(names.map((name) => String(name).toLowerCase()));
+  const subOrders = (dto.subOrders || []).filter((sub) => allowed.has(String(sub.assignedVendor || '').toLowerCase()));
   const skus = new Set(subOrders.map((sub) => sub.sku));
+  const visible = [...new Set(subOrders.map((sub) => sub.assignedVendor).filter(Boolean))];
+  const shopify = String(dto.shopifyVendor || '');
+  const shopifyVisible = visible.some((name) => name.toLowerCase() === shopify.toLowerCase());
   return {
     ...dto,
     email: '',
     phone: '',
+    assignedVendor: visible.join(', '),
+    shopifyVendor: shopifyVisible ? dto.shopifyVendor : '',
     subOrders,
     subOrderIndexMap: Object.fromEntries(subOrders.map((sub) => [String(sub.index), sub.id])),
     items: (dto.items || []).filter((item) => skus.has(item.sku)),
@@ -236,6 +242,12 @@ async function generateInvoice(req, res) {
   }, invoiceEmail.emailed ? 'Invoice emailed' : 'Invoice PDF ready. Email was not sent.');
 }
 
+function lineMasterId(order, sub) {
+  if (sub?.masterSkuId) return sub.masterSkuId;
+  const item = (order.items || []).find((row) => row.sku === sub?.sku);
+  return item?.masterSkuId || null;
+}
+
 async function assignSubOrder(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
@@ -243,6 +255,7 @@ async function assignSubOrder(req, res) {
   if (!order) throw new HttpError(404, 'Order not found');
   const sub = (order.subOrders || []).find((row) => row.id === req.params.subOrderId);
   if (!sub) throw new HttpError(404, 'Sub-order not found');
+  if (!lineMasterId(order, sub)) throw new HttpError(400, 'Map the SKU before this line can go to a vendor.');
   const vendorName = String(req.body.assignedVendor || '').trim();
   const saved = await vendorByName(tenantId, vendorName);
   if (vendorName && !saved) throw new HttpError(400, `${vendorName} is not a vendor on this workspace. Add it on the Vendors page first.`);
@@ -375,6 +388,9 @@ async function patchStatus(req, res) {
   const status = String(req.body.status || '').trim();
   const allowed = new Set(['New', 'Processing', 'Pending', 'Packed', 'Ready to Ship', 'Dispatched', 'Delivered', 'Cancelled', 'Unfulfillable']);
   if (!allowed.has(status)) throw new HttpError(400, 'Unknown status');
+  if (['Packed', 'Ready to Ship'].includes(status) && (order.items || []).some((item) => !item.masterSkuId)) {
+    throw new HttpError(400, 'Map the SKU before this order can be packed.');
+  }
   order.status = status;
   if (status === 'Cancelled') {
     const { releaseOrderReserve } = require('../services/ship.service');

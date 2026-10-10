@@ -9,6 +9,7 @@ const Tenant = require('../src/models/Tenant');
 const Order = require('../src/models/Order');
 const bcrypt = require('bcryptjs');
 const Vendor = require('../src/models/Vendor');
+const MasterSku = require('../src/models/MasterSku');
 const User = require('../src/models/User');
 const Role = require('../src/models/Role');
 const vendors = require('../src/controllers/vendors.controller');
@@ -52,6 +53,7 @@ test.before(async () => {
   await mongoose.connect(memory.getUri());
   await Promise.all([Order.syncIndexes(), Vendor.syncIndexes()]);
   tenant = await Tenant.create({ name: 'Vendor shop', slug: `vend-${Date.now()}`, kind: 'merchant' });
+  const sku = await MasterSku.create({ tenantId: tenant._id, code: 'K1', name: 'Kurta' });
   await Order.create({
     tenantId: tenant._id,
     orderNo: 'SHP-1',
@@ -60,10 +62,13 @@ test.before(async () => {
     customer: 'Buyer',
     phone: '9000000000',
     status: 'New',
-    items: [{ name: 'Kurta', sku: 'K1', qty: 1, price: 1000 }, { name: 'Dupatta', sku: 'D1', qty: 1, price: 500 }],
+    items: [
+      { name: 'Kurta', sku: 'K1', qty: 1, price: 1000, masterSkuId: sku._id },
+      { name: 'Dupatta', sku: 'D1', qty: 1, price: 500, masterSkuId: sku._id },
+    ],
     subOrders: [
-      { id: 'SHP-1-1', index: 1, sku: 'K1', title: 'Kurta', price: 1000 },
-      { id: 'SHP-1-2', index: 2, sku: 'D1', title: 'Dupatta', price: 500 },
+      { id: 'SHP-1-1', index: 1, sku: 'K1', title: 'Kurta', price: 1000, masterSkuId: sku._id },
+      { id: 'SHP-1-2', index: 2, sku: 'D1', title: 'Dupatta', price: 500, masterSkuId: sku._id },
     ],
   });
 });

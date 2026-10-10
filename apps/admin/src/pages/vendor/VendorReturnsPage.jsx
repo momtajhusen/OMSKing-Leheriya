@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import useOrderStore from '../../stores/orderStore';
-import { vendorLines } from '../../lib/vendorLines';
+import useVendorStore from '../../stores/vendorStore';
+import { vendorReturnLines } from '../../lib/vendorLines';
 import { formatDate, formatINR } from '../../utils/format';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -10,25 +11,26 @@ import { VendorPage, VendorStat, VendorSheet } from '../../components/vendor/Ven
 import ProductThumb from '../../components/ui/ProductThumb';
 import { RotateCcw, Ban, Undo2 } from 'lucide-react';
 
-const CANCELLED = ['Cancelled', 'Canceled', 'RTO'];
-
 export default function VendorReturnsPage() {
   const orders = useOrderStore((s) => s.orders);
   const loaded = useOrderStore((s) => s.loaded);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+  const vendors = useVendorStore((s) => s.vendors);
+  const loadVendors = useVendorStore((s) => s.load);
+  const vendorNames = useMemo(() => vendors.filter((row) => !row.removed).map((row) => row.name), [vendors]);
 
   useEffect(() => {
     hydrateFromApi();
-  }, [hydrateFromApi]);
+    loadVendors();
+  }, [hydrateFromApi, loadVendors]);
 
-  const items = useMemo(() => vendorLines(orders)
-    .filter((row) => row.reversePickup || CANCELLED.includes(row.orderStatus))
+  const items = useMemo(() => vendorReturnLines(orders, vendorNames)
     .map((row) => ({
       ...row,
       kind: row.reversePickup ? 'Customer return' : 'Cancelled',
       reason: row.reversePickup?.reason || '',
       eventDate: row.reversePickup?.bookedAt || row.reversePickup?.createdAt || row.assignedDate,
-    })), [orders]);
+    })), [orders, vendorNames]);
 
   const returnsCount = items.filter((r) => r.kind === 'Customer return').length;
 

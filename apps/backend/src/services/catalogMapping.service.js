@@ -98,6 +98,44 @@ function mapMapping(row) {
   };
 }
 
+async function linkOpenOrders(tenantId, mapping) {
+  if (!mapping?.masterSkuId) return;
+  const sku = String(mapping.channelSkuCode || '').trim();
+  if (!sku) return;
+  const Order = require('../models/Order');
+  const match = new RegExp(`^${sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+  const orders = await Order.find({
+    tenantId,
+    $or: [
+      { 'items.sku': match },
+      { 'subOrders.sku': match },
+      { 'channelLines.sku': match },
+    ],
+  }).setOptions({ skipTenantFilter: true });
+  for (const order of orders) {
+    let changed = false;
+    (order.items || []).forEach((item) => {
+      if (!match.test(item.sku || '')) return;
+      if (!item.masterSkuId) {
+        item.masterSkuId = mapping.masterSkuId;
+        changed = true;
+      }
+      if (!item.skuMappingId && mapping._id) {
+        item.skuMappingId = mapping._id;
+        changed = true;
+      }
+    });
+    (order.subOrders || []).forEach((sub) => {
+      if (!match.test(sub.sku || '')) return;
+      if (!sub.masterSkuId) {
+        sub.masterSkuId = mapping.masterSkuId;
+        changed = true;
+      }
+    });
+    if (changed) await order.save();
+  }
+}
+
 async function rememberBarcode(master, barcode) {
   const bar = normalizeBarcode(barcode);
   if (!master || !bar || master.barcode) return master;
@@ -170,6 +208,7 @@ async function ingestListing(tenantId, userId, row, options = {}) {
     if (existing.masterSkuId) {
       master = await MasterSku.findById(existing.masterSkuId).setOptions({ skipTenantFilter: true });
       if (master) await rememberBarcode(master, row.barcode);
+      await linkOpenOrders(tenantId, existing);
     }
     return { action: 'exists', mapping: existing, master };
   }
@@ -198,8 +237,10 @@ async function ingestListing(tenantId, userId, row, options = {}) {
   if (auto) await rememberBarcode(auto, row.barcode);
   if (!auto && createMaster) {
     const created = await createMasterForListing(tenantId, userId, mapping, listingExtras(row));
+    await linkOpenOrders(tenantId, created.mapping);
     return { action: 'created', mapping: created.mapping, master: created.master };
   }
+  if (mapping.masterSkuId) await linkOpenOrders(tenantId, mapping);
   return { action: auto ? 'auto-mapped' : 'unmapped', mapping, master: auto || null };
 }
 
@@ -275,6 +316,7 @@ async function createMasterForListing(tenantId, userId, mapping, extras = {}) {
   mapping.lastSyncError = '';
   mapping.updatedBy = userId;
   await mapping.save();
+  await linkOpenOrders(tenantId, mapping);
   return { product, master, mapping };
 }
 
@@ -291,6 +333,7 @@ async function attachMappingToCode(tenantId, userId, mapping, masterCode) {
     master.codeLocked = true;
     await master.save();
   }
+  await linkOpenOrders(tenantId, mapping);
   return { master, mapping };
 }
 

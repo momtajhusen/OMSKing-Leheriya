@@ -65,8 +65,10 @@ async function connectedClient(tenantId) {
   const row = await getConnection(tenantId, 'myntra');
   if (!row) throw new HttpError(400, 'Myntra is not connected for this workspace');
   const creds = credsOf(row);
-  if (!creds.merchantId || !creds.secretKey) {
-    throw new HttpError(400, 'Myntra Merchant Id and Secret Key are required');
+  if (!String(creds.merchantId || '').trim() || !String(creds.secretKey || '').trim()) {
+    const err = new HttpError(400, 'Myntra Merchant Id and Secret Key are required');
+    err.terminal = true;
+    throw err;
   }
   const client = createMyntraClient(creds, {
     saveTokens: (tokens) => patchCreds(row, tokens),
@@ -206,16 +208,24 @@ async function upsertMappedOrder(tenantId, mapped) {
     delete doc.id;
     delete doc.createdAt;
     delete doc.subOrderIndexMap;
-    const { syncOrderReservations } = require('./orderReserve.service');
-    await syncOrderReservations(tenantId, doc);
-    await Order.create({ ...doc, tenantId, lastChannelSyncAt: now });
-    const { notifyEventEmail } = require('./notify.service');
-    await notifyEventEmail(tenantId, 'NOT-001', {
-      dedupeKey: `order.new:${mapped.orderNo}`,
-      subject: `New order ${mapped.orderNo}`,
-      text: `Order: ${mapped.orderNo}\nChannel: Myntra`,
-    });
-    return 'created';
+    const { claimChannelOrder } = require('./channelOrder.service');
+    const claimed = await claimChannelOrder(
+      { tenantId, channel: 'Myntra', externalOrderId: String(mapped.externalOrderId || '') },
+      { ...doc, tenantId, lastChannelSyncAt: now },
+    );
+    if (claimed.created) {
+      const { syncOrderReservations } = require('./orderReserve.service');
+      await syncOrderReservations(tenantId, claimed.doc);
+      await claimed.doc.save();
+      const { notifyEventEmail } = require('./notify.service');
+      await notifyEventEmail(tenantId, 'NOT-001', {
+        dedupeKey: `order.new:${mapped.orderNo}`,
+        subject: `New order ${mapped.orderNo}`,
+        text: `Order: ${mapped.orderNo}\nChannel: Myntra`,
+      });
+      return 'created';
+    }
+    existing = claimed.doc;
   }
   const before = JSON.stringify([existing.status, existing.channelStatus, existing.awb, existing.invoiceNo]);
   const lines = [
@@ -326,7 +336,7 @@ async function ingestOrderSkus(tenantId, userId, details) {
 /**
  * Pulls Myntra orders for [from, to] and upserts them. Safe to re-run: orders are keyed by MYN-<orderId>.
  */
-async function pullMyntraOrders(tenantId, { from, to, userId, client: injected } = {}) {
+async function pullMyntraOrders(tenantId, { from, to, userId, client: injected, skipExternalIds = [], afterEach } = {}) {
   let client = injected;
   let row = null;
   if (!client) ({ client, row } = await connectedClient(tenantId));
@@ -344,6 +354,7 @@ async function pullMyntraOrders(tenantId, { from, to, userId, client: injected }
     if (ref.sellerOrderId) byOrder.get(ref.orderId).add(ref.sellerOrderId);
   });
 
+  const skip = new Set((skipExternalIds || []).map((id) => String(id)));
   const result = {
     fetched: byOrder.size,
     created: 0,
@@ -355,6 +366,10 @@ async function pullMyntraOrders(tenantId, { from, to, userId, client: injected }
     unmappedSkus: 0,
   };
   for (const [orderId, sellerIds] of byOrder) {
+    if (skip.has(String(orderId))) {
+      result.unchanged += 1;
+      continue;
+    }
     try {
       const details = [];
       for (const sellerOrderId of sellerIds) details.push(await client.getOrder(sellerOrderId));
@@ -364,7 +379,9 @@ async function pullMyntraOrders(tenantId, { from, to, userId, client: injected }
       const masters = await masterNamesFor(tenantId, skuInfo.skus);
       const action = await upsertMappedOrder(tenantId, mapMyntraOrder(orderId, details, masters));
       result[action] += 1;
+      if (afterEach) await afterEach(String(orderId));
     } catch (err) {
+      if (err.delayMs) throw err;
       result.failed += 1;
       if (result.errors.length < 5) result.errors.push(`${orderId}: ${err.message}`);
     }

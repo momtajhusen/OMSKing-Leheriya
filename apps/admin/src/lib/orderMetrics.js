@@ -1,4 +1,4 @@
-import { CHANNEL_CATALOG, orderChannelLabel } from '../constants/channelCatalog';
+import { CHANNEL_CATALOG, orderChannelLabel } from '../constants/channelCatalog.js';
 
 export const CHANNELS = CHANNEL_CATALOG.map((row) => orderChannelLabel(row));
 

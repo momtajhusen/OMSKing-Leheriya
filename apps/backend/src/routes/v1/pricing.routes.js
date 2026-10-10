@@ -10,7 +10,7 @@ const router = require('express').Router();
 
 router.get('/', asyncHandler(pricing.getPricing));
 router.post('/razorpay-webhook', asyncHandler(pricing.razorpayWebhook));
-router.get('/mine', authMiddleware, tenantMiddleware, asyncHandler(pricing.mine));
+router.get('/mine', authMiddleware, tenantMiddleware, requirePermission('settings.manage'), asyncHandler(pricing.mine));
 router.get('/mine/upi', authMiddleware, tenantMiddleware, requirePermission('settings.manage'), asyncHandler(pricing.upi));
 router.post('/mine/checkout', authMiddleware, tenantMiddleware, requirePermission('settings.manage'), asyncHandler(pricing.checkout));
 router.post('/mine/confirm', authMiddleware, tenantMiddleware, requirePermission('settings.manage'), asyncHandler(pricing.confirm));

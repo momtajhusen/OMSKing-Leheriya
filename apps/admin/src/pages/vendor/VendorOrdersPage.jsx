@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
-import { vendorLines } from '../../lib/vendorLines';
+import useVendorStore from '../../stores/vendorStore';
+import { vendorLines, vendorSaveAction, rowsWithSharedTracking } from '../../lib/vendorLines';
 import { formatDate, formatINR } from '../../utils/format';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Button from '../../components/ui/Button';
@@ -38,7 +39,10 @@ export default function VendorOrdersPage() {
   const loadError = useOrderStore((s) => s.error);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const vendorUpdate = useOrderStore((s) => s.vendorUpdate);
-  const rows = useMemo(() => vendorLines(orders), [orders]);
+  const vendors = useVendorStore((s) => s.vendors);
+  const loadVendors = useVendorStore((s) => s.load);
+  const vendorNames = useMemo(() => vendors.filter((row) => !row.removed).map((row) => row.name), [vendors]);
+  const rows = useMemo(() => vendorLines(orders, vendorNames), [orders, vendorNames]);
   const [edits, setEdits] = useState({});
   const [activeTab, setActiveTab] = useState('All');
   const [selectedIds, setSelectedIds] = useState([]);
@@ -53,7 +57,8 @@ export default function VendorOrdersPage() {
 
   useEffect(() => {
     hydrateFromApi();
-  }, [hydrateFromApi]);
+    loadVendors();
+  }, [hydrateFromApi, loadVendors]);
 
   const view = (row) => ({ ...row, ...edits[row.id] });
   const isDirty = (row) => Boolean(edits[row.id]) && EDITABLE.some((key) => key in edits[row.id] && edits[row.id][key] !== row[key]);
@@ -75,26 +80,24 @@ export default function VendorOrdersPage() {
   const toggleRow = (id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const toggleAllVisible = () => setSelectedIds(allVisibleSelected ? [] : visibleRows.map((r) => r.id));
 
-  /** Saves one line: dispatches when tracking + courier are filled on an accepted line, delivers when a delivery date is set. */
-  const persist = async (base) => {
-    const row = view(base);
+  /** Saves one line. An accepted line is a dispatch, so a blank tracking number is refused. */
+  const persist = async (row) => {
+    const decision = vendorSaveAction(row);
+    if (decision.error) return { error: `${row.orderId}: ${decision.error}` };
     const fields = {
       trackingNumber: row.trackingNumber,
       courier: row.courier,
       dispatchDate: row.dispatchedDate,
       deliveredDate: row.deliveryDate,
     };
-    let action = 'save';
-    if (['Accepted', 'Ready to Dispatch'].includes(row.status) && row.trackingNumber && row.courier) action = 'dispatch';
-    if (row.status === 'Dispatched' && row.deliveryDate) action = 'deliver';
-    const next = await vendorUpdate(row.masterId, row.id, { action, ...fields });
+    const next = await vendorUpdate(row.masterId, row.id, { action: decision.action, ...fields });
     if (next?.error) return { error: `${row.orderId}: ${next.error}` };
     setEdits((prev) => {
       const copy = { ...prev };
       delete copy[row.id];
       return copy;
     });
-    return { action };
+    return { action: decision.action };
   };
 
   const respond = async (row, action, reason) => {
@@ -111,17 +114,17 @@ export default function VendorOrdersPage() {
 
   const saveRow = async (row) => {
     setBusy(row.id);
-    const result = await persist(row);
+    const result = await persist(view(row));
     setBusy('');
     if (result.error) toast.error(result.error);
     else toast.success(result.action === 'dispatch' ? `${row.orderId} dispatched` : result.action === 'deliver' ? `${row.orderId} delivered` : `Saved ${row.orderId}`);
   };
 
-  const saveMany = async (list) => {
+  const saveMany = async (list, { snapshots = false } = {}) => {
     setBusy('bulk');
     const errors = [];
     for (const row of list) {
-      const result = await persist(row);
+      const result = await persist(snapshots ? row : view(row));
       if (result.error) errors.push(result.error);
     }
     setBusy('');
@@ -131,14 +134,19 @@ export default function VendorOrdersPage() {
 
   const applyBulkTracking = async () => {
     const courier = resolveVendorCourier(bulkCourier, bulkOtherName);
-    if (!bulkTracking.trim() || !courier) {
-      toast.error('Enter the tracking number and your courier');
+    const applied = rowsWithSharedTracking(rows.map(view), selectedIds, bulkTracking, courier);
+    if (applied.error) {
+      toast.error(applied.error);
       return;
     }
-    const picked = rows.filter((row) => selectedIds.includes(row.id));
-    picked.forEach((row) => { edits[row.id] = { ...edits[row.id], trackingNumber: bulkTracking.trim(), courier }; });
-    setEdits({ ...edits });
-    await saveMany(picked);
+    setEdits((prev) => {
+      const next = { ...prev };
+      applied.picked.forEach((row) => {
+        next[row.id] = { ...next[row.id], trackingNumber: row.trackingNumber, courier: row.courier };
+      });
+      return next;
+    });
+    await saveMany(applied.picked, { snapshots: true });
     setSelectedIds([]);
     setBulkTracking('');
     setBulkCourier('');

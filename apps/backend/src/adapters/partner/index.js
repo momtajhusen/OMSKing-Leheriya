@@ -1,5 +1,6 @@
 const { header, verifyHmac } = require('../signature');
 const { httpsRequest } = require('../http');
+const { gatedRequest } = require('../liveGate');
 
 function tokenOf(creds) {
   return String(creds?.apiToken || creds?.applicationSecret || creds?.token || creds?.secretKey || '').trim();
@@ -123,22 +124,30 @@ function orderRows(body) {
   })).filter((row) => row.externalOrderId);
 }
 
-async function pullCatalog(creds, { request = defaultRequest } = {}) {
+function partnerRequest(creds, request) {
+  return gatedRequest(creds, request, defaultRequest, { allowSandbox: true });
+}
+
+async function pullCatalog(creds, opts = {}) {
   ready(creds);
+  const request = partnerRequest(creds, opts.request);
   const path = creds.productsPath || '/products';
   const body = await call(request, 'GET', `${baseOf(creds)}${path}`, creds);
   return { rows: catalogRows(body), locations: [] };
 }
 
-async function pullOrders(creds, { request = defaultRequest } = {}) {
+async function pullOrders(creds, opts = {}) {
   ready(creds);
+  const request = partnerRequest(creds, opts.request);
   const path = creds.ordersPath || '/orders';
   const body = await call(request, 'GET', `${baseOf(creds)}${path}`, creds);
   return orderRows(body);
 }
 
-async function pushInventory(creds, { sku, quantity, request = defaultRequest } = {}) {
+async function pushInventory(creds, opts = {}) {
   ready(creds);
+  const request = partnerRequest(creds, opts.request);
+  const { sku, quantity } = opts;
   const sellerSku = String(sku || '').trim();
   if (!sellerSku) {
     const err = new Error('Stock was not pushed. The seller SKU is missing.');
@@ -152,12 +161,18 @@ async function pushInventory(creds, { sku, quantity, request = defaultRequest } 
   return `${sellerSku} quantity ${qty}.`;
 }
 
-async function ping(creds, request = defaultRequest) {
+async function ping(creds, request) {
   if (!baseOf(creds) || !tokenOf(creds)) {
     return { ok: false, message: 'API host and token are required' };
   }
+  let transport;
   try {
-    await call(request, 'GET', baseOf(creds), creds);
+    transport = partnerRequest(creds, request);
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+  try {
+    await call(transport, 'GET', baseOf(creds), creds);
     return { ok: true, message: 'Channel API reachable' };
   } catch (err) {
     return { ok: false, message: err.message || 'Channel API did not respond' };

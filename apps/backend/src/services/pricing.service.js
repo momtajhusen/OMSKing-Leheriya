@@ -46,6 +46,7 @@ function quoteOrders(orderCount, doc) {
   const billPaise = Math.max(doc.minimumMonthlyPaise || 0, usagePaise);
   return {
     orders,
+    ratePaise,
     rate: rupees(ratePaise),
     usage: rupees(usagePaise),
     minimumMonthly: rupees(doc.minimumMonthlyPaise || 0),

@@ -1,4 +1,4 @@
-const { invoiceNumber, creditNoteNumber, lineTax, shipToState, money } = require('../services/finance.service');
+const { invoiceNumber, creditNoteNumber, lineTax, shipToState, fromPaise, toPaise } = require('../services/finance.service');
 
 function escapePdfText(value) {
   return String(value || '')
@@ -42,13 +42,20 @@ function buildInvoicePdf(order, { company = {}, warehouseState = '', kind = 'inv
     item,
     tax: lineTax(item, { warehouseState, shipState: ship }),
   }));
-  const totals = taxes.reduce((acc, row) => ({
-    taxable: money(acc.taxable + row.tax.taxable),
-    cgst: money(acc.cgst + row.tax.cgst),
-    sgst: money(acc.sgst + row.tax.sgst),
-    igst: money(acc.igst + row.tax.igst),
-    gross: money(acc.gross + row.tax.gross),
+  const totalsPaise = taxes.reduce((acc, row) => ({
+    taxable: acc.taxable + toPaise(row.tax.taxable),
+    cgst: acc.cgst + toPaise(row.tax.cgst),
+    sgst: acc.sgst + toPaise(row.tax.sgst),
+    igst: acc.igst + toPaise(row.tax.igst),
+    gross: acc.gross + toPaise(row.tax.gross),
   }), { taxable: 0, cgst: 0, sgst: 0, igst: 0, gross: 0 });
+  const totals = {
+    taxable: fromPaise(totalsPaise.taxable),
+    cgst: fromPaise(totalsPaise.cgst),
+    sgst: fromPaise(totalsPaise.sgst),
+    igst: fromPaise(totalsPaise.igst),
+    gross: fromPaise(totalsPaise.gross),
+  };
   const lines = [
     kind === 'credit' ? `Credit note ${number}` : `Tax invoice ${number}`,
     company.companyName || '',

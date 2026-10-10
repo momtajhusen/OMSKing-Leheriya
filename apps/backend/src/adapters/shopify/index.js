@@ -1,6 +1,7 @@
 const https = require('https');
 const { URL } = require('url');
 const { header, verifyHmac } = require('../signature');
+const { gatedRequest } = require('../liveGate');
 
 function shopHost(value) {
   return String(value || '')
@@ -125,10 +126,11 @@ async function listProductVendors(creds) {
     err.statusCode = 400;
     throw err;
   }
+  const request = gatedRequest(creds, undefined, httpGet, { allowSandbox: true });
   const names = new Set();
   let url = `https://${shop}/admin/api/2024-10/products.json?fields=vendor&limit=250`;
   for (let page = 0; page < 4 && url; page += 1) {
-    const res = await httpGet(url, {
+    const res = await request(url, {
       'X-Shopify-Access-Token': token,
       Accept: 'application/json',
     });
@@ -177,7 +179,7 @@ function variantRows(product) {
   });
 }
 
-async function pullCatalog(creds, { request = httpGet } = {}) {
+async function pullCatalog(creds, opts = {}) {
   const shop = shopOf(creds);
   const token = String(creds?.adminToken || '').trim();
   if (!shop || !token) {
@@ -185,6 +187,7 @@ async function pullCatalog(creds, { request = httpGet } = {}) {
     err.statusCode = 400;
     throw err;
   }
+  const request = gatedRequest(creds, opts.request, httpGet, { allowSandbox: true });
   const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
   const products = [];
   let url = `https://${shop}/admin/api/2024-10/products.json?limit=250`;
@@ -257,8 +260,10 @@ async function inventoryItemId(shop, token, variantId, request) {
   return id;
 }
 
-async function pushInventory(creds, { rows = [], request = httpCall } = {}) {
+async function pushInventory(creds, opts = {}) {
+  const rows = opts.rows || [];
   const { shop, token } = requireShop(creds);
+  const request = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
   const sent = [];
   for (const row of rows) {
     const locationId = String(row.locationId || '');
@@ -285,8 +290,10 @@ async function pushInventory(creds, { rows = [], request = httpCall } = {}) {
   return { sent };
 }
 
-async function readLocationAvailable(creds, { variantId, locationId, request = httpCall } = {}) {
+async function readLocationAvailable(creds, opts = {}) {
+  const { variantId, locationId } = opts;
   const { shop, token } = requireShop(creds);
+  const request = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
   if (!locationId || String(locationId).startsWith('shopify-location-')) {
     const err = new Error('Shopify location qty was not read. Location A is still a placeholder.');
     err.statusCode = 400;
@@ -311,8 +318,10 @@ async function readLocationAvailable(creds, { variantId, locationId, request = h
   return Math.max(0, Math.floor(Number(level?.available) || 0));
 }
 
-async function fulfillOrder(creds, { orderId, trackingNumber, request = httpCall } = {}) {
+async function fulfillOrder(creds, opts = {}) {
+  const { orderId, trackingNumber } = opts;
   const { shop, token } = requireShop(creds);
+  const request = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
   const headers = shopifyHeaders(token);
   const listed = await request('GET', `https://${shop}/admin/api/2024-10/orders/${encodeURIComponent(orderId)}/fulfillment_orders.json`, { headers });
   if (listed.status < 200 || listed.status >= 300) {
@@ -346,8 +355,10 @@ async function fulfillOrder(creds, { orderId, trackingNumber, request = httpCall
   return { fulfillmentId: id ? String(id) : '' };
 }
 
-async function cancelFulfillment(creds, { fulfillmentId, request = httpCall } = {}) {
+async function cancelFulfillment(creds, opts = {}) {
+  const { fulfillmentId } = opts;
   const { shop, token } = requireShop(creds);
+  const request = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
   const res = await request('POST', `https://${shop}/admin/api/2024-10/fulfillments/${encodeURIComponent(fulfillmentId)}/cancel.json`, {
     headers: shopifyHeaders(token),
   });
@@ -414,7 +425,7 @@ function mapShopifyOrder(order, creds) {
   };
 }
 
-async function pullOrders(creds, { request = httpGet } = {}) {
+async function pullOrders(creds, opts = {}) {
   const shop = shopOf(creds);
   const token = String(creds?.adminToken || '').trim();
   if (!shop || !token) {
@@ -423,6 +434,7 @@ async function pullOrders(creds, { request = httpGet } = {}) {
     err.terminal = true;
     throw err;
   }
+  const request = gatedRequest(creds, opts.request, httpGet, { allowSandbox: true });
   const since = creds?.importOrdersFrom ? new Date(creds.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
   const created = Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 864e5) : since;
   const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
@@ -479,7 +491,7 @@ function returnRowsFromOrders(orders) {
   return rows;
 }
 
-async function pullReturns(creds, { request = httpGet } = {}) {
+async function pullReturns(creds, opts = {}) {
   const shop = shopOf(creds);
   const token = String(creds?.adminToken || '').trim();
   if (!shop || !token) {
@@ -488,6 +500,7 @@ async function pullReturns(creds, { request = httpGet } = {}) {
     err.terminal = true;
     throw err;
   }
+  const request = gatedRequest(creds, opts.request, httpGet, { allowSandbox: true });
   const since = creds?.importOrdersFrom ? new Date(creds.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
   const updated = Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 864e5) : since;
   const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };

@@ -1,5 +1,20 @@
+function toPaise(value) {
+  return Math.round((Number(value) || 0) * 100);
+}
+
+function fromPaise(paise) {
+  const n = Math.trunc(Number(paise) || 0);
+  const sign = n < 0 ? -1 : 1;
+  const abs = Math.abs(n);
+  return sign * (Math.trunc(abs / 100) + (abs % 100) / 100);
+}
+
 function money(value) {
-  return Math.round((Number(value) || 0) * 100) / 100;
+  return fromPaise(toPaise(value));
+}
+
+function addMoney(...values) {
+  return fromPaise(values.reduce((sum, value) => sum + toPaise(value), 0));
 }
 
 function normState(value) {
@@ -24,19 +39,23 @@ function shipToState(order) {
 
 function lineTax(item, { warehouseState = '', shipState = '' } = {}) {
   const rate = Number(item.gst) || 0;
-  const gross = (Number(item.price) || 0) * (Number(item.qty) || 1);
-  const taxable = rate ? gross / (1 + rate / 100) : gross;
-  const tax = gross - taxable;
+  const qty = Math.max(0, Number(item.qty) || 0) || 1;
+  const grossPaise = toPaise(item.price) * qty;
+  const taxablePaise = rate ? Math.round((grossPaise * 100) / (100 + rate)) : grossPaise;
+  const taxPaise = grossPaise - taxablePaise;
   const from = normState(warehouseState);
   const to = normState(shipState);
   const intra = Boolean(from) && from === to;
+  const cgstPaise = intra ? Math.floor(taxPaise / 2) : 0;
+  const sgstPaise = intra ? taxPaise - cgstPaise : 0;
+  const igstPaise = intra ? 0 : taxPaise;
   return {
     rate,
-    gross: money(gross),
-    taxable: money(taxable),
-    cgst: money(intra ? tax / 2 : 0),
-    sgst: money(intra ? tax / 2 : 0),
-    igst: money(intra ? 0 : tax),
+    gross: fromPaise(grossPaise),
+    taxable: fromPaise(taxablePaise),
+    cgst: fromPaise(cgstPaise),
+    sgst: fromPaise(sgstPaise),
+    igst: fromPaise(igstPaise),
     intraState: intra,
   };
 }
@@ -186,6 +205,9 @@ function matchCourierBill(csv) {
 
 module.exports = {
   money,
+  toPaise,
+  fromPaise,
+  addMoney,
   invoiceNumber,
   creditNoteNumber,
   shipToState,

@@ -42,4 +42,16 @@ async function matchCourierBill(req, res) {
   return successResponse(res, { rows }, 'Courier bill checked. It is not part of the marketplace settlement.');
 }
 
-module.exports = { matchSettlement, matchReturnFile, matchCourierBill };
+async function salesReport(req, res) {
+  const orders = await skip(Order.find({ tenantId: merchantTenant(req) }).select('status total'));
+  let count = 0;
+  let netSalesPaise = 0;
+  for (const order of orders) {
+    if (order.status === 'Cancelled') continue;
+    count += 1;
+    netSalesPaise += Math.round(Number(order.total || 0) * 100);
+  }
+  return successResponse(res, { orders: count, netSalesPaise }, 'Reports');
+}
+
+module.exports = { matchSettlement, matchReturnFile, matchCourierBill, salesReport };

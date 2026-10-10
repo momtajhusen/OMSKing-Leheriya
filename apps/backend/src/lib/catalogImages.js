@@ -2,12 +2,16 @@ const Product = require('../models/Product');
 const MasterSku = require('../models/MasterSku');
 const SkuMapping = require('../models/SkuMapping');
 
+function isPlaceholder(url) {
+  return /example\.com|picsum\.photos|via\.placeholder\.com|placehold\.co|placeholder\.com|dummyimage\.com|placekitten\.com|loremflickr\.com/i.test(url);
+}
+
 function firstImage(images) {
   if (!Array.isArray(images)) return '';
   for (const item of images) {
     if (typeof item !== 'string') continue;
     const url = item.trim();
-    if (!url || /example\.com/i.test(url)) continue;
+    if (!url || isPlaceholder(url)) continue;
     if (/^https?:\/\//i.test(url) || url.startsWith('/uploads/')) return url;
   }
   return '';
@@ -60,10 +64,16 @@ async function imagesBySku(tenantId) {
 }
 
 function withImage(row, bySku) {
-  if (!row || firstImage([row.imageUrl])) return row;
-  const url = imageForSku(bySku, row.sku || row.code)
-    || (row.masterSkuId ? bySku.get(`id:${row.masterSkuId}`) : '');
-  return url ? { ...row, imageUrl: url } : row;
+  if (!row) return row;
+  const own = firstImage([row.imageUrl]);
+  if (own) return row;
+  const url = firstImage([
+    imageForSku(bySku, row.sku || row.code),
+    row.masterSkuId ? bySku.get(`id:${row.masterSkuId}`) : '',
+  ]);
+  if (url) return { ...row, imageUrl: url };
+  if (row.imageUrl) return { ...row, imageUrl: '' };
+  return row;
 }
 
 function paintOrder(order, bySku) {

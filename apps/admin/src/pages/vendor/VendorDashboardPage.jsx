@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
+import useVendorStore from '../../stores/vendorStore';
 import { vendorLines } from '../../lib/vendorLines';
 import { formatINR, formatDate } from '../../utils/format';
 import { useAuth } from '../../hooks/useAuth';
@@ -18,12 +19,16 @@ export default function VendorDashboardPage() {
   const loaded = useOrderStore((s) => s.loaded);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const vendorUpdate = useOrderStore((s) => s.vendorUpdate);
-  const rows = useMemo(() => vendorLines(orders), [orders]);
+  const vendors = useVendorStore((s) => s.vendors);
+  const loadVendors = useVendorStore((s) => s.load);
+  const vendorNames = useMemo(() => vendors.filter((row) => !row.removed).map((row) => row.name), [vendors]);
+  const rows = useMemo(() => vendorLines(orders, vendorNames), [orders, vendorNames]);
   const [busy, setBusy] = useState('');
 
   useEffect(() => {
     hydrateFromApi();
-  }, [hydrateFromApi]);
+    loadVendors();
+  }, [hydrateFromApi, loadVendors]);
 
   const pending = rows.filter((r) => r.status === 'Pending Acceptance');
   const accepted = rows.filter((r) => r.status === 'Accepted');

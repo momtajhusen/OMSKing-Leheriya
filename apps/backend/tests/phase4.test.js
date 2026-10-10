@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { MongoMemoryReplSet } = require('mongodb-memory-server');
 const { als } = require('../src/lib/tenantContext');
-const { withTransaction } = require('../src/lib/withTransaction');
+const { withTransaction, assertTransactionSupport, resetReplicaSetCache, isTransientTransactionError } = require('../src/lib/withTransaction');
 const Tenant = require('../src/models/Tenant');
 const Product = require('../src/models/Product');
 const MasterSku = require('../src/models/MasterSku');
@@ -11,7 +11,7 @@ const Warehouse = require('../src/models/Warehouse');
 const Inventory = require('../src/models/Inventory');
 const InventoryLedger = require('../src/models/InventoryLedger');
 const InventoryReservation = require('../src/models/InventoryReservation');
-const { stockIn, stressReserve, releaseReservation, listBalances } = require('../src/services/inventory.service');
+const { stockIn, stressReserve, releaseReservation, listBalances, reserveStock } = require('../src/services/inventory.service');
 
 let replSet;
 
@@ -170,6 +170,132 @@ test('concurrent reserve holds one unit and rejects the rest without orphan ledg
     const released = releases.some((row) => row.referenceId === line.referenceId && String(row.warehouseId) === String(line.warehouseId));
     assert.ok(stillHeld || released, `reserve ledger ${line.referenceId} has no hold and no release`);
   }
+});
+
+test('startup check accepts a replica set in production', async () => {
+  resetReplicaSetCache();
+  assert.equal(await assertTransactionSupport({ env: 'production' }), true);
+});
+
+test('withTransaction retries a transient error then commits stock and ledger together', async () => {
+  const stamp = Date.now();
+  const tenant = await Tenant.create({ name: 'Retry', slug: `retry-${stamp}`, kind: 'merchant' });
+  const sku = await MasterSku.create({ tenantId: tenant._id, code: `RTY-${stamp}`, name: 'Retry sku' });
+  const warehouse = await Warehouse.create({
+    tenantId: tenant._id,
+    code: 'WH-001',
+    name: 'Physical',
+    type: 'physical',
+    isDefault: true,
+    sellOnShopify: true,
+    sellOnAmazon: true,
+    sellOnMyntra: true,
+    status: 'active',
+  });
+  await stockIn(String(tenant._id), null, {
+    masterSkuId: sku._id,
+    warehouseId: warehouse._id,
+    qty: 2,
+    reason: 'opening',
+  });
+
+  let attempts = 0;
+  const transient = new Error('WriteConflict');
+  transient.code = 112;
+  transient.codeName = 'WriteConflict';
+  transient.errorLabels = ['TransientTransactionError'];
+  transient.hasErrorLabel = (label) => label === 'TransientTransactionError';
+  assert.equal(isTransientTransactionError(transient), true);
+
+  await withTransaction(async (session) => {
+    attempts += 1;
+    if (attempts === 1) throw transient;
+    await Inventory.findOneAndUpdate(
+      { tenantId: tenant._id, masterSkuId: sku._id, warehouseId: warehouse._id },
+      { $inc: { physicalQty: 1 } },
+      { session, new: true },
+    ).setOptions({ skipTenantFilter: true });
+    await new InventoryLedger({
+      tenantId: tenant._id,
+      masterSkuId: sku._id,
+      warehouseId: warehouse._id,
+      transactionId: `TX-RETRY-${stamp}`,
+      movementType: 'adjustment_plus',
+      qtyDelta: 1,
+      balanceAfter: 3,
+      reservedAfter: 0,
+      availableAfter: 3,
+      reason: 'retry commit',
+    }).save({ session });
+  });
+
+  assert.ok(attempts >= 2);
+  const row = await Inventory.findOne({ tenantId: tenant._id, masterSkuId: sku._id });
+  assert.equal(row.physicalQty, 3);
+  assert.equal(await InventoryLedger.countDocuments({ tenantId: tenant._id, transactionId: `TX-RETRY-${stamp}` }), 1);
+});
+
+test('two parallel orders on the last piece reserve exactly one and never go negative', async () => {
+  const stamp = Date.now();
+  const tenant = await Tenant.create({ name: 'Last piece', slug: `last-${stamp}`, kind: 'merchant' });
+  const sku = await MasterSku.create({ tenantId: tenant._id, code: `LAST-${stamp}`, name: 'Last piece' });
+  const warehouse = await Warehouse.create({
+    tenantId: tenant._id,
+    code: 'WH-001',
+    name: 'Physical',
+    type: 'physical',
+    isDefault: true,
+    sellOnShopify: true,
+    sellOnAmazon: true,
+    sellOnMyntra: true,
+    status: 'active',
+  });
+  await stockIn(String(tenant._id), null, {
+    masterSkuId: sku._id,
+    warehouseId: warehouse._id,
+    qty: 1,
+    reason: 'last piece',
+  });
+
+  const results = await Promise.allSettled([
+    reserveStock(String(tenant._id), null, {
+      masterSkuId: sku._id,
+      channel: 'shopify',
+      qty: 1,
+      warehouseId: warehouse._id,
+      idempotencyKey: `last-a-${stamp}`,
+      orderRef: `ORD-A-${stamp}`,
+    }),
+    reserveStock(String(tenant._id), null, {
+      masterSkuId: sku._id,
+      channel: 'shopify',
+      qty: 1,
+      warehouseId: warehouse._id,
+      idempotencyKey: `last-b-${stamp}`,
+      orderRef: `ORD-B-${stamp}`,
+    }),
+  ]);
+
+  const held = results.filter((row) => row.status === 'fulfilled');
+  const rejected = results.filter((row) => row.status === 'rejected');
+  assert.equal(held.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.match(rejected[0].reason.message, /Out of stock|available/i);
+
+  const row = await Inventory.findOne({ tenantId: tenant._id, warehouseId: warehouse._id });
+  assert.equal(row.physicalQty, 1);
+  assert.equal(row.reservedQty, 1);
+  assert.ok(row.physicalQty >= 0);
+  assert.ok(row.reservedQty >= 0);
+  assert.ok(row.physicalQty + row.virtualQty - row.reservedQty >= 0);
+
+  const reserves = await InventoryLedger.find({ tenantId: tenant._id, movementType: 'order_reserve' });
+  const releases = await InventoryLedger.find({ tenantId: tenant._id, movementType: 'order_release' });
+  const holds = await InventoryReservation.find({ tenantId: tenant._id, status: 'held' });
+  assert.equal(holds.length, 1);
+  assert.equal(holds[0].qty, 1);
+  assert.equal(reserves.length - releases.length, 1);
+  assert.equal(row.reservedQty, holds.reduce((sum, hold) => sum + hold.qty, 0));
 });
 
 test('inventory lists every master SKU at both warehouses before any receipt', async () => {

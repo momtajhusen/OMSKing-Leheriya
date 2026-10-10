@@ -3,20 +3,73 @@ const { HttpError } = require('../utils/httpError');
 const { withSubOrders } = require('../lib/orderSubOrders');
 const { channelById } = require('../channels/registry');
 
+function duplicateKey(err) {
+  return err?.code === 11000 || err?.code === 11001 || err?.cause?.code === 11000;
+}
+
+function writeConflict(err) {
+  return err?.code === 112 || err?.codeName === 'WriteConflict';
+}
+
+function insertPayload(next) {
+  const doc = { ...next };
+  delete doc.subOrderIndexMap;
+  delete doc.id;
+  delete doc.createdAt;
+  return doc;
+}
+
+/**
+ * One Master Order per company + channel + channel order id.
+ * A concurrent second delivery hits the unique index and reloads the winner.
+ */
+async function claimChannelOrder(filter, insert, attempt = 0) {
+  try {
+    const raw = await Order.findOneAndUpdate(
+      filter,
+      { $setOnInsert: insertPayload(insert) },
+      { upsert: true, new: true, includeResultMetadata: true, setDefaultsOnInsert: true },
+    ).setOptions({ skipTenantFilter: true });
+    const doc = raw?.value;
+    if (!doc) {
+      const again = await Order.findOne(filter).setOptions({ skipTenantFilter: true });
+      if (!again) throw new Error('Channel order was not saved');
+      return { doc: again, created: false };
+    }
+    return { doc, created: raw.lastErrorObject?.updatedExisting !== true };
+  } catch (err) {
+    if (duplicateKey(err) || (writeConflict(err) && attempt < 2)) {
+      const doc = await Order.findOne(filter).setOptions({ skipTenantFilter: true });
+      if (doc) return { doc, created: false };
+      if (writeConflict(err) && attempt < 2) return claimChannelOrder(filter, insert, attempt + 1);
+    }
+    throw err;
+  }
+}
+
+async function finishChannelOrder(tenantId, doc, { created, before, orderNo, channelName }) {
+  const { syncOrderReservations } = require('./orderReserve.service');
+  await syncOrderReservations(tenantId, doc);
+  await doc.save();
+  if (!created) return before === `${doc.status}|${doc.total}` ? 'unchanged' : 'updated';
+  const { notifyEventEmail } = require('./notify.service');
+  await notifyEventEmail(tenantId, 'NOT-001', {
+    dedupeKey: `order.new:${orderNo}`,
+    subject: `New order ${orderNo}`,
+    text: `Order: ${orderNo}\nChannel: ${channelName}`,
+  });
+  return 'created';
+}
+
 async function ingestChannelOrders(tenantId, channelId, orders = []) {
   const meta = channelById(channelId);
   if (!meta) throw new HttpError(400, 'Unknown channel');
   const out = { fetched: orders.length, created: 0, updated: 0, unchanged: 0 };
+  const { prepareChannelItems } = require('./orderReserve.service');
   for (const order of orders) {
     const externalOrderId = String(order.externalOrderId || '').trim();
     if (!externalOrderId) continue;
     const orderNo = `${meta.orderPrefix}-${externalOrderId}`;
-    const existing = await Order.findOne({
-      tenantId,
-      channel: meta.name,
-      externalOrderId,
-    }).setOptions({ skipTenantFilter: true });
-    const { prepareChannelItems, syncOrderReservations } = require('./orderReserve.service');
     const items = await prepareChannelItems(tenantId, channelId, order.items || []);
     const next = withSubOrders({
       tenantId,
@@ -38,30 +91,29 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       shipState: order.shipState || '',
       sourceOrderData: order.sourceOrderData,
     });
-    await syncOrderReservations(tenantId, next);
-    if (!existing) {
-      await Order.create(next);
-      const { notifyEventEmail } = require('./notify.service');
-      await notifyEventEmail(tenantId, 'NOT-001', {
-        dedupeKey: `order.new:${orderNo}`,
-        subject: `New order ${orderNo}`,
-        text: `Order: ${orderNo}\nChannel: ${meta.name}`,
-      });
-      out.created += 1;
-      continue;
+    const { doc, created } = await claimChannelOrder(
+      { tenantId, channel: meta.name, externalOrderId },
+      next,
+    );
+    let before = null;
+    if (!created) {
+      before = `${doc.status}|${doc.total}`;
+      doc.status = next.status;
+      doc.total = next.total;
+      doc.items = next.items;
+      doc.subOrders = next.subOrders;
+      if (next.reserveState !== undefined) doc.reserveState = next.reserveState;
+      doc.paymentMode = next.paymentMode || doc.paymentMode;
+      doc.orderDate = next.orderDate || doc.orderDate;
+      doc.source = 'channel_api';
     }
-    const before = `${existing.status}|${existing.total}`;
-    existing.status = next.status;
-    existing.total = next.total;
-    existing.items = next.items;
-    existing.subOrders = next.subOrders;
-    if (next.reserveState !== undefined) existing.reserveState = next.reserveState;
-    existing.paymentMode = next.paymentMode || existing.paymentMode;
-    existing.orderDate = next.orderDate || existing.orderDate;
-    existing.source = 'channel_api';
-    await existing.save();
-    if (before === `${existing.status}|${existing.total}`) out.unchanged += 1;
-    else out.updated += 1;
+    const outcome = await finishChannelOrder(tenantId, doc, {
+      created,
+      before,
+      orderNo,
+      channelName: meta.name,
+    });
+    out[outcome] += 1;
   }
   return out;
 }
@@ -100,4 +152,4 @@ async function applyStoredWebhook(event) {
   return 'ignored';
 }
 
-module.exports = { ingestChannelOrders, applyStoredWebhook };
+module.exports = { ingestChannelOrders, applyStoredWebhook, claimChannelOrder, finishChannelOrder };

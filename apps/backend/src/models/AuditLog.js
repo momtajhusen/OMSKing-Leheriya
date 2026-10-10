@@ -28,8 +28,17 @@ auditLogSchema.index({ tenantId: 1, createdAt: -1 });
 auditLogSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 auditLogSchema.plugin(tenantPlugin);
 
-function denyMutation() {
-  throw new Error('Audit log is append-only');
+function denyMutation(next) {
+  const err = new Error('Audit log is append-only');
+  if (typeof next === 'function') return next(err);
+  throw err;
+}
+
+function denyBulk(next, ops) {
+  const list = Array.isArray(ops) ? ops : [];
+  const changesRow = list.some((op) => op && (op.updateOne || op.updateMany || op.deleteOne || op.deleteMany || op.replaceOne));
+  if (!list.length || changesRow) return next(new Error('Audit log is append-only'));
+  return next();
 }
 
 auditLogSchema.pre('save', function denySave(next) {
@@ -41,8 +50,35 @@ auditLogSchema.pre('updateMany', denyMutation);
 auditLogSchema.pre('findOneAndUpdate', denyMutation);
 auditLogSchema.pre('replaceOne', denyMutation);
 auditLogSchema.pre('findOneAndReplace', denyMutation);
-auditLogSchema.pre('deleteOne', denyMutation);
+auditLogSchema.pre('deleteOne', { document: false, query: true }, denyMutation);
+auditLogSchema.pre('deleteOne', { document: true, query: false }, denyMutation);
 auditLogSchema.pre('deleteMany', denyMutation);
 auditLogSchema.pre('findOneAndDelete', denyMutation);
+auditLogSchema.pre('bulkWrite', denyBulk);
 
-module.exports = mongoose.model('AuditLog', auditLogSchema);
+const AuditLog = mongoose.model('AuditLog', auditLogSchema);
+
+const BLOCKED_WRITES = [
+  'updateOne', 'updateMany', 'replaceOne',
+  'deleteOne', 'deleteMany',
+  'findOneAndUpdate', 'findOneAndDelete', 'findOneAndReplace',
+];
+
+function lockAuditCollection(collection) {
+  if (!collection || collection.auditAppendOnly) return;
+  collection.auditAppendOnly = true;
+  const refuse = () => Promise.reject(new Error('Audit log is append-only'));
+  for (const name of BLOCKED_WRITES) collection[name] = refuse;
+  const insertBulk = collection.bulkWrite.bind(collection);
+  collection.bulkWrite = function auditBulk(ops, options) {
+    const list = Array.isArray(ops) ? ops : [];
+    const insertOnly = list.length > 0 && list.every((op) => op && op.insertOne && Object.keys(op).every((key) => key === 'insertOne'));
+    if (!insertOnly) return Promise.reject(new Error('Audit log is append-only'));
+    return insertBulk(ops, options);
+  };
+}
+
+lockAuditCollection(AuditLog.collection);
+mongoose.connection.on('connected', () => lockAuditCollection(AuditLog.collection));
+
+module.exports = AuditLog;

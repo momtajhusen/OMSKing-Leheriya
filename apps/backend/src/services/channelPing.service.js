@@ -1,5 +1,6 @@
 const https = require('https');
 const { URL } = require('url');
+const { outboundMode } = require('../adapters/liveGate');
 
 function describeErr(err) {
   const cause = err.cause || err;
@@ -89,6 +90,9 @@ async function pingMyntra(creds) {
   if (!merchantId || !secretKey) {
     return { ok: false, message: 'Merchant Id and Secret Key are required' };
   }
+  if (!outboundMode(creds)) {
+    return { ok: false, message: 'Live API was not called. Set apiMode to live.' };
+  }
   const bases = myntraBases(creds);
   let lastNetErr;
   for (const base of bases) {
@@ -146,6 +150,9 @@ async function pingShopify(creds) {
       };
     }
     return { ok: false, message: 'Shop URL and Admin API token are required' };
+  }
+  if (!outboundMode(creds)) {
+    return { ok: false, message: 'Live API was not called. Set apiMode to live.' };
   }
   try {
     const res = await httpPost(`https://${shop}/admin/api/2024-10/graphql.json`, {

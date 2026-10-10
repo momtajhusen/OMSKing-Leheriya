@@ -192,6 +192,49 @@ test('the second order for the last unit is out of stock and location B uses the
   assert.equal(String(virtualHold.warehouseId), String(virtual._id));
 });
 
+test('two parallel channel orders on the last piece reserve exactly one', async () => {
+  const { tenant, physical } = await seller();
+  const id = String(tenant._id);
+  await Inventory.updateMany(
+    { tenantId: tenant._id },
+    { $set: { physicalQty: 0, virtualQty: 0, reservedQty: 0 } },
+  ).setOptions({ skipTenantFilter: true });
+  await Inventory.updateOne(
+    { tenantId: tenant._id, warehouseId: physical._id },
+    { $set: { physicalQty: 1 } },
+  ).setOptions({ skipTenantFilter: true });
+
+  const a = shopify.mapShopifyOrder(shopifyOrder(41, 'KURTA', 1), {});
+  const b = shopify.mapShopifyOrder(shopifyOrder(42, 'KURTA', 1), {});
+  await Promise.all([
+    ingestChannelOrders(id, 'shopify', [a]),
+    ingestChannelOrders(id, 'shopify', [b]),
+  ]);
+
+  const orders = await Order.find({ tenantId: tenant._id, externalOrderId: { $in: ['41', '42'] } });
+  assert.equal(orders.length, 2);
+  assert.deepEqual(orders.map((row) => row.reserveState).sort(), ['out_of_stock', 'reserved']);
+
+  const row = await Inventory.findOne({ tenantId: tenant._id, warehouseId: physical._id });
+  assert.equal(row.reservedQty, 1);
+  assert.ok(row.physicalQty >= 0);
+  assert.ok(row.reservedQty >= 0);
+  assert.ok(row.physicalQty + row.virtualQty - row.reservedQty >= 0);
+
+  const reserves = await InventoryLedger.find({
+    tenantId: tenant._id,
+    movementType: 'order_reserve',
+    referenceId: { $in: ['SHP-41', 'SHP-42'] },
+  });
+  const releases = await InventoryLedger.find({
+    tenantId: tenant._id,
+    movementType: 'order_release',
+    referenceId: { $in: ['SHP-41', 'SHP-42'] },
+  });
+  assert.equal(reserves.length - releases.length, 1);
+  assert.equal(row.reservedQty, reserves.length - releases.length);
+});
+
 test('a Shopify webhook creates an order only when the payload has line items', async () => {
   const { tenant } = await seller();
   const ignored = await applyStoredWebhook({

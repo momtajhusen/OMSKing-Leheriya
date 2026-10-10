@@ -26,8 +26,14 @@ function directionFor(jobType) {
 
 function redactSecrets(value) {
   return String(value || '')
-    .replace(/\b(?:shpat|shpca|shpse|xoxb|xoxp|ya29)_[A-Za-z0-9_\-]+/g, '[redacted]')
-    .replace(/(token|secret|password|apiToken|webhookSecret|accessToken)\s*[:=]\s*\S+/gi, '$1=[redacted]');
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/gi, (match) => {
+      const scheme = match.slice(0, match.indexOf('://'));
+      return `${scheme}://[redacted]@`;
+    })
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\b(?:shpat|shpca|shpse|shpss|xoxb|xoxp|ya29|whsec)_[A-Za-z0-9_\-]+/g, '[redacted]')
+    .replace(/\bAtzr\|[A-Za-z0-9|._\-]+/g, '[redacted]')
+    .replace(/((?:access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|apiToken|webhook[_-]?secret|webhookSecret|client[_-]?secret|clientSecret|password|secret|token|authorization)\s*[:=]\s*)\S+/gi, '$1[redacted]');
 }
 
 function toJobDto(row) {
@@ -220,17 +226,50 @@ function terminalError(message) {
   return err;
 }
 
-async function hasLiveConnection(tenantId, channel) {
-  const row = await getConnection(tenantId, channel);
-  if (!row) return false;
-  const creds = credsOf(row);
-  if (channel === 'shopify') return Boolean(String(creds.shopUrl || '').trim() && String(creds.adminToken || '').trim());
-  if (channel === 'myntra') return Boolean(creds.merchantId && creds.secretKey);
+function filled(value) {
+  return String(value ?? '').trim();
+}
+
+function keysReady(channel, creds) {
+  if (channel === 'shopify') return Boolean(filled(creds?.shopUrl) && filled(creds?.adminToken));
+  if (channel === 'myntra') return Boolean(filled(creds?.merchantId) && filled(creds?.secretKey));
   if (channel === 'amazon') {
-    return Boolean(creds.sellerId && creds.refreshToken && creds.lwaClientId && creds.lwaClientSecret);
+    return Boolean(filled(creds?.sellerId) && filled(creds?.refreshToken) && filled(creds?.lwaClientId) && filled(creds?.lwaClientSecret));
   }
   if (channelById(channel)?.kind === 'partner') return Boolean(partner.baseOf(creds) && partner.tokenOf(creds));
   return false;
+}
+
+async function hasLiveConnection(tenantId, channel) {
+  const row = await getConnection(tenantId, channel);
+  if (!row) return false;
+  return keysReady(channel, credsOf(row));
+}
+
+async function noteOrderApplied(job, externalOrderId) {
+  const id = String(externalOrderId || '').trim();
+  if (!id) return;
+  const current = { ...(job.payload?.toObject?.() || job.payload || {}) };
+  const done = new Set((current.appliedExternalIds || []).map((value) => String(value)));
+  done.add(id);
+  current.appliedExternalIds = [...done];
+  job.payload = current;
+  await IntegrationJob.updateOne(
+    { _id: job._id },
+    { $set: { 'payload.appliedExternalIds': current.appliedExternalIds, recordsProcessed: done.size } },
+  ).setOptions({ skipTenantFilter: true });
+  if (process.env.NODE_ENV !== 'test') return;
+  const stopAfter = Number(current.interruptAfter);
+  if (!(stopAfter > 0) || done.size !== stopAfter || current.interruptConsumed) return;
+  current.interruptConsumed = true;
+  job.payload = current;
+  await IntegrationJob.updateOne(
+    { _id: job._id },
+    { $set: { 'payload.interruptConsumed': true } },
+  ).setOptions({ skipTenantFilter: true });
+  const err = new Error('Order pull stopped before the remaining orders were saved.');
+  err.delayMs = 60_000;
+  throw err;
 }
 
 async function pullLiveOrders(job) {
@@ -239,7 +278,23 @@ async function pullLiveOrders(job) {
     const { ingestChannelOrders } = require('./channelOrder.service');
     const creds = credsOf(await getConnection(job.tenantId, 'shopify'));
     const orders = await shopify.pullOrders(creds);
-    const res = await ingestChannelOrders(job.tenantId, 'shopify', orders);
+    const done = new Set((job.payload?.appliedExternalIds || []).map((id) => String(id)));
+    const res = { fetched: orders.length, created: 0, updated: 0, unchanged: 0 };
+    for (const order of orders) {
+      const id = String(order?.externalOrderId || '').trim();
+      if (id && done.has(id)) {
+        res.unchanged += 1;
+        continue;
+      }
+      const one = await ingestChannelOrders(job.tenantId, 'shopify', [order]);
+      res.created += one.created;
+      res.updated += one.updated;
+      res.unchanged += one.unchanged;
+      if (id) {
+        done.add(id);
+        await noteOrderApplied(job, id);
+      }
+    }
     const summary = `Shopify ${res.fetched} orders: ${res.created} new, ${res.updated} updated, ${res.unchanged} unchanged.`;
     await IntegrationJob.updateOne(
       { _id: job._id },
@@ -249,7 +304,10 @@ async function pullLiveOrders(job) {
   }
   if (job.channel === 'amazon') {
     const { pullAmazonOrders } = require('./amazonSync.service');
-    const res = await pullAmazonOrders(job.tenantId);
+    const res = await pullAmazonOrders(job.tenantId, {
+      skipExternalIds: job.payload?.appliedExternalIds || [],
+      afterEach: (id) => noteOrderApplied(job, id),
+    });
     const summary = `Amazon ${res.fetched} orders: ${res.created} new, ${res.updated} updated, ${res.unchanged} unchanged.`;
     await IntegrationJob.updateOne(
       { _id: job._id },
@@ -262,6 +320,8 @@ async function pullLiveOrders(job) {
     from: job.payload?.from,
     to: job.payload?.to,
     userId: job.triggeredByUserId,
+    skipExternalIds: job.payload?.appliedExternalIds || [],
+    afterEach: (id) => noteOrderApplied(job, id),
   });
   const summary = `Myntra ${res.fetched} orders: ${res.created} new, ${res.updated} updated, ${res.unchanged} unchanged`
     + `${res.failed ? `, ${res.failed} failed` : ''}. SKUs ${res.skus} (${res.unmappedSkus} unmapped).`;
@@ -318,6 +378,9 @@ async function pullCatalogJob(job) {
 }
 
 async function dispatch(job) {
+  if (process.env.NODE_ENV === 'test' && job.payload?.failMessage) {
+    throw terminalError(String(job.payload.failMessage));
+  }
   if (job.effectApplied) {
     job.shortSummary = 'Already applied. Retry did not reserve again.';
     return;
@@ -328,8 +391,14 @@ async function dispatch(job) {
     if (!(await hasLiveConnection(job.tenantId, job.channel))) {
       throw terminalError(notLiveMessage(job.channel, job.jobType));
     }
-    if (channelById(job.channel)?.kind === 'partner') return pullPartnerOrders(job);
-    return pullLiveOrders(job);
+    try {
+      if (channelById(job.channel)?.kind === 'partner') return await pullPartnerOrders(job);
+      return await pullLiveOrders(job);
+    } catch (err) {
+      if (err.delayMs) throw err;
+      if (err.terminal || err.statusCode === 400) throw err.terminal ? err : terminalError(err.message);
+      throw err;
+    }
   }
   if (job.jobType === 'inventory_push') {
     const { runInventoryJob } = require('./inventoryPush.service');
@@ -401,7 +470,7 @@ async function finishJob(job) {
   } catch (err) {
     const fresh = await IntegrationJob.findById(job._id).setOptions({ skipTenantFilter: true });
     if (!fresh) return;
-    fresh.lastError = String(err.message || 'Job failed').slice(0, 500);
+    fresh.lastError = redactSecrets(String(err.message || 'Job failed')).slice(0, 500);
     fresh.shortSummary = fresh.lastError;
     if (err.terminal) {
       fresh.status = 'failed';
@@ -427,7 +496,8 @@ async function finishJob(job) {
       }
     } else {
       fresh.status = 'queued';
-      fresh.nextRunAt = new Date(Date.now() + retryDelayMs(fresh.retriesCount));
+      const delay = Number.isFinite(err.delayMs) ? err.delayMs : retryDelayMs(fresh.retriesCount);
+      fresh.nextRunAt = new Date(Date.now() + delay);
     }
     await fresh.save();
     await notifyJobFailed(fresh);
@@ -572,6 +642,7 @@ module.exports = {
   enqueue,
   enqueueManual,
   notLiveMessage,
+  keysReady,
   listJobs,
   listPlatformJobs,
   requeueJob,

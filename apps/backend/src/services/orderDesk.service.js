@@ -120,6 +120,11 @@ function routeOrder(order, physical, virtual, channelPools) {
   return { ...base, items, subOrders, fulfilmentSource, routeNote };
 }
 
+function openedAt(order) {
+  const time = new Date(order?.createdAt || order?.orderDate || 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
 function applyDeskRules(orders, pools = {}) {
   const physical = new Map(pools.physical || []);
   const virtual = new Map(pools.virtual || []);
@@ -128,7 +133,7 @@ function applyDeskRules(orders, pools = {}) {
   const open = orders
     .map((order, index) => ({ order, index }))
     .filter((row) => OPEN.has(row.order.status))
-    .sort((a, b) => String(a.order.createdAt).localeCompare(String(b.order.createdAt)));
+    .sort((a, b) => openedAt(a.order) - openedAt(b.order) || a.index - b.index);
   const routed = new Map();
   open.forEach(({ order, index }) => {
     routed.set(index, routeOrder(order, physical, virtual, channelPools));

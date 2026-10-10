@@ -2,7 +2,7 @@ const ChannelConnection = require('../models/ChannelConnection');
 const IntegrationJob = require('../models/IntegrationJob');
 const Tenant = require('../models/Tenant');
 const { credsOf } = require('./channelConnection.service');
-const { enqueue } = require('./jobQueue.service');
+const { enqueue, keysReady } = require('./jobQueue.service');
 
 // Myntra deliveries settle within ~10 days of order creation; older orders rarely change.
 const SCHEDULED_LOOKBACK_DAYS = 10;
@@ -11,10 +11,8 @@ let timer = null;
 
 function pullReady(row, creds) {
   if (row.status === 'error') return false;
-  if (row.channel === 'myntra') return Boolean(creds.merchantId && creds.secretKey);
-  if (row.channel === 'shopify') return Boolean(String(creds.shopUrl || '').trim() && String(creds.adminToken || '').trim());
-  if (row.channel === 'amazon') return Boolean(creds.sellerId && creds.refreshToken && creds.lwaClientId && creds.lwaClientSecret);
-  return false;
+  if (!['shopify', 'amazon', 'myntra'].includes(row.channel)) return false;
+  return keysReady(row.channel, creds);
 }
 
 async function enqueueIdle(row, jobType, payload) {
@@ -79,4 +77,4 @@ function stopChannelScheduler() {
   timer = null;
 }
 
-module.exports = { enqueueScheduledPulls, startChannelScheduler, stopChannelScheduler };
+module.exports = { enqueueScheduledPulls, startChannelScheduler, stopChannelScheduler, pullReady };

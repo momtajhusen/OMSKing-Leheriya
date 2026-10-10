@@ -5,6 +5,7 @@ const { HttpError } = require('../utils/httpError');
 const SECRET_KEYS = new Set([
   'secretKey', 'token', 'refreshToken', 'lwaClientSecret', 'adminToken',
   'apiToken', 'applicationSecret', 'apiSecret', 'webhookSecret', 'accessToken',
+  'sandboxRefreshToken',
 ]);
 
 function publicCreds(creds, reveal) {
@@ -36,6 +37,20 @@ function sandboxTokenOnLive(creds) {
   const token = String(creds?.refreshToken || '');
   const sandboxToken = String(creds?.sandboxRefreshToken || '');
   return explicitMode(creds) === 'live' && token && sandboxToken && token === sandboxToken;
+}
+
+function amazonLiveReady(creds) {
+  const sellerId = String(creds?.sellerId || '').trim();
+  const refreshToken = String(creds?.refreshToken || '').trim();
+  const clientId = String(creds?.lwaClientId || '').trim();
+  const secret = String(creds?.lwaClientSecret || '').trim();
+  const sandboxToken = String(creds?.sandboxRefreshToken || '').trim();
+  if (!/^A[A-Z0-9]{9,}$/.test(sellerId)) return false;
+  if (!refreshToken.startsWith('Atzr|') || refreshToken.length < 40) return false;
+  if (sandboxToken && refreshToken === sandboxToken) return false;
+  if (!clientId.startsWith('amzn1.application-oa2-client.')) return false;
+  if (secret.length < 40) return false;
+  return true;
 }
 
 function staleEnvironmentTest(row, prev, next) {
@@ -110,15 +125,31 @@ function toDto(row, { reveal = false } = {}) {
 }
 
 async function recordTest(row, result) {
-  const ok = Boolean(result.ok);
+  let ok = Boolean(result?.ok);
+  let message = String(result?.message || '').slice(0, 500);
+  const mode = explicitMode(credsOf(row));
+  if (row.channel === 'amazon' && ok && mode === 'sandbox') {
+    const token = String(credsOf(row).refreshToken || '').trim();
+    if (token) await patchCreds(row, { sandboxRefreshToken: token });
+  }
+  if (row.channel === 'amazon' && ok && mode === 'live' && !amazonLiveReady(credsOf(row))) {
+    ok = false;
+    message = 'Live is not connected. Live mode needs the production Seller ID, refresh token, and LWA client id + secret. A sandbox refresh token stays on Sandbox. The live API was not called.';
+  }
+  if (row.channel === 'amazon' && ok && !mode) {
+    ok = false;
+    message = 'Live is not connected. Choose Sandbox or Live. The live API was not called.';
+  }
   row.lastTestAt = new Date();
   row.lastTestOk = ok;
-  row.lastTestMode = explicitMode(credsOf(row)) || 'live';
-  row.lastTestMessage = String(result.message || '').slice(0, 500);
+  row.lastTestMode = mode || (row.channel === 'amazon' ? '' : 'live');
+  row.lastTestMessage = message.slice(0, 500);
   if (ok) row.status = 'connected';
-  else if (result.incomplete) row.status = 'saved';
+  else if (row.channel === 'amazon' && result?.ok && (mode === 'live' || !mode)) row.status = 'saved';
+  else if (result?.incomplete) row.status = 'saved';
   else row.status = 'error';
   await row.save();
+  return row;
 }
 
 module.exports = {
@@ -128,5 +159,6 @@ module.exports = {
   patchCreds,
   toDto,
   recordTest,
+  amazonLiveReady,
   HttpError,
 };

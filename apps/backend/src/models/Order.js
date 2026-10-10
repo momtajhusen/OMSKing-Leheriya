@@ -107,6 +107,13 @@ const orderSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 orderSchema.index({ tenantId: 1, orderNo: 1 }, { unique: true });
+orderSchema.index(
+  { tenantId: 1, channel: 1, externalOrderId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { externalOrderId: { $gt: '' } },
+  },
+);
 orderSchema.index({ tenantId: 1, 'subOrders.id': 1 });
 orderSchema.plugin(tenantPlugin);
 

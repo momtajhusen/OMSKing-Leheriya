@@ -171,7 +171,7 @@ async function register(req, res) {
     pending.fullName = name;
     pending.passwordHash = await hashPassword(password);
     await pending.save();
-    await issueEmailOtp({ user: pending, purpose: 'signup', platformOnly: true, required: true });
+    await issueEmailOtp({ user: pending, purpose: 'signup', required: true });
     return successResponse(res, { verificationRequired: true, email: pending.email }, 'OTP sent. Verify your email to finish.');
   }
 
@@ -187,7 +187,7 @@ async function register(req, res) {
   });
   const user = await loadUserById(owner._id);
   try {
-    await issueEmailOtp({ user, purpose: 'signup', platformOnly: true, required: true });
+    await issueEmailOtp({ user, purpose: 'signup', required: true });
   } catch (err) {
     await removeUnverifiedMerchant(tenant._id);
     throw err;
@@ -220,7 +220,7 @@ async function resendVerification(req, res) {
   const users = (await accountsForEmail(email)).filter((user) => user.emailVerified === false && user.status !== 'disabled');
   const user = users.length ? pickAccount(users, req.body.workspace) : null;
   if (!user) return successResponse(res, generic, 'If that email is waiting for verification, an OTP was sent');
-  await issueEmailOtp({ user, purpose: 'signup', platformOnly: true, required: true });
+  await issueEmailOtp({ user, purpose: 'signup', required: true });
   return successResponse(res, generic, 'If that email is waiting for verification, an OTP was sent');
 }
 
@@ -259,6 +259,10 @@ async function refresh(req, res) {
   const user = await loadUserById(decoded.sub);
   if (!user || user.status === 'disabled') throw new HttpError(401, 'Invalid session');
   if (decoded.rv !== user.refreshTokenVersion) throw new HttpError(401, 'Session expired');
+  const home = user.tenantId;
+  if (home?.kind === 'merchant' && home.status === 'suspended') {
+    throw new HttpError(403, 'This tenant is suspended');
+  }
 
   session.lastActiveAt = new Date();
   await session.save();
@@ -409,6 +413,8 @@ async function confirmTwoFactor(req, res) {
 async function exitImpersonation(req, res) {
   if (!req.user.impersonating) throw new HttpError(400, 'Not impersonating');
   const user = await loadUserById(req.user.id);
+  user.refreshTokenVersion = (user.refreshTokenVersion || 0) + 1;
+  await user.save();
   const session = await issueSession(req, res, user);
   return successResponse(res, session, 'Returned to platform');
 }

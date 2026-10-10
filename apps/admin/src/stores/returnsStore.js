@@ -32,7 +32,7 @@ const useReturnsStore = create(persist((set, get) => ({
   },
 
   clearCompany() {
-    set({ returns: [] });
+    set({ returns: [], workflowByTenant: {} });
   },
 
   /** Returns are the reverse pickups on orders; only workflow fields (approve / receive) are kept locally. */
