@@ -1,15 +1,13 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { User, Mail, Building2, Lock, Layers, Crown } from 'lucide-react';
+import { User, Mail, Building2, Lock, Crown } from 'lucide-react';
 import BrandLogo from '../../components/brand/BrandLogo';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { FormBanner, PasswordHints } from '../../components/ui/FormBanner';
-import { useAuth } from '../../hooks/useAuth';
-import { homePathForRole } from '../../constants/roles';
 import api, { apiFormError } from '../../lib/api';
 import { registerSchema } from '../../lib/validation';
 import { SUBSCRIPTION_PLANS } from '../../constants/channelCatalog';
@@ -21,9 +19,20 @@ function startingPlan(value) {
 export default function RegisterPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const { login } = useAuth();
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [trialDays, setTrialDays] = useState(14);
+
+  useEffect(() => {
+    let alive = true;
+    api.get('/tenants/public-config')
+      .then(({ data }) => {
+        const days = Number(data.data?.trialDays);
+        if (alive && days >= 1) setTrialDays(days);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   const {
     register,
@@ -50,10 +59,9 @@ export default function RegisterPage() {
     setFormError('');
     setSubmitting(true);
     try {
-      const { data } = await api.post('/auth/register', values);
-      login(data.data.accessToken, data.data.user);
-      toast.success(`${values.company} is on a 14-day ${values.plan} trial. You are the Super Admin.`);
-      navigate(homePathForRole(data.data.user.role));
+      await api.post('/auth/register', values);
+      toast.success('OTP sent. Enter it to finish creating the company.');
+      navigate(`/auth/verify-email?email=${encodeURIComponent(values.email)}`);
     } catch (err) {
       const parsed = apiFormError(err, 'Could not create the merchant account.');
       Object.entries(parsed.fields).forEach(([field, message]) => {
@@ -72,13 +80,13 @@ export default function RegisterPage() {
           <div className="mb-5 text-center">
             <BrandLogo className="mx-auto mb-4 h-14 w-14 rounded-2xl shadow-lg shadow-emerald-900/25" />
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create your company</h1>
-            <p className="mt-1 text-sm text-slate-500">14-day trial. You become this company’s Super Admin. No payment now.</p>
+            <p className="mt-1 text-sm text-slate-500">{trialDays}-day trial. We email a 6-digit OTP. The company opens after you enter it.</p>
           </div>
 
           <div className="mb-5 grid grid-cols-3 gap-2">
             {[
               { icon: Building2, label: 'Company', tone: 'bg-emerald-50 text-emerald-700' },
-              { icon: Layers, label: 'Tenant', tone: 'bg-teal-50 text-teal-700' },
+              { icon: Mail, label: 'Email OTP', tone: 'bg-teal-50 text-teal-700' },
               { icon: Crown, label: 'Super Admin', tone: 'bg-lime-50 text-lime-800' },
             ].map((step) => (
               <div key={step.label} className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-[11px] font-semibold ${step.tone}`}>
@@ -137,9 +145,9 @@ export default function RegisterPage() {
                 <input type="checkbox" id="terms" className="mt-1 rounded" {...register('terms')} />
                 <span>
                   I agree to the{' '}
-                  <a href="#" className="font-medium text-emerald-700 hover:underline">Terms</a>
+                  <Link to="/terms" target="_blank" rel="noreferrer" className="font-medium text-emerald-700 hover:underline" onClick={(event) => event.stopPropagation()}>Terms</Link>
                   {' '}and{' '}
-                  <a href="#" className="font-medium text-emerald-700 hover:underline">Privacy Policy</a>
+                  <Link to="/privacy" target="_blank" rel="noreferrer" className="font-medium text-emerald-700 hover:underline" onClick={(event) => event.stopPropagation()}>Privacy Policy</Link>
                 </span>
               </label>
               {errors.terms?.message && (

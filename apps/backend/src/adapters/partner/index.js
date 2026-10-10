@@ -118,6 +118,7 @@ function orderRows(body) {
       name: item.name || item.title || item.sku || '',
       qty: Number(item.qty || item.quantity || 1) || 1,
       price: Number(item.price || 0) || 0,
+      imageUrl: item.imageUrl || item.image || '',
     })),
   })).filter((row) => row.externalOrderId);
 }

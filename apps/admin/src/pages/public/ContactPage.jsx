@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, Phone, MapPin, PlayCircle, BadgeIndianRupee, LifeBuoy } from 'lucide-react';
+import { CONTACT_EMAIL, CONTACT_PHONE_DISPLAY } from '../../components/marketing/StickyContactDock';
+import { LEGAL_LINKS } from './LegalPage';
 import { toast } from 'react-hot-toast';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
@@ -63,18 +65,27 @@ export default function ContactPage() {
           <div className="space-y-4">
             <h2 className="text-xl font-bold text-slate-900">Reach us</h2>
             {[
-              { icon: Mail, tone: 'blue', title: 'Email', value: 'contact@omsking.com' },
-              { icon: Phone, tone: 'emerald', title: 'Phone', value: '+91 98765 43210' },
+              { icon: Mail, tone: 'blue', title: 'Email', value: CONTACT_EMAIL, href: `mailto:${CONTACT_EMAIL}` },
+              { icon: Phone, tone: 'emerald', title: 'Phone', value: CONTACT_PHONE_DISPLAY, href: 'tel:+917600201227' },
               { icon: MapPin, tone: 'amber', title: 'Studio', value: 'Jaipur, Rajasthan' },
             ].map((item) => (
               <MktCard key={item.title} className="flex items-start gap-4">
                 <IconWell icon={item.icon} tone={item.tone} className="mb-0 shrink-0" />
                 <div className="pt-1">
                   <p className="font-semibold text-slate-900">{item.title}</p>
-                  <p className="text-sm text-slate-600">{item.value}</p>
+                  {item.href ? (
+                    <a href={item.href} className="text-sm text-slate-600 hover:text-emerald-800">{item.value}</a>
+                  ) : (
+                    <p className="text-sm text-slate-600">{item.value}</p>
+                  )}
                 </div>
               </MktCard>
             ))}
+            <nav className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-sm" aria-label="Legal">
+              {LEGAL_LINKS.map((item) => (
+                <Link key={item.to} to={item.to} className="font-medium text-emerald-800 hover:underline">{item.label}</Link>
+              ))}
+            </nav>
           </div>
 
           <form onSubmit={onSubmit} className="rounded-2xl border border-white bg-white p-6 shadow-[0_12px_40px_-16px_rgba(15,23,42,0.18)]">

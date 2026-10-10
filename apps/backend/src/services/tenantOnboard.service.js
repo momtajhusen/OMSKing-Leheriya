@@ -4,6 +4,7 @@ const Tenant = require('../models/Tenant');
 const Role = require('../models/Role');
 const User = require('../models/User');
 const { HttpError } = require('../utils/httpError');
+const { trialLengthDays } = require('./platformSettings.service');
 
 function slugify(value) {
   const slug = String(value || '')
@@ -36,6 +37,7 @@ async function provisionMerchant({
   plan = 'growth',
   status = 'trial',
   channels = [],
+  emailVerified = true,
 }) {
   const finalSlug = slugify(slug || name);
   const exists = await Tenant.findOne({ slug: finalSlug });
@@ -47,7 +49,7 @@ async function provisionMerchant({
     kind: 'merchant',
     status,
     plan,
-    planExpiresAt: status === 'trial' ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : undefined,
+    planExpiresAt: status === 'trial' ? new Date(Date.now() + (await trialLengthDays()) * 24 * 60 * 60 * 1000) : undefined,
     legalEntity: { email: ownerEmail },
     settings: { channels, skuPrefix: (finalSlug || 'OMS').slice(0, 4).toUpperCase() },
   });
@@ -62,6 +64,7 @@ async function provisionMerchant({
     passwordHash,
     roleId: superRole._id,
     status: 'active',
+    emailVerified: emailVerified !== false,
   });
 
   const { ensureDefaultWarehouses } = require('./warehouse.service');

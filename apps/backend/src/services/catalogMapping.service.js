@@ -343,6 +343,7 @@ function parseCsv(text) {
       color: row.color,
       size: row.size,
       fabric: row.fabric,
+      image: row.image || row.imageUrl || '',
     };
   }).filter((row) => row.channelSkuCode);
 }

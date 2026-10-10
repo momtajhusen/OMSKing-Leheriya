@@ -34,7 +34,7 @@ function KpiCard({ label, value, delta, icon: Icon, tone = 'blue', className, on
       onClick={onClick}
       onKeyDown={onClick ? (event) => event.key === 'Enter' && onClick() : undefined}
       className={cn(
-        'premium-card p-4 sm:p-6 relative overflow-hidden group min-w-0 w-full',
+        'premium-card p-3 relative overflow-hidden group min-w-0 w-full',
         onClick && 'cursor-pointer',
         className
       )}
@@ -43,10 +43,10 @@ function KpiCard({ label, value, delta, icon: Icon, tone = 'blue', className, on
       {/* Subtle gradient background effect */}
       <div className="absolute top-0 right-0 w-24 h-24 sm:w-32 sm:h-32 bg-gradient-to-br from-[hsl(var(--color-primary-blue))]/5 to-[hsl(var(--color-indigo-accent))]/5 rounded-full blur-2xl"></div>
       
-      <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex-1">
-          <p className="text-[10px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{label}</p>
-          <p className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight text-foreground">{value}</p>
+      <div className="relative flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="mb-0.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</p>
+          <p className="break-words text-lg font-bold leading-tight tracking-tight text-foreground sm:text-xl">{value}</p>
           {delta !== undefined && (
             <div className={cn('mt-2 flex items-center text-xs sm:text-sm font-medium', getDeltaColor(delta))}>
               <DeltaIcon className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
@@ -56,8 +56,8 @@ function KpiCard({ label, value, delta, icon: Icon, tone = 'blue', className, on
           )}
         </div>
         {Icon && (
-          <div className={cn('flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-md transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3', ICON_TONES[tone] || ICON_TONES.blue)}>
-            <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
+          <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-sm', ICON_TONES[tone] || ICON_TONES.blue)}>
+            <Icon className="h-4 w-4" />
           </div>
         )}
       </div>

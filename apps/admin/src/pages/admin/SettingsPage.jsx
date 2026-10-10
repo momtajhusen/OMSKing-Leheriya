@@ -111,25 +111,23 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="p-6 space-y-8">
+    <div className="space-y-4">
       {/* Modern Page Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <div className="absolute inset-0 bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] rounded-xl blur-lg opacity-30"></div>
-            <div className="relative bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] rounded-xl p-3">
-              <SettingsIcon className="h-6 w-6 text-white" />
-            </div>
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="relative shrink-0">
+          <div className="absolute inset-0 bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] rounded-xl blur-lg opacity-30"></div>
+          <div className="relative bg-gradient-to-r from-[hsl(var(--color-primary-blue))] to-[hsl(var(--color-indigo-accent))] rounded-xl p-3">
+            <SettingsIcon className="h-6 w-6 text-white" />
           </div>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-            <p className="text-muted-foreground mt-1">This company’s profile, Gmail, GST, and pickup. Channel and courier keys stay on this company only.</p>
-          </div>
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold tracking-tight">Settings</h1>
+          <p className="mt-1 text-muted-foreground">This company’s profile, Gmail, GST, and pickup. Channel and courier keys stay on this company only.</p>
         </div>
       </div>
 
       {/* Pill-style Tabs */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {tabs.map(tab => (
           <button
             key={tab.id}
@@ -144,7 +142,7 @@ export default function SettingsPage() {
 
       {/* Tab Content */}
       {activeTab === 'company' && (
-        <div className="premium-card p-8">
+        <div className="premium-card p-4">
           <div className="flex items-start justify-between mb-6">
             <div>
               <h2 className="text-xl font-semibold mb-1">Company Details</h2>
@@ -324,7 +322,7 @@ export default function SettingsPage() {
       )}
 
       {activeTab === 'channels' && (
-        <div className="premium-card p-8">
+        <div className="premium-card p-4">
           <div className="mb-6">
             <h2 className="text-xl font-semibold mb-1">Channel Connections</h2>
             <p className="text-sm text-muted-foreground">
@@ -336,13 +334,13 @@ export default function SettingsPage() {
       )}
 
       {activeTab === 'couriers' && (
-        <div className="premium-card p-8">
+        <div className="premium-card p-4">
           <CourierSettings />
         </div>
       )}
 
       {activeTab === 'tax' && (
-        <div className="premium-card p-8">
+        <div className="premium-card p-4">
           <div className="mb-6">
             <h2 className="text-xl font-semibold mb-1">Tax & GST Settings</h2>
             <p className="text-sm text-muted-foreground">Default rate, category slabs, and the HSN master used on products</p>
@@ -352,7 +350,7 @@ export default function SettingsPage() {
       )}
 
       {activeTab === 'inventory' && (
-        <div className="premium-card p-8 space-y-4">
+        <div className="premium-card p-4 space-y-4">
           <h2 className="text-xl font-semibold">Who owns sellable stock</h2>
           <p className="text-sm text-muted-foreground">
             Tenant config — not hard-coded to Leheriya. Amazon and Myntra still only receive WH-001.

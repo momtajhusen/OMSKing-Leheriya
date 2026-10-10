@@ -8,6 +8,7 @@ import Select from '../ui/Select';
 import { Save, Plug, Unplug, CheckCircle2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import api, { apiError } from '../../lib/api';
+import { isChannelConnected } from '../../lib/connectedChannels';
 
 const STATUS = {
   connected: {
@@ -34,7 +35,7 @@ function connectionState(conn, modeOverride) {
   const mode = modeOverride || conn?.credentials?.apiMode || 'live';
   const tested = conn?.lastTestMode || '';
   const environmentMatches = !tested || tested === mode;
-  if ((conn?.status === 'connected' || conn?.lastTestOk) && environmentMatches) return 'connected';
+  if (isChannelConnected(conn, modeOverride)) return 'connected';
   if (conn?.status === 'error' && environmentMatches) return 'error';
   if (conn?.status === 'saved' || conn?.lastTestOk || conn?.status === 'error' || conn?.status === 'connected') return 'saved';
   return 'not_configured';

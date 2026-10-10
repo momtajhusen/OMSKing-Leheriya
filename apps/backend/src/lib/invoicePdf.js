@@ -88,11 +88,17 @@ async function emailInvoicePdf({ tenantId, to, pdf, filename, subject, mailboxOf
   const box = await mailboxOf(tenantId);
   if (!box) return { emailed: false, skipped: true, reason: 'gmail' };
   try {
+    const { operationalEmail } = require('./mailTemplates');
+    const letter = operationalEmail({
+      title: subject,
+      detail: 'Your document is attached to this email.\nPlease keep it with your records.',
+    });
     await sendMail({
       tenantId,
       to,
-      subject,
-      text: subject,
+      subject: letter.subject,
+      text: letter.text,
+      html: letter.html,
       attachments: [{ filename, content: pdf, contentType: 'application/pdf' }],
     });
     return { emailed: true, skipped: false };

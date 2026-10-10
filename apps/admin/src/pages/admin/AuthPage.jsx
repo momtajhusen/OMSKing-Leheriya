@@ -27,6 +27,8 @@ export default function AuthPage({ scope = 'tenant' }) {
   const [keyLabel, setKeyLabel] = useState('');
   const [issuedSecret, setIssuedSecret] = useState('');
   const [twoFa, setTwoFa] = useState(Boolean(user?.twoFactorEnabled));
+  const [twoFaPending, setTwoFaPending] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -80,7 +82,7 @@ export default function AuthPage({ scope = 'tenant' }) {
 
   const heading = (
     <>
-      <h1 className="text-3xl font-bold mb-2">Authentication</h1>
+      <h1 className="text-xl font-bold">Authentication</h1>
       <p className="text-muted-foreground">
         {isPlatform
           ? 'Platform-wide sessions and password resets across every subscriber.'
@@ -326,26 +328,62 @@ export default function AuthPage({ scope = 'tenant' }) {
       {activeTab === '2fa' && (
         <Card>
           <CardHeader>
-            <CardTitle>Optional 2FA</CardTitle>
-            <CardDescription>TOTP after JWT. Dummy toggle — live enrol is later.</CardDescription>
+            <CardTitle>Sign-in OTP</CardTitle>
+            <CardDescription>
+              {isPlatform
+                ? 'Platform mailbox sends the code. Another company mailbox is not used.'
+                : 'Uses this company’s Gmail from Settings. Until that is saved, OMSKing Gmail sends the code.'}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">Require authenticator app at login</p>
-            <Button
-              variant={twoFa ? 'default' : 'outline'}
-              onClick={async () => {
-                try {
-                  const next = !twoFa;
-                  await api.patch('/auth/me', { twoFactorEnabled: next });
-                  setTwoFa(next);
-                  toast.success(next ? '2FA flag on for this user' : '2FA off');
-                } catch (err) {
-                  toast.error(apiError(err));
-                }
-              }}
-            >
-              {twoFa ? 'Enabled' : 'Disabled'}
-            </Button>
+          <CardContent className="space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">Ask for an email OTP at every sign-in</p>
+              <Button
+                variant={twoFa ? 'default' : 'outline'}
+                onClick={async () => {
+                  try {
+                    if (twoFa) {
+                      await api.patch('/auth/me', { twoFactorEnabled: false });
+                      setTwoFa(false);
+                      setOtpCode('');
+                      toast.success('Sign-in OTP is off');
+                      return;
+                    }
+                    await api.post('/auth/2fa/start');
+                    setOtpCode('');
+                    setTwoFaPending(true);
+                    toast.success('OTP sent to your email');
+                  } catch (err) {
+                    toast.error(apiError(err));
+                  }
+                }}
+              >
+                {twoFa ? 'Turn off' : 'Send OTP to turn on'}
+              </Button>
+            </div>
+            {twoFaPending && !twoFa && (
+              <form
+                className="flex flex-wrap items-end gap-2"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  if (!/^\d{6}$/.test(otpCode.trim())) {
+                    toast.error('Enter the 6-digit OTP from Gmail');
+                    return;
+                  }
+                  try {
+                    await api.post('/auth/2fa/confirm', { otp: otpCode.trim() });
+                    setTwoFa(true);
+                    setTwoFaPending(false);
+                    toast.success('Sign-in OTP is on');
+                  } catch (err) {
+                    toast.error(apiError(err, 'Could not confirm the OTP'));
+                  }
+                }}
+              >
+                <Input className="h-9 w-40 tracking-[0.2em]" inputMode="numeric" maxLength={6} placeholder="123456" value={otpCode} onChange={(event) => setOtpCode(event.target.value)} aria-label="OTP from Gmail" />
+                <Button type="submit" className="h-9">Confirm OTP</Button>
+              </form>
+            )}
           </CardContent>
         </Card>
       )}
@@ -410,7 +448,7 @@ export default function AuthPage({ scope = 'tenant' }) {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div>{heading}</div>
       {body}
     </div>

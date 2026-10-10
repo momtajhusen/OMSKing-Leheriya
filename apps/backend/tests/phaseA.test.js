@@ -187,7 +187,8 @@ test('NOT-010 off sends nothing, and on WhatsApp goes to the vendor phone', asyn
   const meera = calls.find((row) => row.to === '919333333333');
   assert.ok(raj);
   assert.ok(meera);
-  assert.equal(raj.text.startsWith('Please dispatch this item urgently'), true);
+  assert.match(raj.text, /^\*OMSKing\*/);
+  assert.match(raj.text, /Please dispatch this item urgently/);
   assert.match(raj.text, /SKU: K1/);
   assert.equal(calls.some((row) => row.to === '919000000000'), false);
   assert.equal(calls.some((row) => row.text.includes('LATE-2') || row.text.includes('LATE-3')), false);

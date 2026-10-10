@@ -181,15 +181,15 @@ export default function ProductsPage() {
   if (loading) return <PageLoader label="Loading products..." />;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Products</h1>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">Products</h1>
           <p className="text-muted-foreground">
             Catalog shell. Each color/size variant is one Master SKU. Stock comes in the inventory phase — not here.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => navigate('/import')}>Bulk import</Button>
           <Button variant="outline" onClick={() => navigate('/master-sku')}>Master SKU</Button>
           {canCatalogEdit && (
@@ -208,9 +208,9 @@ export default function ProductsPage() {
       </div>
 
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="flex gap-2">
-            <div className="flex-1 relative">
+            <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="text"
@@ -255,7 +255,7 @@ export default function ProductsPage() {
                   <TableRow key={product.id}>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <ProductThumb name={product.name} src={(product.images || [])[0]} size="lg" />
+                        <ProductThumb name={product.name} sku={product.variants?.[0]?.code || product.name} src={(product.images || [])[0]} size="lg" />
                         <div>
                           <div className="font-medium">{product.name}</div>
                           <div className="text-xs text-muted-foreground">

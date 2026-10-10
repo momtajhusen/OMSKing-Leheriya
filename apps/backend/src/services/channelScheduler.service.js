@@ -41,11 +41,20 @@ async function enqueueScheduledPulls(now = new Date()) {
   return queued;
 }
 
-function startChannelScheduler() {
-  const minutes = Number(process.env.MYNTRA_PULL_MINUTES || 15);
-  if (timer || !(minutes > 0)) return;
+let minutesApplied = 0;
+
+async function startChannelScheduler() {
+  const { orderPullMinutes } = require('./platformSettings.service');
+  const minutes = await orderPullMinutes();
+  if (timer && minutesApplied === minutes) return;
+  if (timer) clearInterval(timer);
+  timer = null;
+  minutesApplied = minutes;
+  if (!(minutes > 0)) return;
   timer = setInterval(() => {
     enqueueScheduledPulls().catch((err) => console.error('[SCHEDULER]', err.message));
+    const { pollActiveCouriers } = require('./tracking.service');
+    pollActiveCouriers().catch((err) => console.error('[TRACK]', err.message));
   }, minutes * 60_000);
   if (typeof timer.unref === 'function') timer.unref();
 }

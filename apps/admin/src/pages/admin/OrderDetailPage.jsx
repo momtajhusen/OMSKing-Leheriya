@@ -95,12 +95,12 @@ export default function OrderDetailPage() {
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-5">
+    <div className="space-y-3">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div className="space-y-2">
           <Breadcrumbs items={[{ label: 'Orders', href: '/orders' }, { label: order.id }]} />
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-bold">{order.id}</h1>
+            <h1 className="text-xl font-bold">{order.id}</h1>
             <Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge>
             <Badge variant="outline">{order.channel}</Badge>
             <Badge variant="secondary">{order.paymentMode}</Badge>
@@ -242,7 +242,7 @@ export default function OrderDetailPage() {
                   <TableRow key={line.orderLineId}>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <ProductThumb name={line.sku} src={line.imageUrl} />
+                        <ProductThumb name={line.sku} sku={line.sku} src={line.imageUrl} />
                         <span className="font-mono text-xs">{line.sku}</span>
                       </div>
                     </TableCell>
@@ -280,7 +280,7 @@ export default function OrderDetailPage() {
                 <TableRow key={`${item.sku}-${item.name}`}>
                   <TableCell>
                     <div className="flex items-center gap-3">
-                      <ProductThumb name={item.name} src={item.imageUrl} size="lg" />
+                      <ProductThumb name={item.name} sku={item.sku} src={item.imageUrl} size="lg" />
                       <span className="font-medium">{item.name}</span>
                     </div>
                   </TableCell>
@@ -306,7 +306,7 @@ export default function OrderDetailPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <Table className="min-w-[980px]">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Sub-order</TableHead>
@@ -328,7 +328,7 @@ export default function OrderDetailPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <ProductThumb name={sub.title} src={sub.imageUrl} />
+                      <ProductThumb name={sub.title} sku={sub.sku} src={sub.imageUrl} />
                       <div>
                         <div>{sub.title}</div>
                         <div className="text-xs text-muted-foreground">{sub.sku} · qty {sub.qty}</div>

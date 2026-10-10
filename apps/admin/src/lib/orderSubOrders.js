@@ -65,7 +65,7 @@ export function buildSubOrders(order) {
         id: sub.id || `${masterOrderBase(order.id)}-${idx + 1}`,
         index: sub.index || idx + 1,
         title: sub.title || sub.name || sub.product || '',
-        imageUrl: sub.imageUrl || '',
+        imageUrl: sub.imageUrl || matchedItem?.imageUrl || matchedItem?.image || '',
         qty: 1,
         ...vendor,
         assignedDate: sub.assignedDate || (vendor.assignedVendor ? String(order.createdAt || '').slice(0, 10) : ''),

@@ -60,7 +60,7 @@ function buildSubOrders(order) {
         index: sub.index || idx + 1,
         sku: sub.sku,
         title: sub.title || sub.name || sub.product || '',
-        imageUrl: sub.imageUrl || productImageUrl(sub.sku, sub.title || sub.name),
+        imageUrl: sub.imageUrl || matchedItem?.imageUrl || matchedItem?.image || productImageUrl(sub.sku, sub.title || sub.name),
         qty: 1,
         price: sub.price ?? 0,
         ...vendor,

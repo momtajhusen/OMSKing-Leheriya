@@ -34,6 +34,16 @@ export const registerSchema = z.object({
   path: ['confirmPassword'],
 });
 
+export const verifyEmailSchema = z.object({
+  email: emailSchema,
+  workspace: z.string().trim().max(80).optional(),
+  otp: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit OTP from Gmail'),
+});
+
+export const loginOtpSchema = z.object({
+  otp: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit OTP from Gmail'),
+});
+
 export const forgotPasswordSchema = z.object({
   email: emailSchema,
   workspace: z.string().trim().max(80).optional(),

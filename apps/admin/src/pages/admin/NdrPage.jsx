@@ -69,10 +69,10 @@ export default function NdrPage() {
   if (!loaded) return <PageLoader label="Loading NDR..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold mb-2">NDR</h1>
+          <h1 className="text-xl font-bold">NDR</h1>
           <p className="text-muted-foreground">
             Failed delivery on the same Master Order. Fix the phone or address, then reattempt or send it to RTO.
           </p>
@@ -116,7 +116,7 @@ export default function NdrPage() {
             />
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[880px]">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Order</TableHead>
@@ -142,7 +142,7 @@ export default function NdrPage() {
                         </TableCell>
                         <TableCell className="font-mono text-xs">{row.awb || '—'}</TableCell>
                         <TableCell>{row.attempt}</TableCell>
-                        <TableCell className="max-w-[220px] text-sm">{row.reason}</TableCell>
+                        <TableCell className="max-w-[220px] whitespace-normal break-words text-sm">{row.reason}</TableCell>
                         <TableCell>
                           <Input
                             value={form.phone}

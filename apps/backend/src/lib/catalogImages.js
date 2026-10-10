@@ -1,16 +1,40 @@
 const Product = require('../models/Product');
 const MasterSku = require('../models/MasterSku');
+const SkuMapping = require('../models/SkuMapping');
 
 function firstImage(images) {
   if (!Array.isArray(images)) return '';
-  const url = images.find((item) => typeof item === 'string' && /^https?:\/\//i.test(item.trim()));
-  return url ? url.trim() : '';
+  for (const item of images) {
+    if (typeof item !== 'string') continue;
+    const url = item.trim();
+    if (!url || /example\.com/i.test(url)) continue;
+    if (/^https?:\/\//i.test(url) || url.startsWith('/uploads/')) return url;
+  }
+  return '';
+}
+
+function remember(bySku, key, url) {
+  const norm = String(key || '').trim().toLowerCase();
+  if (norm && url && !bySku.has(norm)) bySku.set(norm, url);
+}
+
+/** Exact SKU, then the same code without a leading M or A (Myntra/Amazon seller prefix). */
+function imageForSku(bySku, sku) {
+  const key = String(sku || '').trim().toLowerCase();
+  if (!key || !bySku) return '';
+  if (bySku.has(key)) return bySku.get(key) || '';
+  if (key.length > 4 && /^[ma]/.test(key) && bySku.has(key.slice(1))) return bySku.get(key.slice(1)) || '';
+  return '';
 }
 
 async function imagesBySku(tenantId) {
-  const [products, masters] = await Promise.all([
+  const [products, masters, mappings] = await Promise.all([
     Product.find({ tenantId }).select('images').setOptions({ skipTenantFilter: true }).lean(),
     MasterSku.find({ tenantId }).select('code productId').setOptions({ skipTenantFilter: true }).lean(),
+    SkuMapping.find({ tenantId, masterSkuId: { $ne: null } })
+      .select('channelSkuCode channelVariantId masterSkuId')
+      .setOptions({ skipTenantFilter: true })
+      .lean(),
   ]);
   const byProduct = new Map();
   products.forEach((product) => {
@@ -18,16 +42,27 @@ async function imagesBySku(tenantId) {
     if (url) byProduct.set(String(product._id), url);
   });
   const bySku = new Map();
+  const urlForMaster = new Map();
   masters.forEach((master) => {
     const url = byProduct.get(String(master.productId));
-    if (url && master.code) bySku.set(String(master.code).trim().toLowerCase(), url);
+    if (!url) return;
+    urlForMaster.set(String(master._id), url);
+    remember(bySku, master.code, url);
+    bySku.set(`id:${master._id}`, url);
+  });
+  mappings.forEach((mapping) => {
+    const url = urlForMaster.get(String(mapping.masterSkuId));
+    if (!url) return;
+    remember(bySku, mapping.channelSkuCode, url);
+    remember(bySku, mapping.channelVariantId, url);
   });
   return bySku;
 }
 
 function withImage(row, bySku) {
-  if (!row || row.imageUrl) return row;
-  const url = bySku.get(String(row.sku || row.code || '').trim().toLowerCase());
+  if (!row || firstImage([row.imageUrl])) return row;
+  const url = imageForSku(bySku, row.sku || row.code)
+    || (row.masterSkuId ? bySku.get(`id:${row.masterSkuId}`) : '');
   return url ? { ...row, imageUrl: url } : row;
 }
 
@@ -41,4 +76,4 @@ function paintOrder(order, bySku) {
   };
 }
 
-module.exports = { firstImage, imagesBySku, withImage, paintOrder };
+module.exports = { firstImage, imageForSku, imagesBySku, withImage, paintOrder };

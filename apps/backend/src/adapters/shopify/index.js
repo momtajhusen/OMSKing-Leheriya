@@ -385,6 +385,7 @@ function mapShopifyOrder(order, creds) {
   const items = order.line_items.map((line) => ({
     name: String(line.title || line.sku || ''),
     sku: String(line.sku || '').trim(),
+    imageUrl: String(line.image?.src || line.image_url || '').trim(),
     qty: Math.max(1, Number(line.quantity) || 1),
     price: Number(line.price) || 0,
     locationId: String(line.origin_location?.id || order.location_id || ''),

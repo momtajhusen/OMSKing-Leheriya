@@ -18,6 +18,7 @@ const PlatformOpsPage = lazy(() => import('../pages/platform/PlatformOpsPage'));
 const PlatformStaffPage = lazy(() => import('../pages/platform/PlatformStaffPage'));
 const DemoRequestsPage = lazy(() => import('../pages/platform/DemoRequestsPage'));
 const PlatformPlansPage = lazy(() => import('../pages/platform/PlatformPlansPage'));
+const LegalPage = lazy(() => import('../pages/public/LegalPage'));
 const OrderDetailPage = lazy(() => import('../pages/admin/OrderDetailPage'));
 
 // Route definitions - single source of truth for sidebar and router
@@ -53,6 +54,10 @@ export const ROUTE_DEFS = {
       label: 'Request a demo',
       component: lazy(() => import('../pages/public/DemoRequestPage')),
     },
+    { path: '/terms', label: 'Terms', component: LegalPage },
+    { path: '/privacy', label: 'Privacy', component: LegalPage },
+    { path: '/billing', label: 'Billing', component: LegalPage },
+    { path: '/cookies', label: 'Cookies', component: LegalPage },
   ],
   auth: [
     {
@@ -64,6 +69,11 @@ export const ROUTE_DEFS = {
       path: '/auth/register',
       label: 'Register',
       component: lazy(() => import('../pages/auth/RegisterPage')),
+    },
+    {
+      path: '/auth/verify-email',
+      label: 'Verify email',
+      component: lazy(() => import('../pages/auth/VerifyEmailPage')),
     },
     {
       path: '/auth/forgot-password',
@@ -230,6 +240,13 @@ export const ROUTE_DEFS = {
       icon: 'Bell',
       group: 'Setup',
       component: lazy(() => import('../pages/admin/NotificationsPage')),
+    },
+    {
+      path: '/subscription',
+      label: 'Subscription',
+      icon: 'Receipt',
+      group: 'Admin',
+      component: lazy(() => import('../pages/admin/SubscriptionPage')),
     },
     {
       path: '/settings',

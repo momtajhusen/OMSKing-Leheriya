@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import { Link } from 'react-router-dom';
 import api, { apiError } from '../../lib/api';
 import useChannelStore from '../../stores/channelStore';
+import { isChannelConnected } from '../../lib/connectedChannels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -19,7 +20,6 @@ function when(value) {
 
 export default function IntegrationManagementPage() {
   const catalog = useChannelStore((s) => s.catalog);
-  const enabledIds = useChannelStore((s) => s.enabledIds);
   const connections = useChannelStore((s) => s.connections);
   const hydrateFromServer = useChannelStore((s) => s.hydrateFromServer);
   const [jobs, setJobs] = useState([]);
@@ -46,7 +46,7 @@ export default function IntegrationManagementPage() {
   }, []);
 
   const integrations = catalog
-    .filter((c) => enabledIds.includes(c.id))
+    .filter((c) => isChannelConnected(connections[c.id]))
     .map((c) => {
       const failedJobs = jobs.filter((job) => job.channel === c.id && job.status === 'failed').length;
       const latest = jobs.find((job) => job.channel === c.id && job.status === 'success');
@@ -85,10 +85,10 @@ export default function IntegrationManagementPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Integration Management</h1>
+          <h1 className="text-xl font-bold">Integration Management</h1>
           <p className="text-muted-foreground">
             Health for the channels this tenant selected. Sync Now pulls orders only when that channel's orders API is connected.
           </p>

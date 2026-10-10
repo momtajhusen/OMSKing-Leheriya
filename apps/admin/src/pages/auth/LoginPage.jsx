@@ -11,7 +11,7 @@ import { FormBanner } from '../../components/ui/FormBanner';
 import { useAuth } from '../../hooks/useAuth';
 import { homePathForRole } from '../../constants/roles';
 import api, { apiFormError } from '../../lib/api';
-import { loginSchema } from '../../lib/validation';
+import { loginSchema, loginOtpSchema } from '../../lib/validation';
 import CompanyChoice, { companiesFromError } from '../../components/auth/CompanyChoice';
 
 export default function LoginPage() {
@@ -20,6 +20,9 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [companies, setCompanies] = useState([]);
+  const [twoFactor, setTwoFactor] = useState(null);
+  const [otp, setOtp] = useState('');
+  const [otpError, setOtpError] = useState('');
 
   useEffect(() => {
     if (isAuthenticated) navigate(homePath, { replace: true });
@@ -40,10 +43,22 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const { data } = await api.post('/auth/login', values);
+      if (data.data?.twoFactorRequired) {
+        setTwoFactor({ email: values.email, password: values.password, workspace: values.workspace || '' });
+        setOtp('');
+        toast.success('OTP sent to your email');
+        return;
+      }
       login(data.data.accessToken, data.data.user);
       toast.success(`Signed in as ${data.data.user.name}`);
       navigate(homePathForRole(data.data.user.role));
     } catch (err) {
+      const pending = err.response?.data?.data;
+      if (err.response?.status === 403 && pending?.verificationRequired) {
+        toast.success('Verify the OTP sent to your email');
+        navigate(`/auth/verify-email?email=${encodeURIComponent(values.email)}`);
+        return;
+      }
       const parsed = apiFormError(err, 'Invalid email or password.');
       const choices = companiesFromError(err);
       if (parsed.status === 409 && choices.length) {
@@ -76,6 +91,51 @@ export default function LoginPage() {
             <p className="mt-1.5 text-sm text-slate-500">Sign in to the company you already have.</p>
           </div>
 
+          {twoFactor ? (
+            <form
+              className="relative space-y-4"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const parsed = loginOtpSchema.safeParse({ otp });
+                if (!parsed.success) {
+                  setOtpError(parsed.error.issues[0]?.message || 'Enter the 6-digit OTP from Gmail');
+                  return;
+                }
+                setOtpError('');
+                setFormError('');
+                setSubmitting(true);
+                try {
+                  const { data } = await api.post('/auth/verify-login', { ...twoFactor, otp: parsed.data.otp });
+                  login(data.data.accessToken, data.data.user);
+                  toast.success(`Signed in as ${data.data.user.name}`);
+                  navigate(homePathForRole(data.data.user.role));
+                } catch (err) {
+                  const parsedErr = apiFormError(err, 'Could not verify the OTP.');
+                  setFormError(parsedErr.message);
+                } finally {
+                  setSubmitting(false);
+                }
+              }}
+            >
+              {formError && <FormBanner tone="error" title="Could not sign in">{formError}</FormBanner>}
+              <p className="text-sm text-slate-500">Enter the 6-digit OTP sent to {twoFactor.email}. It expires in 10 minutes.</p>
+              <div>
+                <label htmlFor="login-otp" className="mb-1.5 block text-sm font-medium text-slate-700">OTP from Gmail</label>
+                <Input id="login-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" value={otp} onChange={(event) => setOtp(event.target.value)} error={otpError} className="h-12 rounded-xl bg-slate-50 tracking-[0.3em]" />
+              </div>
+              <Button type="submit" disabled={submitting} className="h-12 w-full rounded-full">
+                {submitting ? 'Checking…' : 'Verify and sign in'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 w-full rounded-full"
+                onClick={() => { setTwoFactor(null); setOtp(''); setFormError(''); }}
+              >
+                Back
+              </Button>
+            </form>
+          ) : (
           <form onSubmit={handleSubmit(onSubmit)} className="relative space-y-4" noValidate>
             {formError && (
               <FormBanner tone="error" title="Could not sign in">
@@ -123,6 +183,7 @@ export default function LoginPage() {
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
           </form>
+          )}
 
         </div>
       </div>

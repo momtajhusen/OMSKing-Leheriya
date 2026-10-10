@@ -6,7 +6,7 @@ import useOrderStore from '../../stores/orderStore';
 import useReturnsStore, { EMPTY_WORKFLOW } from '../../stores/returnsStore';
 import useAuthStore from '../../stores/authStore';
 import { formatINR, formatDate } from '../../utils/format';
-import { CHANNELS } from '../../lib/orderMetrics';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -37,6 +37,7 @@ export default function ReturnsRefundsReconciliationPage() {
   const [tab, setTab] = useState('all');
   const [returnFile, setReturnFile] = useState([]);
   const [busy, setBusy] = useState(false);
+  const connected = useConnectedChannels();
 
   useEffect(() => {
     hydrateFromApi();
@@ -74,7 +75,7 @@ export default function ReturnsRefundsReconciliationPage() {
     return true;
   });
 
-  const summary = CHANNELS.map((channel) => {
+  const summary = connected.labels.map((channel) => {
     const list = rows.filter((row) => row.order.channel === channel);
     return { channel, total: list.length, awaiting: list.filter((row) => row.shipped && !row.received).length };
   });
@@ -98,9 +99,9 @@ export default function ReturnsRefundsReconciliationPage() {
   if (!loaded) return <PageLoader label="Loading refunds..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Returns &amp; Refunds Reconciliation</h1>
+        <h1 className="text-xl font-bold">Returns &amp; Refunds Reconciliation</h1>
         <p className="text-muted-foreground">
           Every cancellation and return, whether the parcel is back, and whether money goes back to the customer.
         </p>
@@ -116,7 +117,7 @@ export default function ReturnsRefundsReconciliationPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {summary.map((row) => (
           <Card key={row.channel}>
-            <CardContent className="pt-6">
+            <CardContent className="p-3">
               <p className="text-sm text-muted-foreground">{row.channel}</p>
               <p className="text-2xl font-bold">{row.total}</p>
               <p className="text-xs text-muted-foreground">{row.awaiting} parcel{row.awaiting === 1 ? '' : 's'} not back yet</p>
@@ -141,7 +142,7 @@ export default function ReturnsRefundsReconciliationPage() {
             <EmptyState title="Nothing in this view" />
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[900px]">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Order ID</TableHead>
@@ -222,7 +223,7 @@ export default function ReturnsRefundsReconciliationPage() {
       </Card>
 
       <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="flex items-start gap-3">
             <Info className="w-5 h-5 text-primary mt-0.5" />
             <p className="text-sm text-muted-foreground">

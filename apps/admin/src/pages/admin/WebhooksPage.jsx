@@ -43,9 +43,9 @@ export default function WebhooksPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Webhooks</h1>
+        <h1 className="text-xl font-bold">Webhooks</h1>
         <p className="text-muted-foreground">
           Inbox for every channel. POST /api/v1/integrations/:channel/webhook. The shop signature picks the tenant. The same event id is stored once and is not applied again. A public HTTPS host is required; localhost does not receive channel webhooks.
         </p>

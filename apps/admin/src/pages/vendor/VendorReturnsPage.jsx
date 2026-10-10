@@ -69,7 +69,7 @@ export default function VendorReturnsPage() {
                   <TableCell className="p-2 font-medium whitespace-nowrap">{item.orderId}</TableCell>
                   <TableCell className="p-2 whitespace-nowrap">
                     <div className="flex items-center gap-2">
-                      <ProductThumb name={item.product || item.sku} src={item.imageUrl} />
+                      <ProductThumb name={item.product || item.sku} sku={item.sku} src={item.imageUrl} />
                       {item.product}
                     </div>
                   </TableCell>

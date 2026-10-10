@@ -93,6 +93,7 @@ export const ROUTE_PERMISSION = Object.freeze({
   '/payment-reconciliation': P.FINANCE_RECONCILE,
   '/returns-refunds-reconciliation': P.FINANCE_RECONCILE,
   '/notifications': P.SETTINGS_MANAGE,
+  '/subscription': P.SETTINGS_MANAGE,
   '/settings': P.SETTINGS_MANAGE,
   '/users-roles': P.USERS_MANAGE,
   '/audit-logs': P.USERS_MANAGE,

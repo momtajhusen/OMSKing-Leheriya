@@ -1,5 +1,6 @@
 const PlatformPricing = require('../models/PlatformPricing');
 const { HttpError } = require('../utils/httpError');
+const { encryptObject } = require('../lib/secretBox');
 
 const DEFAULT_SLABS = [
   { upTo: 1000, ratePaise: 200 },
@@ -101,8 +102,96 @@ async function savePricing(body) {
   const doc = await ensurePricing();
   doc.minimumMonthlyPaise = toPaise(minimum);
   doc.slabs = slabs;
+  if (body.payment != null) {
+    const current = typeof doc.payment?.toObject === 'function' ? doc.payment.toObject() : (doc.payment || {});
+    doc.payment = cleanPayment(body.payment, current);
+    doc.markModified('payment');
+  }
   await doc.save();
   return doc;
 }
 
-module.exports = { ensurePricing, present, quoteOrders, savePricing, DEFAULT_SLABS };
+function cleanPayment(raw, existing = {}) {
+  const payment = raw || {};
+  const upiId = String(payment.upiId || '').trim();
+  if (upiId && !/^[\w.-]{2,}@[\w.-]{2,}$/.test(upiId)) {
+    throw new HttpError(400, 'Enter a UPI id like name@bank');
+  }
+  const accountNumber = String(payment.accountNumber || '').replace(/\s/g, '');
+  if (accountNumber && !/^\d{6,18}$/.test(accountNumber)) {
+    throw new HttpError(400, 'Account number should be 6 to 18 digits');
+  }
+  const ifsc = String(payment.ifsc || '').trim().toUpperCase();
+  if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+    throw new HttpError(400, 'Enter a valid IFSC');
+  }
+  const next = {
+    upiId,
+    accountName: String(payment.accountName || '').trim().slice(0, 80),
+    accountNumber,
+    ifsc,
+    bankName: String(payment.bankName || '').trim().slice(0, 80),
+    note: String(payment.note || '').trim().slice(0, 280),
+    razorpayKeyId: existing.razorpayKeyId || '',
+    razorpayKeySecretEnc: existing.razorpayKeySecretEnc || '',
+    razorpayWebhookSecretEnc: existing.razorpayWebhookSecretEnc || '',
+  };
+  if (Object.prototype.hasOwnProperty.call(payment, 'razorpayKeyId')) {
+    const razorpayKeyId = String(payment.razorpayKeyId || '').trim();
+    if (razorpayKeyId && !/^rzp_(test|live)_[A-Za-z0-9]+$/.test(razorpayKeyId)) {
+      throw new HttpError(400, 'Razorpay Key ID should look like rzp_test_ or rzp_live_');
+    }
+    next.razorpayKeyId = razorpayKeyId;
+    const keySecret = String(payment.razorpayKeySecret || '').trim();
+    const webhookSecret = String(payment.razorpayWebhookSecret || '').trim();
+    if (keySecret) next.razorpayKeySecretEnc = encryptObject({ secret: keySecret });
+    if (webhookSecret) next.razorpayWebhookSecretEnc = encryptObject({ secret: webhookSecret });
+    if (!razorpayKeyId) {
+      next.razorpayKeySecretEnc = '';
+      next.razorpayWebhookSecretEnc = '';
+    }
+  }
+  return next;
+}
+
+function upiPayUrl({ upiId, payeeName, amount, note }) {
+  const query = (value) => encodeURIComponent(String(value)).replace(/%40/g, '@');
+  const parts = [
+    `pa=${query(upiId)}`,
+    `pn=${query(payeeName || 'OMSKing')}`,
+    `am=${Number(amount).toFixed(2)}`,
+    'cu=INR',
+  ];
+  if (note) parts.push(`tn=${query(String(note).slice(0, 80))}`);
+  return `upi://pay?${parts.join('&')}`;
+}
+
+function paymentPublic(doc) {
+  const payment = doc?.payment || {};
+  return {
+    upiId: payment.upiId || '',
+    accountName: payment.accountName || '',
+    accountNumber: payment.accountNumber || '',
+    ifsc: payment.ifsc || '',
+    bankName: payment.bankName || '',
+    note: payment.note || '',
+    razorpayKeyId: payment.razorpayKeyId || '',
+    razorpayReady: Boolean(payment.razorpayKeyId && payment.razorpayKeySecretEnc),
+    webhookReady: Boolean(payment.razorpayKeyId && payment.razorpayWebhookSecretEnc),
+  };
+}
+
+function payLine(payment) {
+  const parts = [];
+  if (payment.upiId) parts.push(`UPI ${payment.upiId}`);
+  if (payment.accountName) parts.push(payment.accountName);
+  if (payment.accountNumber) parts.push(`account ${payment.accountNumber}`);
+  if (payment.ifsc) parts.push(`IFSC ${payment.ifsc}`);
+  if (payment.bankName) parts.push(payment.bankName);
+  if (payment.note) parts.push(payment.note);
+  return parts.join('. ').replace(/\.+$/, '');
+}
+
+module.exports = {
+  ensurePricing, present, quoteOrders, savePricing, paymentPublic, payLine, upiPayUrl, DEFAULT_SLABS,
+};

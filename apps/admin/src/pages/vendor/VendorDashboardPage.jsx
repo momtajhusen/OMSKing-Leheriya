@@ -86,7 +86,7 @@ export default function VendorDashboardPage() {
                     <TableRow key={row.id}>
                       <TableCell className="p-2 font-medium">{row.orderId}</TableCell>
                       <TableCell className="p-2">{row.product}</TableCell>
-                      <TableCell className="p-2"><VendorProductThumb name={row.product} src={row.imageUrl} /></TableCell>
+                      <TableCell className="p-2"><VendorProductThumb name={row.product} sku={row.sku} src={row.imageUrl} /></TableCell>
                       <TableCell className="p-2 font-mono text-xs">{row.sku}</TableCell>
                       <TableCell className="p-2">{row.qty}</TableCell>
                       <TableCell className="p-2">{formatINR(row.assignPrice)}</TableCell>

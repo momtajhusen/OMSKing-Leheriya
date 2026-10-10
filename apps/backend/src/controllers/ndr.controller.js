@@ -5,9 +5,10 @@ const tracking = require('../services/tracking.service');
 
 async function poll(req, res) {
   const data = await tracking.pollOpenShipments(merchantTenant(req));
-  return successResponse(res, data, data.checked
-    ? `Checked ${data.checked} Delhivery shipment${data.checked === 1 ? '' : 's'}`
-    : 'No open Delhivery shipment to check');
+  let message = 'No open own-courier shipment to check. Marketplace tracking stays on the channel.';
+  if (data.skipped === 'courier') message = 'This company has no courier token. Marketplace tracking was left as it is.';
+  else if (data.checked) message = `Checked ${data.checked} own-courier shipment${data.checked === 1 ? '' : 's'}`;
+  return successResponse(res, data, message);
 }
 
 async function listNdr(req, res) {

@@ -161,10 +161,10 @@ export default function GstInvoicePage() {
   if (!loaded) return <PageLoader label="Loading invoices..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold mb-2">GST Invoice</h1>
+          <h1 className="text-xl font-bold">GST Invoice</h1>
           <p className="text-muted-foreground">
             Myntra and Amazon issue the tax invoice for their orders; open it from here. Shopify and manual orders are invoiced by OMSKing (invoice no. = Order ID for Shopify).
           </p>
@@ -236,7 +236,7 @@ export default function GstInvoicePage() {
             <EmptyState title="Nothing here" description={tab === 'pending' ? 'Every shipped order has an invoice.' : 'No invoices in this view yet.'} />
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[960px]">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Invoice No</TableHead>

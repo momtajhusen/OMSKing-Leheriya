@@ -26,6 +26,23 @@ function merchantTenant(req) {
   return tenantId;
 }
 
+async function listStatus(req, res) {
+  const tenantId = merchantTenant(req);
+  const ChannelConnection = require('../models/ChannelConnection');
+  const rows = await ChannelConnection.find({ tenantId }).setOptions({ skipTenantFilter: true });
+  const data = rows.map((row) => {
+    const dto = toDto(row);
+    return {
+      channel: dto.channel,
+      status: dto.status,
+      lastTestOk: Boolean(dto.lastTestOk),
+      lastTestMode: dto.lastTestMode || '',
+      credentials: { apiMode: dto.credentials?.apiMode || '' },
+    };
+  });
+  return successResponse(res, data, 'Channel status');
+}
+
 async function listConnections(req, res) {
   const tenantId = merchantTenant(req);
   const ChannelConnection = require('../models/ChannelConnection');
@@ -96,4 +113,4 @@ async function listShopifyVendors(req, res) {
   return successResponse(res, names, 'Shopify vendors');
 }
 
-module.exports = { listConnections, saveConnection, testConnection, listShopifyVendors };
+module.exports = { listConnections, listStatus, saveConnection, testConnection, listShopifyVendors };

@@ -1,7 +1,12 @@
 const { successResponse } = require('../utils/response');
 const { HttpError } = require('../utils/httpError');
 const PricingInquiry = require('../models/PricingInquiry');
-const { ensurePricing, present, quoteOrders, savePricing } = require('../services/pricing.service');
+const { ensurePricing, present, quoteOrders, savePricing, paymentPublic } = require('../services/pricing.service');
+const {
+  mySubscription, listSubscriptions, recordSubscriptionPayment,
+  upiCheckout, startRazorpayCheckout, confirmRazorpayCheckout, submitUpiReference, applyRazorpayWebhook,
+} = require('../services/subscription.service');
+const { recordFromReq } = require('../services/auditLog.service');
 
 async function getPricing(req, res) {
   const doc = await ensurePricing();
@@ -13,7 +18,70 @@ async function getPricing(req, res) {
 
 async function putPricing(req, res) {
   const doc = await savePricing(req.body);
-  return successResponse(res, present(doc), 'Pricing updated');
+  return successResponse(res, { ...present(doc), payment: paymentPublic(doc) }, 'Pricing updated');
+}
+
+async function mine(req, res) {
+  return successResponse(res, await mySubscription(req.tenant), 'Subscription');
+}
+
+async function upi(req, res) {
+  return successResponse(res, await upiCheckout(req.tenant), 'UPI');
+}
+
+async function checkout(req, res) {
+  return successResponse(res, await startRazorpayCheckout(req.tenant), 'Checkout');
+}
+
+async function confirm(req, res) {
+  const view = await confirmRazorpayCheckout(req.tenant, req.body || {});
+  await recordFromReq(req, {
+    tenantId: req.user?.tenantId,
+    action: 'subscription.payment_recorded',
+    resourceType: 'subscription',
+    resourceId: view.tenantId,
+    resourceDisplay: view.name,
+    before: null,
+    after: { period: view.period, bill: view.bill, monthStatus: view.monthStatus, status: view.status },
+  });
+  return successResponse(res, view, 'Payment received');
+}
+
+async function reference(req, res) {
+  const view = await submitUpiReference(req.tenant, req.body?.reference);
+  await recordFromReq(req, {
+    tenantId: req.user?.tenantId,
+    action: 'subscription.upi_reference',
+    resourceType: 'subscription',
+    resourceId: view.tenantId,
+    resourceDisplay: view.name,
+    before: null,
+    after: { period: view.period, reference: view.reference, monthStatus: view.monthStatus },
+  });
+  return successResponse(res, view, 'Reference received');
+}
+
+async function razorpayWebhook(req, res) {
+  return successResponse(res, await applyRazorpayWebhook(req), 'Webhook');
+}
+
+async function subscriptions(req, res) {
+  return successResponse(res, await listSubscriptions(), 'Subscriptions');
+}
+
+async function recordPayment(req, res) {
+  const before = null;
+  const view = await recordSubscriptionPayment(req.params.tenantId, req.body || {});
+  await recordFromReq(req, {
+    tenantId: req.user?.tenantId,
+    action: 'subscription.payment_recorded',
+    resourceType: 'subscription',
+    resourceId: view.tenantId,
+    resourceDisplay: view.name,
+    before,
+    after: { period: view.period, bill: view.bill, monthStatus: view.monthStatus, status: view.status },
+  });
+  return successResponse(res, view, 'Payment recorded');
 }
 
 async function createInquiry(req, res) {
@@ -61,4 +129,6 @@ async function listInquiries(_req, res) {
   })), 'Pricing requests');
 }
 
-module.exports = { getPricing, putPricing, createInquiry, listInquiries };
+module.exports = {
+  getPricing, putPricing, createInquiry, listInquiries, mine, upi, checkout, confirm, reference, razorpayWebhook, subscriptions, recordPayment,
+};

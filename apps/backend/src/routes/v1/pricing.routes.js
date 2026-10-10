@@ -9,6 +9,26 @@ const pricing = require('../../controllers/pricing.controller');
 const router = require('express').Router();
 
 router.get('/', asyncHandler(pricing.getPricing));
+router.post('/razorpay-webhook', asyncHandler(pricing.razorpayWebhook));
+router.get('/mine', authMiddleware, tenantMiddleware, asyncHandler(pricing.mine));
+router.get('/mine/upi', authMiddleware, tenantMiddleware, requirePermission('settings.manage'), asyncHandler(pricing.upi));
+router.post('/mine/checkout', authMiddleware, tenantMiddleware, requirePermission('settings.manage'), asyncHandler(pricing.checkout));
+router.post('/mine/confirm', authMiddleware, tenantMiddleware, requirePermission('settings.manage'), asyncHandler(pricing.confirm));
+router.post('/mine/reference', authMiddleware, tenantMiddleware, requirePermission('settings.manage'), asyncHandler(pricing.reference));
+router.get(
+  '/subscriptions',
+  authMiddleware,
+  tenantMiddleware,
+  requirePermission('tenants.manage'),
+  asyncHandler(pricing.subscriptions),
+);
+router.post(
+  '/subscriptions/:tenantId/payments',
+  authMiddleware,
+  tenantMiddleware,
+  requirePermission('tenants.manage'),
+  asyncHandler(pricing.recordPayment),
+);
 router.post(
   '/inquiries',
   body('name').trim().isLength({ min: 2, max: 80 }).withMessage('Name is required'),

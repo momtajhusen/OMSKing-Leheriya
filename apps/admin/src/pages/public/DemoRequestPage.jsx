@@ -175,6 +175,10 @@ export default function DemoRequestPage() {
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900"
                   />
                 </div>
+                <p className="text-xs leading-5 text-slate-500 sm:col-span-2">
+                  This form stores your name, email, mobile, and company so we can book the walkthrough.{' '}
+                  <Link to="/privacy" className="font-medium text-emerald-800 hover:underline">Privacy</Link>
+                </p>
                 <div className="sm:col-span-2">
                   <Button type="submit" disabled={sending} className="h-12 w-full rounded-full">
                     {sending ? 'Sending…' : 'Request a demo'}

@@ -15,6 +15,7 @@ const reconcile = [authMiddleware, tenantMiddleware, vendorScope('orders'), requ
 
 router.post('/labels/bulk', ...ship, asyncHandler(orders.bookBulkLabels));
 router.post('/manifest', ...ship, asyncHandler(orders.closeManifest));
+router.get('/shipping-readiness', ...view, asyncHandler(orders.shippingReadiness));
 router.get('/', ...view, asyncHandler(orders.listOrders));
 router.get('/:orderId', ...view, asyncHandler(orders.getOrder));
 router.post('/:orderId/label', ...ship, asyncHandler(orders.generateLabel));

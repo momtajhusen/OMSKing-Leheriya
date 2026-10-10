@@ -11,9 +11,12 @@ import { formatINR, statusBadgeVariant } from '../../utils/format';
 import {
   netSales, salesByChannel, statusCounts, ordersTrend, topSkus, isCancelled, relativeTime,
 } from '../../lib/orderMetrics';
-import { CHANNEL_CATALOG } from '../../constants/channelCatalog';
+import { orderChannelLabel } from '../../constants/channelCatalog';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import KpiCard from '../../components/ui/KpiCard';
 import Button from '../../components/ui/Button';
+import Select from '../../components/ui/Select';
+import { FieldLabel } from '../../components/ui/TableToolbar';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
@@ -23,6 +26,7 @@ import ProductThumb from '../../components/ui/ProductThumb';
 import { TrendingUp, Package, ShoppingCart, Truck, RotateCcw, AlertTriangle, Clock } from 'lucide-react';
 
 const COLORS = ['#7C3AED', '#D97706', '#2563EB', '#10B981', '#F43F5E', '#64748B'];
+const CHANNEL_STROKES = ['#7C3AED', '#D97706', '#2563EB', '#059669', '#DB2777', '#0891B2', '#CA8A04'];
 
 const STATUS_TABS = ['all', 'New', 'Processing', 'Pending', 'Dispatched', 'Delivered'];
 const AWAITING_DISPATCH = ['Processing', 'Packed', 'Ready to Ship'];
@@ -30,6 +34,8 @@ const AWAITING_DISPATCH = ['Processing', 'Packed', 'Ready to Ship'];
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('all');
+  const [channelFilter, setChannelFilter] = useState('all');
+  const [range, setRange] = useState('all');
   const orders = useOrderStore((s) => s.orders);
   const loaded = useOrderStore((s) => s.loaded);
   const loadError = useOrderStore((s) => s.error);
@@ -37,6 +43,7 @@ export default function DashboardPage() {
   const tenantName = useAuthStore((s) => s.user?.tenantName || '');
   const [lowStock, setLowStock] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const connected = useConnectedChannels();
 
   useEffect(() => {
     hydrateFromApi();
@@ -44,52 +51,83 @@ export default function DashboardPage() {
     api.get('/integrations/jobs').then(({ data }) => setJobs((data.data || []).slice(0, 6))).catch(() => setJobs([]));
   }, [hydrateFromApi]);
 
+  const trendChannels = channelFilter === 'all'
+    ? connected.channels
+    : connected.channels.filter((channel) => orderChannelLabel(channel) === channelFilter);
+  const channelLabels = channelFilter === 'all' ? connected.labels : connected.labels.filter((label) => label === channelFilter);
+  const trendDays = range === 'all' ? 14 : Number(range);
+
+  const filteredOrders = useMemo(() => {
+    const start = range === 'all' ? 0 : Date.now() - Number(range) * 86400000;
+    return orders.filter((order) => {
+      if (channelFilter !== 'all' && order.channel !== channelFilter) return false;
+      if (!start) return true;
+      const time = new Date(order.createdAt || 0).getTime();
+      return Number.isFinite(time) && time >= start;
+    });
+  }, [orders, channelFilter, range]);
+
   const stats = useMemo(() => {
-    const live = orders.filter((order) => !isCancelled(order));
-    const channels = salesByChannel(orders);
+    const live = filteredOrders.filter((order) => !isCancelled(order));
     return {
-      newOrders: orders.filter((order) => order.status === 'New').length,
-      shipping: orders.filter((order) => AWAITING_DISPATCH.includes(order.status)).length,
-      returns: orders.filter((order) => order.reversePickup?.returnId).length,
+      newOrders: filteredOrders.filter((order) => order.status === 'New').length,
+      shipping: filteredOrders.filter((order) => AWAITING_DISPATCH.includes(order.status)).length,
+      returns: filteredOrders.filter((order) => order.reversePickup?.returnId).length,
       missingInvoice: live.filter((order) => ['Dispatched', 'Delivered'].includes(order.status) && !order.invoiceNo).length,
-      revenue: netSales(orders),
-      channels,
-      statuses: statusCounts(orders),
-      trend: ordersTrend(orders, 14),
-      top: topSkus(orders, 5),
+      revenue: netSales(filteredOrders),
+      channels: salesByChannel(filteredOrders, channelLabels),
+      statuses: statusCounts(filteredOrders),
+      trend: ordersTrend(filteredOrders, trendDays, trendChannels),
+      top: topSkus(filteredOrders, 5),
     };
-  }, [orders]);
+  }, [filteredOrders, channelLabels, trendChannels, trendDays]);
 
   const pendingPulse = (order) => order.status === 'Pending'
     || (order.subOrders || []).some((sub) => sub.vendorStatus === 'Pending Acceptance');
 
-  const recentOrders = useMemo(() => [...orders]
+  const recentOrders = useMemo(() => [...filteredOrders]
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
     .filter((order) => {
       if (activeTab === 'all') return true;
       if (activeTab === 'Pending') return pendingPulse(order);
       return order.status === activeTab;
     })
-    .slice(0, 5), [orders, activeTab]);
+    .slice(0, 5), [filteredOrders, activeTab]);
 
   const pulseCount = (tab) => {
-    if (tab === 'all') return orders.length;
-    if (tab === 'Pending') return orders.filter(pendingPulse).length;
-    return orders.filter((order) => order.status === tab).length;
+    if (tab === 'all') return filteredOrders.length;
+    if (tab === 'Pending') return filteredOrders.filter(pendingPulse).length;
+    return filteredOrders.filter((order) => order.status === tab).length;
   };
 
   if (!loaded) return <PageLoader label="Loading dashboard..." />;
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+    <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold mb-2">Dashboard</h1>
-          <p className="text-sm sm:text-base text-muted-foreground">
-            {tenantName ? `${tenantName} · ` : ''}{orders.length} orders from connected channels
+          <h1 className="text-xl font-bold">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
+            {tenantName ? `${tenantName} · ` : ''}{filteredOrders.length} orders from connected channels
           </p>
         </div>
-        <Button variant="outline" onClick={() => navigate('/orders')}>View all orders</Button>
+        <div className="flex flex-wrap items-end justify-end gap-2">
+          <FieldLabel label="Filters">
+            <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row">
+              <Select className="h-9 w-full sm:w-40" value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)} aria-label="Channel">
+                <option value="all">All channels</option>
+                {connected.labels.map((label) => <option key={label} value={label}>{label}</option>)}
+              </Select>
+              <Select className="h-9 w-full sm:w-36" value={range} onChange={(event) => setRange(event.target.value)} aria-label="Period">
+                <option value="all">All time</option>
+                <option value="7">Last 7 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30">Last 30 days</option>
+              </Select>
+            </div>
+          </FieldLabel>
+          <Button variant="outline" className="h-9" onClick={() => navigate('/orders')}>View all orders</Button>
+        </div>
       </div>
 
       {loadError && (
@@ -122,14 +160,17 @@ export default function DashboardPage() {
         <KpiCard label="Low Stock" value={lowStock.length} icon={Clock} tone="slate" onClick={() => navigate('/inventory')} />
       </div>
 
-      {orders.length === 0 ? (
-        <EmptyState title="No orders yet" description="Connect a channel and run Sync Orders on the Orders page." />
+      {filteredOrders.length === 0 ? (
+        <EmptyState
+          title={orders.length ? 'Nothing in this filter' : 'No orders yet'}
+          description={orders.length ? 'Choose another channel or period.' : 'Connect a channel and run Sync Orders on the Orders page.'}
+        />
       ) : (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader>
-                <CardTitle className="text-lg sm:text-xl">Orders Trend (Last 14 Days)</CardTitle>
+                <CardTitle>Orders Trend ({range === 'all' ? 'Last 14 Days' : `Last ${range} Days`})</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={250}>
@@ -139,13 +180,13 @@ export default function DashboardPage() {
                     <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                     <Tooltip />
                     <Legend />
-                    {CHANNEL_CATALOG.map((channel, index) => (
+                    {trendChannels.map((channel, index) => (
                       <Line
                         key={channel.id}
                         type="monotone"
                         dataKey={channel.id}
-                        name={channel.name}
-                        stroke={['#7C3AED', '#D97706', '#2563EB', '#059669', '#DB2777', '#0891B2', '#CA8A04'][index % 7]}
+                        name={orderChannelLabel(channel)}
+                        stroke={CHANNEL_STROKES[index % CHANNEL_STROKES.length]}
                       />
                     ))}
                   </LineChart>
@@ -155,7 +196,7 @@ export default function DashboardPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg sm:text-xl">Order Status</CardTitle>
+                <CardTitle>Order Status</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={250}>
@@ -183,7 +224,7 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg sm:text-xl">Revenue by Channel (excluding cancelled)</CardTitle>
+              <CardTitle>Revenue by Channel (excluding cancelled)</CardTitle>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={250}>
@@ -200,10 +241,10 @@ export default function DashboardPage() {
         </>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg sm:text-xl">Top Selling SKUs</CardTitle>
+            <CardTitle>Top Selling SKUs</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => navigate('/products')}>Open</Button>
           </CardHeader>
           <CardContent>
@@ -223,7 +264,7 @@ export default function DashboardPage() {
                     <TableRow key={sku.sku} className="cursor-pointer" onClick={() => navigate('/products')}>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <ProductThumb name={sku.name || sku.sku} src={sku.imageUrl} />
+                          <ProductThumb name={sku.name || sku.sku} sku={sku.sku} src={sku.imageUrl} />
                           <div>
                             <div className="font-medium">{sku.name}</div>
                             <div className="text-xs text-muted-foreground">{sku.sku}</div>
@@ -242,7 +283,7 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg sm:text-xl">Recent Orders</CardTitle>
+            <CardTitle>Recent Orders</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => navigate('/orders')}>Open</Button>
           </CardHeader>
           <CardContent>
@@ -278,7 +319,7 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg sm:text-xl">Channel sync activity</CardTitle>
+            <CardTitle>Channel sync activity</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => navigate('/integrations')}>Open</Button>
           </CardHeader>
           <CardContent>
@@ -286,7 +327,7 @@ export default function DashboardPage() {
               <EmptyState title="No sync jobs yet" description="Order pulls and webhooks show here." />
             ) : (
               <div className="space-y-4">
-                {jobs.map((job) => (
+                {jobs.filter((job) => connected.ids.includes(String(job.channel || '').toLowerCase())).map((job) => (
                   <button
                     key={job.id}
                     type="button"

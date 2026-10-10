@@ -87,7 +87,7 @@ export default function VendorProductsPage() {
                 <TableRow key={item.sku}>
                   <TableCell className="p-2 font-medium whitespace-nowrap">
                     <div className="flex items-center gap-2">
-                      <ProductThumb name={item.product || item.sku} src={item.imageUrl} />
+                      <ProductThumb name={item.product || item.sku} sku={item.sku} src={item.imageUrl} />
                       {item.product || item.sku}
                     </div>
                   </TableCell>

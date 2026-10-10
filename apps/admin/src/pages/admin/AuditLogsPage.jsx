@@ -77,10 +77,10 @@ export default function AuditLogsPage() {
   if (rows === null) return <PageLoader label="Loading audit log..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Audit Logs</h1>
+          <h1 className="text-xl font-bold">Audit Logs</h1>
           <p className="text-muted-foreground">Who changed company, tax, users, roles, channels, catalog and order status, with the value before and after. The log is append-only.</p>
         </div>
         <Button variant="outline" onClick={exportRows} disabled={!filtered.length}>
@@ -92,7 +92,7 @@ export default function AuditLogsPage() {
       {error && <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
 
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -116,7 +116,7 @@ export default function AuditLogsPage() {
             <EmptyState title="No record changes yet" description="Saving company, tax, a user, a role, a channel or an order status writes a before/after row here." />
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[960px]">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>When</TableHead>
@@ -160,7 +160,7 @@ export default function AuditLogsPage() {
             <EmptyState title="No stock movements yet" description="Stock-in, adjustments, reservations and restocks show here." />
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[960px]">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>When</TableHead>
@@ -181,7 +181,7 @@ export default function AuditLogsPage() {
                       <TableCell><Badge variant="outline">{String(row.type || '').replace(/_/g, ' ')}</Badge></TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <ProductThumb name={row.productName || row.sku} src={row.imageUrl} />
+                          <ProductThumb name={row.productName || row.sku} sku={row.sku} src={row.imageUrl} />
                           <div>
                             <div className="font-mono text-xs">{row.sku}</div>
                             <div className="text-xs text-muted-foreground">{row.productName}</div>

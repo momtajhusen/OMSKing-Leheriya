@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate, statusBadgeVariant } from '../../utils/format';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
+import { Card, CardContent } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -20,7 +20,9 @@ import { isChannelManaged, packetIdOf, openMyntraDocument, pullMyntraOrders } fr
 import { downloadCsv } from '../../lib/orderMetrics';
 import api, { apiError } from '../../lib/api';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
-import { CHANNEL_CATALOG, orderChannelLabel } from '../../constants/channelCatalog';
+import TableToolbar from '../../components/ui/TableToolbar';
+import { orderChannelLabel } from '../../constants/channelCatalog';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { withSubOrders } from '../../lib/orderSubOrders';
 
 const STATUS_TABS = [
@@ -30,11 +32,6 @@ const STATUS_TABS = [
   { id: 'Ready to Ship', label: 'Ready To Ship' },
   { id: 'Cancelled', label: 'Cancelled' },
   { id: 'all', label: 'All Orders' },
-];
-
-const CHANNEL_TABS = [
-  { id: 'all', label: 'All channels' },
-  ...CHANNEL_CATALOG.map((channel) => ({ id: orderChannelLabel(channel), label: orderChannelLabel(channel) })),
 ];
 
 const IN_TRANSIT = ['Dispatched', 'In transit'];
@@ -54,6 +51,15 @@ export default function OrdersPage() {
   const [reverseCourier, setReverseCourier] = useState('Delhivery');
   const [activeTab, setActiveTab] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
+  const connected = useConnectedChannels();
+  const connectedKey = connected.loaded ? (connected.labels.join(',') || '__none__') : '';
+  const channelTabs = [
+    { id: 'all', label: 'All channels' },
+    ...connected.channels.map((channel) => {
+      const label = orderChannelLabel(channel);
+      return { id: label, label };
+    }),
+  ];
   const [paymentFilter, setPaymentFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,6 +86,7 @@ export default function OrdersPage() {
           limit: PAGE_SIZE,
           status: activeTab,
           channel: channelFilter,
+          connected: connectedKey || undefined,
           payment: paymentFilter,
           source: sourceFilter,
           q: query || undefined,
@@ -98,7 +105,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     loadOrders(page);
-  }, [page, activeTab, channelFilter, paymentFilter, sourceFilter, query]);
+  }, [page, activeTab, channelFilter, paymentFilter, sourceFilter, query, connectedKey]);
 
   const filteredOrders = orderList;
 
@@ -143,6 +150,7 @@ export default function OrdersPage() {
         params: {
           status: activeTab,
           channel: channelFilter,
+          connected: connectedKey || undefined,
           payment: paymentFilter,
           source: sourceFilter,
           q: query || undefined,
@@ -174,13 +182,13 @@ export default function OrdersPage() {
   if (loading) return <PageLoader label="Loading orders..." />;
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold mb-2">Orders</h1>
-          <p className="text-sm sm:text-base text-muted-foreground">Tabs used on the packing desk: Unfulfillable, New, Packed, Ready To Ship, Cancelled, All Orders. Delivered and in-transit orders stay under All Orders.</p>
+          <h1 className="text-xl font-bold">Orders ({total})</h1>
+          <p className="text-xs text-muted-foreground">Packing desk tabs: Unfulfillable, New, Packed, Ready To Ship, Cancelled, All.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={syncOrders} disabled={syncing}>
             <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? 'Syncing…' : 'Sync Orders'}
@@ -196,7 +204,7 @@ export default function OrdersPage() {
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>
       )}
 
-      <div className="kpi-grid">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <KpiCard label="Total Orders" value={kpiData.total} icon={ShoppingCart} tone="blue" onClick={() => { setActiveTab('all'); setPage(1); }} />
         <KpiCard label="Unfulfillable" value={kpiData.unfulfillable} icon={Filter} tone="rose" onClick={() => { setActiveTab('Unfulfillable'); setPage(1); }} />
         <KpiCard label="New" value={kpiData.newOrders} icon={Filter} tone="emerald" onClick={() => { setActiveTab('New'); setPage(1); }} />
@@ -204,64 +212,59 @@ export default function OrdersPage() {
         <KpiCard label="Ready To Ship" value={kpiData.readyToShip} icon={Filter} tone="amber" onClick={() => { setActiveTab('Ready to Ship'); setPage(1); }} />
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap overflow-x-auto pb-1">
-        {CHANNEL_TABS.map((tab) => (
-          <Button
-            key={tab.id}
-            variant={channelFilter === tab.id ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => { setChannelFilter(tab.id); setPage(1); }}
-            className="text-xs whitespace-nowrap"
-          >
-            {tab.label}
-          </Button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-2 flex-wrap overflow-x-auto pb-2">
-        {STATUS_TABS.map((tab) => (
-          <Button
-            key={tab.id}
-            variant={activeTab === tab.id ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => { setActiveTab(tab.id); setPage(1); }}
-            className="text-xs whitespace-nowrap"
-          >
-            {tab.label}
-          </Button>
-        ))}
-      </div>
-
       <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search by order ID, sub-order, or customer..."
-                className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Select className="w-full sm:w-44" value={channelFilter} onChange={(e) => { setChannelFilter(e.target.value); setPage(1); }}>
-              <option value="all">All Channels</option>
-              {CHANNEL_CATALOG.map((channel) => <option key={channel.id} value={orderChannelLabel(channel)}>{orderChannelLabel(channel)}</option>)}
-            </Select>
-            <Button variant="outline" className="w-full sm:w-auto" onClick={() => setFiltersOpen(true)}>
-              <Filter className="w-4 h-4 mr-2" />
-              Filters
-            </Button>
+        <CardContent className="space-y-2 p-3">
+          <TableToolbar
+            search={(
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Order ID, sub-order, or customer"
+                  className="h-9 w-full rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] pl-10 pr-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+            )}
+            filters={(
+              <Button variant="outline" size="sm" className="h-9" onClick={() => setFiltersOpen(true)}>
+                <Filter className="mr-2 h-4 w-4" />
+                More filters
+              </Button>
+            )}
+          />
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            {channelTabs.map((tab) => (
+              <Button
+                key={tab.id}
+                variant={channelFilter === tab.id ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => { setChannelFilter(tab.id); setPage(1); }}
+                className="h-7 whitespace-nowrap px-2.5 text-xs"
+              >
+                {tab.label}
+              </Button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            {STATUS_TABS.map((tab) => (
+              <Button
+                key={tab.id}
+                variant={activeTab === tab.id ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => { setActiveTab(tab.id); setPage(1); }}
+                className="h-7 whitespace-nowrap px-2.5 text-xs"
+              >
+                {tab.label}
+              </Button>
+            ))}
           </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Orders ({total})</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="p-3">
           {filteredOrders.length === 0 ? (
             <EmptyState
               icon={<ShoppingCart className="h-7 w-7 text-muted-foreground" />}

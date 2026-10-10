@@ -217,6 +217,12 @@ export default function PricingPage() {
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                   />
                 </div>
+                <p className="text-xs leading-5 text-slate-500 sm:col-span-2">
+                  We keep the details on this form to reply with a quote.{' '}
+                  <Link to="/privacy" className="font-medium text-emerald-800 hover:underline">Privacy</Link>
+                  {' · '}
+                  <Link to="/billing" className="font-medium text-emerald-800 hover:underline">Billing</Link>
+                </p>
                 <div className="sm:col-span-2">
                   <Button type="submit" disabled={sending} className="rounded-full">
                     {sending ? 'Saving…' : 'Send pricing request'}
@@ -235,6 +241,8 @@ export default function PricingPage() {
               <p className="px-1 text-sm text-slate-600">
                 Prefer a walkthrough before you sign up?{' '}
                 <Link to="/demo" className="font-medium text-emerald-700 hover:underline">Request a demo</Link>
+                {' · '}
+                <Link to="/billing" className="font-medium text-emerald-700 hover:underline">How billing works</Link>
               </p>
             </div>
           </div>

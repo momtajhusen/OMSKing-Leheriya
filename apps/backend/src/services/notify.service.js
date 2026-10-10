@@ -2,6 +2,7 @@ const Tenant = require('../models/Tenant');
 const Vendor = require('../models/Vendor');
 const NotificationDelivery = require('../models/NotificationDelivery');
 const { encryptObject, decryptObject } = require('../lib/secretBox');
+const { companyText, operationalEmail } = require('../lib/mailTemplates');
 
 const EVENTS = [
   { id: 'NOT-001', email: false, telegram: false, whatsapp: false, other: false },
@@ -282,7 +283,9 @@ async function notifyVendorAssigned(tenantId, order, sub, deps = {}) {
   const events = flagsOf(tenant);
   const token = botTokenOf(tenant);
   const chatId = chatIdOf(vendor?.telegramGroup);
-  const text = assignText(order, sub);
+  const detail = assignText(order, sub);
+  const text = companyText(`Vendor order ${order.orderNo}`, detail);
+  const whatsappText = companyText(`Vendor order ${order.orderNo}`, detail, { whatsapp: true });
   const dedupeKey = dedupeAssign(order, sub);
   let telegram = 'skipped';
   let reason = '';
@@ -309,7 +312,7 @@ async function notifyVendorAssigned(tenantId, order, sub, deps = {}) {
       dedupeKey: `${dedupeKey}:vendor-email`,
       to: vendor.email,
       subject: `Vendor order ${order.orderNo}`,
-      text,
+      text: detail,
       mailer,
     });
   }
@@ -319,7 +322,7 @@ async function notifyVendorAssigned(tenantId, order, sub, deps = {}) {
       dedupeKey: `${dedupeKey}:owner-email`,
       to: emailRecipient(tenant),
       subject: `Vendor assigned ${order.orderNo}`,
-      text,
+      text: detail,
       mailer,
     });
   }
@@ -327,14 +330,14 @@ async function notifyVendorAssigned(tenantId, order, sub, deps = {}) {
   if (events['NOT-002']?.whatsapp) {
     await notifyEventWhatsapp(tenantId, 'NOT-002', {
       dedupeKey: `${dedupeKey}:vendor-wa`,
-      text,
+      text: whatsappText,
       to: phone,
     }, deps);
   }
   await notifyEventInApp(tenantId, 'NOT-002', { dedupeKey, text });
   const whatsapp = await notifyEventWhatsapp(tenantId, 'NOT-009', {
     dedupeKey: `${dedupeKey}:owner-wa`,
-    text,
+    text: whatsappText,
   }, deps);
   const ownerTelegram = await notifyEventTelegram(tenantId, 'NOT-009', {
     dedupeKey: `${dedupeKey}:owner-tg`,
@@ -352,12 +355,13 @@ async function sendEmailOnce(tenantId, { eventKey, dedupeKey, to, subject, text,
       dedupeKey,
       channel: 'email',
       transport: async () => {
+        const letter = operationalEmail({ title: subject, detail: text });
         const info = await mailer({
           to,
-          subject,
-          text,
+          subject: letter.subject,
+          text: letter.text,
           tenantId,
-          html: `<pre>${String(text).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))}</pre>`,
+          html: letter.html,
         });
         return info?.messageId || `email-${dedupeKey}`;
       },
@@ -451,14 +455,15 @@ async function notifyEventEmail(tenantId, eventId, { dedupeKey, subject, text, w
       })
       : { email: 'skipped', reason: 'no_recipient' };
   }
+  const framed = companyText(subject, text);
   const whatsapp = await notifyEventWhatsapp(tenantId, eventId, {
     dedupeKey,
-    text,
+    text: companyText(subject, text, { whatsapp: true }),
     to: whatsappTo,
     direct: whatsappTo != null,
   }, deps);
-  const telegram = await notifyEventTelegram(tenantId, eventId, { dedupeKey, text }, deps);
-  const inApp = await notifyEventInApp(tenantId, eventId, { dedupeKey, text });
+  const telegram = await notifyEventTelegram(tenantId, eventId, { dedupeKey, text: framed }, deps);
+  const inApp = await notifyEventInApp(tenantId, eventId, { dedupeKey, text: framed });
   return { ...emailResult, whatsapp: whatsapp.whatsapp, telegram: telegram.telegram, inApp: inApp.inApp };
 }
 

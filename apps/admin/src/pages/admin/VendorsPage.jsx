@@ -196,10 +196,10 @@ export default function VendorsPage() {
   if (!loaded) return <PageLoader label="Loading vendors..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Vendors</h1>
+          <h1 className="text-xl font-bold">Vendors</h1>
           <p className="text-muted-foreground">Accept / reject, dispatch, bulk AWB. Same phone number can exist on more than one vendor.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -214,8 +214,8 @@ export default function VendorsPage() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-4 py-3">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-4 py-3">
+        <div className="min-w-0 flex-1">
           <p className="font-medium">Auto assignment</p>
           <p className="text-sm text-muted-foreground">When on, fulfilment assigns the Shopify vendor name automatically if that vendor is still on this list.</p>
         </div>
@@ -250,7 +250,7 @@ export default function VendorsPage() {
             </Button>
           ))}
         </div>
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -391,7 +391,7 @@ export default function VendorsPage() {
           <EmptyState title="No assigned orders yet" description="Fulfilment assignments will show here." />
         ) : (
           <div className="overflow-x-auto">
-          <Table className="min-w-[820px]">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Order</TableHead>
@@ -425,7 +425,7 @@ export default function VendorsPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex min-w-[180px] items-center gap-2">
-                        <ProductThumb name={title} src={photo} />
+                        <ProductThumb name={title} sku={sku} src={photo} />
                         <span className="leading-tight">{title}</span>
                       </div>
                     </TableCell>
@@ -477,7 +477,7 @@ export default function VendorsPage() {
                 <TableRow key={sub.id}>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <ProductThumb name={sub.title} src={sub.imageUrl} />
+                      <ProductThumb name={sub.title} sku={sub.sku} src={sub.imageUrl} />
                       <span>{sub.title}</span>
                     </div>
                   </TableCell>

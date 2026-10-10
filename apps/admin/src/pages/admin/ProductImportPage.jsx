@@ -93,16 +93,16 @@ export default function ProductImportPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Bulk product import</h1>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">Bulk product import</h1>
           <p className="text-muted-foreground">
             Shopify first, then Myntra, then Amazon. Pull live catalog or upload CSV. The same seller SKU or barcode stays one Master SKU. Amazon never creates a new master. No import creates stock.
             {masterChannel === 'myntra' ? ' Shopify is not connected, so Myntra rows can create the master.' : ' Shopify owns the catalog, so Myntra and Amazon only auto-map.'}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={downloadTemplate}>
             <Download className="w-4 h-4 mr-2" />
             Download template
@@ -209,7 +209,7 @@ export default function ProductImportPage() {
                   <TableRow key={`${row.channel}-${row.sku}-${i}`}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        <ProductThumb name={row.title || row.sku} src={row.image} />
+                        <ProductThumb name={row.title || row.sku} sku={row.sku} src={row.image} />
                         {row.sku}
                       </div>
                     </TableCell>

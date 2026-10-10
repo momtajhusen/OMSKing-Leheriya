@@ -13,12 +13,12 @@ import { GitCompare, Link, Search, Unlink } from 'lucide-react';
 import api, { apiError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
 
-import { CHANNEL_CATALOG } from '../../constants/channelCatalog';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 
-const CHANNELS = CHANNEL_CATALOG.map((row) => row.id);
-
 export default function SkuMappingPage() {
+  const connected = useConnectedChannels();
+  const channels = connected.ids;
   const navigate = useNavigate();
   const { canCatalogEdit } = usePermissions();
   const [activeTab, setActiveTab] = useState('mapped');
@@ -136,10 +136,10 @@ export default function SkuMappingPage() {
   if (loading) return <PageLoader label="Loading SKU mappings..." />;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">SKU Mapping</h1>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">SKU Mapping</h1>
           <p className="text-muted-foreground">
             Every channel listing attaches to one Master SKU. Match is normalized seller SKU, then barcode — never title.
           </p>
@@ -148,7 +148,7 @@ export default function SkuMappingPage() {
       </div>
 
       <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="flex items-start gap-3">
             <GitCompare className="w-5 h-5 text-primary mt-0.5" />
             <div>
@@ -188,22 +188,22 @@ export default function SkuMappingPage() {
                 }).catch((err) => toast.error(apiError(err, 'Could not load mappings'))).finally(() => setLoading(false));
               }}
             >
-              {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+              {channels.map((c) => <option key={c} value={c}>{c}</option>)}
             </Select>
           </div>
         ) : (
           <div className="w-40">
             <Select value={channel} onChange={(e) => setChannel(e.target.value)}>
               <option value="">All channels</option>
-              {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+              {channels.map((c) => <option key={c} value={c}>{c}</option>)}
             </Select>
           </div>
         )}
         {activeTab !== 'unlisted' && (
-          <div className="relative">
+          <div className="relative w-full sm:w-52">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <input
-              className="h-8 pl-7 pr-2 rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] text-sm text-foreground placeholder:text-muted-foreground"
+              className="h-8 w-full rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] pl-7 pr-2 text-sm text-foreground placeholder:text-muted-foreground"
               placeholder="Search SKU / title"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -253,7 +253,7 @@ export default function SkuMappingPage() {
                   <TableRow key={row.id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        <ProductThumb name={row.productName || row.channelTitle || row.channelSku} src={row.imageUrl} />
+                        <ProductThumb name={row.productName || row.channelTitle || row.channelSku} sku={row.channelSku || row.masterSku} src={row.imageUrl} />
                         {row.masterSku ? <Link className="w-4 h-4 text-green-600" /> : <Unlink className="w-4 h-4 text-destructive" />}
                         {row.channelSku}
                       </div>
@@ -330,7 +330,7 @@ export default function SkuMappingPage() {
                   <TableRow key={sku.id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        <ProductThumb name={sku.name || sku.code} src={sku.imageUrl} />
+                        <ProductThumb name={sku.name || sku.code} sku={sku.code} src={sku.imageUrl} />
                         {sku.code}
                       </div>
                     </TableCell>

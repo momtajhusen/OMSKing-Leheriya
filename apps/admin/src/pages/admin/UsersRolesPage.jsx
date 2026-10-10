@@ -157,10 +157,10 @@ export default function UsersRolesPage() {
   if (loading) return <PageLoader label="Loading users & roles..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Users & Roles</h1>
+          <h1 className="text-xl font-bold">Users & Roles</h1>
           <p className="text-muted-foreground">
             Permissions are checked as keys (orders.view, finance.reconcile, …) — not by role title alone. This tenant cannot see another merchant. Platform Admin is not assigned here.
           </p>

@@ -14,10 +14,13 @@ const {
   hashToken, signAccessToken, signRefreshToken, verifyRefresh,
   setRefreshCookie, clearRefreshCookie, deviceFromUa, COOKIE_NAME,
 } = require('../lib/tokens');
-const { provisionMerchant } = require('../services/tenantOnboard.service');
-const { sendMail, assertMailConfigured, mailboxOf } = require('../lib/mailer');
+const { provisionMerchant, slugify } = require('../services/tenantOnboard.service');
+const { sendMail } = require('../lib/mailer');
+const { issueEmailOtp, takeEmailOtp } = require('../lib/emailOtp');
 const config = require('../config');
-const { welcomeEmail, resetOtpEmail } = require('../lib/mailTemplates');
+const { welcomeEmail } = require('../lib/mailTemplates');
+const Warehouse = require('../models/Warehouse');
+const WarehouseLocationMap = require('../models/WarehouseLocationMap');
 const { removeStoredUpload } = require('../middleware/uploadImage');
 
 const POPULATE = [
@@ -90,13 +93,24 @@ async function login(req, res) {
   const user = pickAccount(matched, req.body.workspace);
   if (!user) throw new HttpError(401, 'Invalid email or password');
   if (user.status === 'disabled') throw new HttpError(403, 'Account disabled');
+  if (user.emailVerified === false) {
+    const err = new HttpError(403, 'Enter the OTP sent to your email before signing in.');
+    err.data = { verificationRequired: true, email: user.email };
+    throw err;
+  }
 
   const tenant = user.tenantId;
   if (tenant.kind === 'merchant' && tenant.status === 'suspended') {
     throw new HttpError(403, 'This tenant is suspended');
   }
   if (tenant.kind === 'merchant' && tenant.status === 'trial' && tenant.planExpiresAt && new Date(tenant.planExpiresAt) < new Date()) {
-    throw new HttpError(403, 'This 14-day trial has ended. Renew the plan to sign in.');
+    const { expiredTrialMessage } = require('../services/subscription.service');
+    throw new HttpError(403, await expiredTrialMessage(tenant));
+  }
+
+  if (user.twoFactorEnabled) {
+    await issueEmailOtp({ user, purpose: 'login', required: true });
+    return successResponse(res, { twoFactorRequired: true, email: user.email }, 'OTP sent to your email');
   }
 
   user.lastLoginAt = new Date();
@@ -132,27 +146,103 @@ async function demoLogin(req, res) {
   return successResponse(res, session, 'Demo signed in');
 }
 
+async function removeUnverifiedMerchant(tenantId) {
+  await PasswordReset.deleteMany({ tenantId }).setOptions({ skipTenantFilter: true });
+  await User.deleteMany({ tenantId }).setOptions({ skipTenantFilter: true });
+  await Role.deleteMany({ tenantId }).setOptions({ skipTenantFilter: true });
+  await Warehouse.deleteMany({ tenantId }).setOptions({ skipTenantFilter: true });
+  await WarehouseLocationMap.deleteMany({ tenantId }).setOptions({ skipTenantFilter: true });
+  await Tenant.deleteOne({ _id: tenantId });
+}
+
 async function register(req, res) {
   const { name, email, company, password } = req.body;
   const plan = PLANS[req.body.plan] ? req.body.plan : 'starter';
+  const normalizedEmail = String(email || '').toLowerCase().trim();
+  const slug = slugify(company);
+  const existing = await Tenant.findOne({ slug });
+  if (existing) {
+    const pending = await User.findOne({
+      tenantId: existing._id,
+      email: normalizedEmail,
+      emailVerified: false,
+    }).setOptions({ skipTenantFilter: true });
+    if (!pending) throw new HttpError(409, 'A tenant with this slug already exists');
+    pending.fullName = name;
+    pending.passwordHash = await hashPassword(password);
+    await pending.save();
+    await issueEmailOtp({ user: pending, purpose: 'signup', platformOnly: true, required: true });
+    return successResponse(res, { verificationRequired: true, email: pending.email }, 'OTP sent. Verify your email to finish.');
+  }
+
   const { tenant, owner } = await provisionMerchant({
     name: company,
-    ownerEmail: email,
+    ownerEmail: normalizedEmail,
     ownerName: name,
     password,
     status: 'trial',
     plan,
     channels: PLANS[plan],
+    emailVerified: false,
   });
   const user = await loadUserById(owner._id);
-  const session = await issueSession(req, res, user, { tenant });
   try {
-    const mail = welcomeEmail({ name, email: email.toLowerCase() });
-    await sendMail({ to: email.toLowerCase(), ...mail });
+    await issueEmailOtp({ user, purpose: 'signup', platformOnly: true, required: true });
+  } catch (err) {
+    await removeUnverifiedMerchant(tenant._id);
+    throw err;
+  }
+  return successResponse(res, { verificationRequired: true, email: user.email }, 'OTP sent. Verify your email to finish.', 201);
+}
+
+async function verifyEmail(req, res) {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const users = (await accountsForEmail(email)).filter((user) => user.emailVerified === false && user.status !== 'disabled');
+  const user = pickAccount(users, req.body.workspace);
+  if (!user) throw new HttpError(400, 'Invalid email or OTP');
+  await takeEmailOtp({ user, purpose: 'signup', otp: String(req.body.otp || '').trim() });
+  user.emailVerified = true;
+  user.lastLoginAt = new Date();
+  await user.save();
+  try {
+    const mail = welcomeEmail({ name: user.fullName, email: user.email });
+    await sendMail({ to: user.email, ...mail });
   } catch (err) {
     console.error('[MAIL] Welcome email failed:', err.message);
   }
-  return successResponse(res, session, 'Merchant trial created', 201);
+  const session = await issueSession(req, res, user);
+  return successResponse(res, session, 'Email verified');
+}
+
+async function resendVerification(req, res) {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const generic = { sent: true };
+  const users = (await accountsForEmail(email)).filter((user) => user.emailVerified === false && user.status !== 'disabled');
+  const user = users.length ? pickAccount(users, req.body.workspace) : null;
+  if (!user) return successResponse(res, generic, 'If that email is waiting for verification, an OTP was sent');
+  await issueEmailOtp({ user, purpose: 'signup', platformOnly: true, required: true });
+  return successResponse(res, generic, 'If that email is waiting for verification, an OTP was sent');
+}
+
+async function verifyLogin(req, res) {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const password = req.body.password || '';
+  const users = await accountsForEmail(email);
+  const matched = [];
+  for (const row of users) {
+    if (row.passwordHash && await bcrypt.compare(password, row.passwordHash)) matched.push(row);
+  }
+  if (!matched.length) throw new HttpError(401, 'Invalid email or password');
+  const user = pickAccount(matched, req.body.workspace);
+  if (!user || user.status === 'disabled') throw new HttpError(401, 'Invalid email or password');
+  if (!user.twoFactorEnabled) throw new HttpError(400, 'Sign-in OTP is not turned on for this account');
+  await takeEmailOtp({ user, purpose: 'login', otp: String(req.body.otp || '').trim() });
+  const tenant = user.tenantId;
+  if (tenant.kind === 'merchant' && tenant.status === 'suspended') throw new HttpError(403, 'This tenant is suspended');
+  user.lastLoginAt = new Date();
+  await user.save();
+  const session = await issueSession(req, res, user);
+  return successResponse(res, session, 'Signed in');
 }
 
 async function refresh(req, res) {
@@ -213,6 +303,9 @@ async function me(req, res) {
 async function patchMe(req, res) {
   const user = await User.findById(req.user.id).setOptions({ skipTenantFilter: true });
   if (!user) throw new HttpError(401, 'User not found');
+  if (req.body.twoFactorEnabled === true) {
+    throw new HttpError(400, 'Enter the OTP from Gmail to turn on sign-in verification.');
+  }
   if (typeof req.body.twoFactorEnabled === 'boolean' && user.twoFactorEnabled !== req.body.twoFactorEnabled) {
     const before = { twoFactorEnabled: Boolean(user.twoFactorEnabled) };
     user.twoFactorEnabled = req.body.twoFactorEnabled;
@@ -262,25 +355,8 @@ async function forgotPassword(req, res) {
   if (!user || user.status === 'disabled') {
     return successResponse(res, generic, 'If that Gmail is registered, an OTP was sent');
   }
-  const box = await mailboxOf(user.tenantId?._id || user.tenantId);
-  if (!box) {
-    return successResponse(res, generic, 'If that Gmail is registered, an OTP was sent');
-  }
-
-  await PasswordReset.updateMany(
-    { userId: user._id, usedAt: { $exists: false } },
-    { usedAt: new Date() },
-  ).setOptions({ skipTenantFilter: true });
-
-  const otp = String(crypto.randomInt(100000, 1000000));
-  await PasswordReset.create({
-    tenantId: user.tenantId?._id || user.tenantId,
-    userId: user._id,
-    tokenHash: hashToken(`otp:${user._id}:${otp}`),
-    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-  });
-  const mail = resetOtpEmail({ name: user.fullName, otp });
-  await sendMail({ to: email, tenantId: user.tenantId?._id || user.tenantId, ...mail });
+  const sent = await issueEmailOtp({ user, purpose: 'reset' });
+  if (!sent) return successResponse(res, generic, 'If that Gmail is registered, an OTP was sent');
   return successResponse(res, generic, 'If that Gmail is registered, an OTP was sent');
 }
 
@@ -291,28 +367,43 @@ async function resetPassword(req, res) {
   const users = await accountsForEmail(email);
   const user = pickAccount(users, req.body.workspace);
   if (!user) throw new HttpError(400, 'Invalid email or OTP');
-  const row = await PasswordReset.findOne({
-    userId: user._id,
-    tokenHash: hashToken(`otp:${user._id}:${otp}`),
-  }).setOptions({ skipTenantFilter: true });
-  if (!row || row.usedAt || row.expiresAt < new Date()) {
-    throw new HttpError(400, 'OTP is invalid or expired. Request a new one.');
-  }
-  if (row.attempts >= 5) {
-    row.usedAt = new Date();
-    await row.save();
-    throw new HttpError(400, 'Too many attempts. Request a new OTP.');
-  }
+  await takeEmailOtp({ user, purpose: 'reset', otp });
   user.passwordHash = await hashPassword(password);
   user.refreshTokenVersion += 1;
   await user.save();
-  row.usedAt = new Date();
-  await row.save();
   await RefreshSession.updateMany(
     { userId: user._id, revokedAt: { $exists: false } },
     { revokedAt: new Date() },
   ).setOptions({ skipTenantFilter: true });
   return successResponse(res, null, 'Password updated. Sign in with the new password.');
+}
+
+async function startTwoFactor(req, res) {
+  const user = await loadUserById(req.user.id);
+  if (!user || user.status === 'disabled') throw new HttpError(401, 'User not found');
+  if (user.twoFactorEnabled) return successResponse(res, { twoFactorEnabled: true }, 'Sign-in OTP is already on');
+  await issueEmailOtp({ user, purpose: 'enable-2fa', required: true });
+  return successResponse(res, { sent: true }, 'OTP sent to your email');
+}
+
+async function confirmTwoFactor(req, res) {
+  const user = await loadUserById(req.user.id);
+  if (!user || user.status === 'disabled') throw new HttpError(401, 'User not found');
+  await takeEmailOtp({ user, purpose: 'enable-2fa', otp: String(req.body.otp || '').trim() });
+  const before = { twoFactorEnabled: Boolean(user.twoFactorEnabled) };
+  user.twoFactorEnabled = true;
+  await user.save();
+  await recordFromReq(req, {
+    tenantId: user.tenantId?._id || user.tenantId,
+    action: 'auth.two_factor_updated',
+    resourceType: 'users',
+    resourceId: user._id,
+    resourceDisplay: user.email,
+    before,
+    after: { twoFactorEnabled: true },
+  });
+  const fresh = await loadUserById(user._id);
+  return successResponse(res, publicUser(fresh, fresh.tenantId), 'Sign-in OTP is on');
 }
 
 async function exitImpersonation(req, res) {
@@ -352,6 +443,11 @@ module.exports = {
   login,
   demoLogin,
   register,
+  verifyEmail,
+  resendVerification,
+  verifyLogin,
+  startTwoFactor,
+  confirmTwoFactor,
   refresh,
   logout,
   me,

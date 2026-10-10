@@ -14,7 +14,7 @@ import { Check, Plug, ListTodo, ScrollText, Settings } from 'lucide-react';
 const TITLES = {
   jobs: ['System jobs', 'Retry uses the same job. A second stock reserve is not created.'],
   logs: ['Error logs', 'Failed jobs only. Tokens and webhook secrets are not shown on the row.'],
-  settings: ['Platform settings', 'Session TTL is set in the API. Merchant GST stays on the tenant.'],
+  settings: ['Platform settings', 'OMSKing Gmail for client OTP, trial length, and order sync. Merchant GST and channel keys stay on each company.'],
   plans: ['Plans', 'What a new subscriber gets. Change a live tenant’s plan from Subscribers.'],
   health: ['Subscribers', 'Merchant status from the tenants API. Channel health is inside each tenant.'],
 };
@@ -41,10 +41,36 @@ export default function PlatformOpsPage() {
   const [title, subtitle] = TITLES[mode];
   const [tenants, setTenants] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(mode === 'health' || mode === 'jobs' || mode === 'logs');
+  const [loading, setLoading] = useState(mode === 'health' || mode === 'jobs' || mode === 'logs' || mode === 'settings');
   const [retrying, setRetrying] = useState('');
+  const [settingsForm, setSettingsForm] = useState(null);
+  const [mailStatus, setMailStatus] = useState(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [testingMail, setTestingMail] = useState(false);
 
   useEffect(() => {
+    if (mode === 'settings') {
+      let alive = true;
+      setLoading(true);
+      api.get('/tenants/ops/settings')
+        .then(({ data }) => {
+          if (!alive) return;
+          const row = data.data || {};
+          setMailStatus(row);
+          setSettingsForm({
+            gmailUser: row.gmailUser || '',
+            gmailAppPassword: '',
+            fromName: row.fromName || 'OMSKing',
+            emailBrand: row.emailBrand || 'OMSKing',
+            trialDays: row.trialDays || 14,
+            orderPullMinutes: row.orderPullMinutes || 15,
+            publicAppUrl: row.publicAppUrl || '',
+          });
+        })
+        .catch((err) => toast.error(apiError(err, 'Could not load platform settings')))
+        .finally(() => { if (alive) setLoading(false); });
+      return () => { alive = false; };
+    }
     if (mode !== 'health' && mode !== 'jobs' && mode !== 'logs') return undefined;
     let alive = true;
     const path = mode === 'jobs' ? '/tenants/ops/jobs' : mode === 'logs' ? '/tenants/ops/logs' : '/tenants';
@@ -190,15 +216,91 @@ export default function PlatformOpsPage() {
       )}
 
       {mode === 'settings' && (
-        <div className="premium-card max-w-lg space-y-4 p-6">
-          <div className="flex gap-3">
-            <Settings className="h-5 w-5 text-muted-foreground mt-0.5" />
-            <div className="space-y-2 text-sm">
-              <p><span className="font-medium">Access token</span> — 15 minutes (JWT). Refresh cookie 7 days.</p>
-              <p className="text-muted-foreground">These values come from the API process. There is no dummy save on this screen.</p>
+        loading || !settingsForm ? <PageLoader label="Loading platform settings..." /> : (
+          <form
+            className="premium-card max-w-xl space-y-4 p-4"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setSavingSettings(true);
+              try {
+                const payload = { ...settingsForm, trialDays: Number(settingsForm.trialDays), orderPullMinutes: Number(settingsForm.orderPullMinutes) };
+                if (!payload.gmailAppPassword) delete payload.gmailAppPassword;
+                const { data } = await api.patch('/tenants/ops/settings', payload);
+                setMailStatus(data.data);
+                setSettingsForm((current) => ({ ...current, gmailAppPassword: '' }));
+                toast.success('Platform settings saved');
+              } catch (err) {
+                toast.error(apiError(err, 'Could not save platform settings'));
+              } finally {
+                setSavingSettings(false);
+              }
+            }}
+          >
+            <div className="flex gap-3">
+              <Settings className="mt-0.5 h-5 w-5 text-muted-foreground" />
+              <div className="space-y-1 text-sm">
+                <p className="font-medium">Client OTP mailbox</p>
+                <p className="text-muted-foreground">
+                  {mailStatus?.mailSource === 'panel' && `New-seller OTP and welcome mail send from ${mailStatus.activeGmail}.`}
+                  {mailStatus?.mailSource === 'env' && `Still using the server mailbox ${mailStatus.activeGmail}. Save a Gmail here to manage it from this panel.`}
+                  {mailStatus?.mailSource === 'missing' && 'No Gmail is set, so a new seller cannot finish signup.'}
+                </p>
+              </div>
             </div>
-          </div>
-        </div>
+            <label className="block text-sm font-medium">
+              Gmail address
+              <input className="premium-input mt-1.5" type="email" autoComplete="off" value={settingsForm.gmailUser} onChange={(event) => setSettingsForm({ ...settingsForm, gmailUser: event.target.value })} placeholder="otp@yourdomain.com" />
+            </label>
+            <label className="block text-sm font-medium">
+              Gmail app password
+              <input className="premium-input mt-1.5" type="password" autoComplete="new-password" value={settingsForm.gmailAppPassword} onChange={(event) => setSettingsForm({ ...settingsForm, gmailAppPassword: event.target.value })} placeholder={mailStatus?.panelMailReady ? 'Saved. Leave blank to keep it.' : 'Google App Password'} />
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm font-medium">
+                Sender name
+                <input className="premium-input mt-1.5" value={settingsForm.fromName} onChange={(event) => setSettingsForm({ ...settingsForm, fromName: event.target.value })} />
+              </label>
+              <label className="block text-sm font-medium">
+                Email footer
+                <input className="premium-input mt-1.5" value={settingsForm.emailBrand} onChange={(event) => setSettingsForm({ ...settingsForm, emailBrand: event.target.value })} />
+              </label>
+              <label className="block text-sm font-medium">
+                Trial length (days)
+                <input className="premium-input mt-1.5" type="number" min="1" max="90" value={settingsForm.trialDays} onChange={(event) => setSettingsForm({ ...settingsForm, trialDays: event.target.value })} />
+              </label>
+              <label className="block text-sm font-medium">
+                Order sync every (minutes)
+                <input className="premium-input mt-1.5" type="number" min="1" max="1440" value={settingsForm.orderPullMinutes} onChange={(event) => setSettingsForm({ ...settingsForm, orderPullMinutes: event.target.value })} />
+              </label>
+            </div>
+            <label className="block text-sm font-medium">
+              App link in emails
+              <input className="premium-input mt-1.5" value={settingsForm.publicAppUrl} onChange={(event) => setSettingsForm({ ...settingsForm, publicAppUrl: event.target.value })} placeholder="https://omsking.codersalpha.com" />
+            </label>
+            <p className="text-xs text-muted-foreground">A company that has saved its own Gmail still sends that company’s password reset and sign-in OTP. This mailbox is for new sellers and for mail before a company Gmail exists. Access tokens stay 15 minutes.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={savingSettings}>{savingSettings ? 'Saving…' : 'Save settings'}</Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={testingMail}
+                onClick={async () => {
+                  setTestingMail(true);
+                  try {
+                    const { data } = await api.post('/tenants/ops/settings/test-mail');
+                    toast.success(`Test email sent to ${data.data.sentTo}`);
+                  } catch (err) {
+                    toast.error(apiError(err, 'Could not send the test email'));
+                  } finally {
+                    setTestingMail(false);
+                  }
+                }}
+              >
+                {testingMail ? 'Sending…' : 'Send test email'}
+              </Button>
+            </div>
+          </form>
+        )
       )}
 
       {mode === 'plans' && (

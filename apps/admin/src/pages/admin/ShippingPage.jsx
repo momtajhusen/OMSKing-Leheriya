@@ -5,6 +5,7 @@ import useOrderStore from '../../stores/orderStore';
 import { formatDate, statusBadgeVariant } from '../../utils/format';
 import { isChannelManaged, packetIdOf, openMyntraDocument } from '../../lib/channelOrders';
 import { downloadCsv } from '../../lib/orderMetrics';
+import api, { apiError } from '../../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -64,9 +65,11 @@ export default function ShippingPage() {
   const [labelFor, setLabelFor] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [busy, setBusy] = useState('');
+  const [readiness, setReadiness] = useState(null);
 
   useEffect(() => {
     hydrateFromApi();
+    api.get('/orders/shipping-readiness').then(({ data }) => setReadiness(data.data || null)).catch(() => setReadiness(null));
   }, [hydrateFromApi]);
 
   const shipments = useMemo(() => orders
@@ -76,6 +79,7 @@ export default function ShippingPage() {
       ...order,
       shipStatus: shipmentStatus(order),
       tracking: trackingOf(order),
+      scan: order.trackingScan?.detail || order.trackingScan?.deliveryStatus || '',
       marketplace: order.channel === 'Amazon' || order.channel === 'Myntra',
     }))
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))), [orders]);
@@ -91,9 +95,16 @@ export default function ShippingPage() {
 
   const syncShipments = async () => {
     setSyncing(true);
-    await hydrateFromApi();
-    setSyncing(false);
-    toast.success('Shipments refreshed from orders');
+    try {
+      const { data } = await api.post('/ndr/poll');
+      await hydrateFromApi();
+      toast.success(data.message || 'Shipments checked');
+    } catch (err) {
+      await hydrateFromApi();
+      toast.error(apiError(err, 'Could not check courier tracking'));
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const saveLabel = async () => {
@@ -179,13 +190,13 @@ export default function ShippingPage() {
   if (!loaded) return <PageLoader label="Loading shipping..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Shipping</h1>
-          <p className="text-muted-foreground">
-            Shopify orders book one Delhivery AWB from WH-001 and mark the order fulfilled.
-            Amazon and Myntra orders keep the marketplace courier.
+          <h1 className="text-xl font-bold">Shipping</h1>
+          <p className="text-xs text-muted-foreground">
+            Amazon and Myntra keep that channel’s courier. Shopify books this company’s own Delhivery AWB from WH-001.
+            {readiness?.missing?.length ? ` Still needed: ${readiness.missing.join(', ')}.` : readiness?.courierReady ? ' Own courier is ready.' : ''}
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -205,7 +216,7 @@ export default function ShippingPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <KpiCard label="Label Pending" value={count('Label Pending')} icon={Package} onClick={() => setActiveTab('Label Pending')} />
         <KpiCard label="In Transit" value={count('In Transit')} icon={Truck} onClick={() => setActiveTab('In Transit')} />
         <KpiCard label="Delivered" value={count('Delivered')} icon={CheckCircle} onClick={() => setActiveTab('Delivered')} />
@@ -223,14 +234,14 @@ export default function ShippingPage() {
       <Card>
         <CardHeader>
           <CardTitle>Shipments ({filtered.length})</CardTitle>
-          <CardDescription>Built from orders. Courier tracking events are not connected yet.</CardDescription>
+          <CardDescription>Marketplace scans come from the channel. Own-courier scans update when you sync.</CardDescription>
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? (
             <EmptyState title="No shipments in this tab" description="Try another status or sync shipments." />
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[960px]">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-8" />
@@ -272,7 +283,10 @@ export default function ShippingPage() {
                         )}
                       </TableCell>
                       <TableCell>{row.courier || '—'}</TableCell>
-                      <TableCell className="font-mono text-xs">{row.tracking || '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        <div>{row.tracking || '—'}</div>
+                        {row.scan && <div className="font-sans text-xs text-muted-foreground">{row.scan}</div>}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={row.shipStatus === 'Exception' ? 'destructive' : statusBadgeVariant(row.status)}>{row.shipStatus}</Badge>
                       </TableCell>

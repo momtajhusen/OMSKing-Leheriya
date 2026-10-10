@@ -10,6 +10,7 @@ const userSchema = new mongoose.Schema({
   avatarUrl: String,
   roleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Role', required: true },
   status: { type: String, enum: ['active', 'disabled', 'invited'], default: 'active' },
+  emailVerified: { type: Boolean, default: true },
   lastLoginAt: Date,
   refreshTokenVersion: { type: Number, default: 0 },
   assignedVendorIds: [{ type: mongoose.Schema.Types.ObjectId }],

@@ -15,7 +15,7 @@ const { stockIn } = require('../src/services/inventory.service');
 const { ensureDefaultWarehouses } = require('../src/services/warehouse.service');
 const { channelQty, runInventoryJob } = require('../src/services/inventoryPush.service');
 const { upsertConnection } = require('../src/services/channelConnection.service');
-const { applyTracking, pollDelhivery, reattemptNdr, convertNdrToRto } = require('../src/services/tracking.service');
+const { applyTracking, pollDelhivery, pollOpenShipments, reattemptNdr, convertNdrToRto } = require('../src/services/tracking.service');
 const { ingestReturns, approveReturn, receiveReturn } = require('../src/services/returnsFlow.service');
 const { restockReturn } = require('../src/services/inventory.service');
 
@@ -41,6 +41,25 @@ async function seller(slug) {
   }
   return { tenant, physical };
 }
+
+test('a company with no courier token does not call Delhivery', async () => {
+  const { tenant } = await seller(`skip-${Date.now()}`);
+  const order = await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-SKIP',
+    channel: 'Shopify',
+    status: 'Dispatched',
+    awb: 'AWB-SKIP',
+    courier: 'Delhivery',
+    source: 'manual',
+  });
+  const result = await pollOpenShipments(tenant._id);
+  const fresh = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-SKIP' });
+  assert.equal(result.checked, 0);
+  assert.equal(result.skipped, 'courier');
+  assert.equal(fresh.status, 'Dispatched');
+  assert.equal(String(fresh._id), String(order._id));
+});
 
 test('a delivered scan keeps the same Master Order', async () => {
   const { tenant } = await seller(`track-${Date.now()}`);

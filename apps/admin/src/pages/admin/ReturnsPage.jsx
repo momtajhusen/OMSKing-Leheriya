@@ -10,10 +10,17 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import { RotateCcw, Package, CheckCircle, XCircle, RefreshCw, AlertTriangle } from 'lucide-react';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
-import { CHANNEL_CATALOG, orderChannelLabel } from '../../constants/channelCatalog';
+import { orderChannelLabel } from '../../constants/channelCatalog';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import Pagination, { useClientPage } from '../../components/ui/Pagination';
 
 export default function ReturnsPage() {
+  const connected = useConnectedChannels();
+  const restockDestinations = [
+    'All',
+    ...connected.channels.map((channel) => (channel.id === 'shopify' ? 'Shopify (Offline)' : orderChannelLabel(channel))),
+    'None',
+  ];
   const [activeTab, setActiveTab] = useState('all');
   const [selectedReturns, setSelectedReturns] = useState({});
   const [receiveFor, setReceiveFor] = useState(null);
@@ -91,11 +98,11 @@ export default function ReturnsPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Returns</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">Returns</h1>
           <p className="text-muted-foreground">Customer returns and reverse pickups. Approve adds qty to Offline WH-001 and the same ATS goes to Amazon and Myntra.</p>
         </div>
         <Button variant="outline" onClick={async () => { await hydrateFromApi(); await loadReturns(); toast.success('Returns refreshed'); }}>
@@ -107,7 +114,7 @@ export default function ReturnsPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Returns</p>
@@ -118,7 +125,7 @@ export default function ReturnsPage() {
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Pending</p>
@@ -129,7 +136,7 @@ export default function ReturnsPage() {
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Approved</p>
@@ -140,7 +147,7 @@ export default function ReturnsPage() {
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Rejected</p>
@@ -153,7 +160,7 @@ export default function ReturnsPage() {
       </div>
 
       {/* Status Tabs */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {statusTabs.map(tab => (
           <Button
             key={tab}
@@ -168,14 +175,14 @@ export default function ReturnsPage() {
 
       {/* Restock Destination Info */}
       <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="flex items-start gap-3">
             <Package className="w-5 h-5 text-primary mt-0.5" />
             <div>
               <p className="font-medium">Restock Destination Configuration</p>
               <p className="text-sm text-muted-foreground">
-                Returned units go back to Offline WH-001. All channels raises Shopify, Amazon and Myntra.
-                Shopify, Amazon or Myntra raises only that channel. None leaves stock unchanged.
+                Returned units go back to Offline WH-001. All raises every connected channel{connected.labels.length ? `: ${connected.labels.join(', ')}` : ''}.
+                One channel raises only that channel. None leaves stock unchanged.
               </p>
             </div>
           </div>
@@ -232,7 +239,7 @@ export default function ReturnsPage() {
                     <TableCell>
                       {ret.status === 'Pending' ? (
                         <div className="space-y-1">
-                          {['All', ...CHANNEL_CATALOG.map((channel) => (channel.id === 'shopify' ? 'Shopify (Offline)' : orderChannelLabel(channel))), 'None'].map((dest) => (
+                          {restockDestinations.map((dest) => (
                             <label key={dest} className="flex items-center gap-2 text-sm">
                               <input
                                 type="radio"
@@ -316,7 +323,7 @@ export default function ReturnsPage() {
 
       {/* Restock Legend */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <h3 className="font-medium mb-3">Restock Destination Options</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div className="flex items-start gap-2">

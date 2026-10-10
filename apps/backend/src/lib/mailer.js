@@ -1,26 +1,21 @@
 const nodemailer = require('nodemailer');
-const config = require('../config');
 const { HttpError } = require('../utils/httpError');
 const { decryptObject } = require('./secretBox');
 
-function platformMailbox() {
-  if (!config.mail.user || !config.mail.pass) return null;
-  return {
-    user: config.mail.user,
-    pass: config.mail.pass.replace(/\s+/g, ''),
-    from: config.mail.from || config.mail.user,
-  };
+async function platformMailbox() {
+  const { platformMailboxFromSettings } = require('../services/platformSettings.service');
+  return platformMailboxFromSettings();
 }
 
-function mailConfigured() {
-  return Boolean(platformMailbox());
+async function mailConfigured() {
+  return Boolean(await platformMailbox());
 }
 
-function assertMailConfigured() {
-  if (!mailConfigured()) {
+async function assertMailConfigured() {
+  if (!(await mailConfigured())) {
     throw new HttpError(
       503,
-      'Platform Gmail is not configured. Add GMAIL_USER and GMAIL_APP_PASSWORD to apps/backend/.env (use a Google App Password).',
+      'Save the Gmail that sends client OTP in Platform → Settings. Use a Google App Password.',
     );
   }
 }
@@ -52,17 +47,20 @@ async function sendMail({ to, subject, html, text, tenantId, attachments }) {
       503,
       tenantId
         ? 'Save this company Gmail in Settings. Another company mailbox is not used.'
-        : 'Platform Gmail is not configured.',
+        : 'Save the Gmail that sends client OTP in Platform → Settings.',
     );
   }
+  const { emailBrandSync, fromNameSync } = require('../services/platformSettings.service');
+  const brand = emailBrandSync();
+  const fromName = box.fromName || fromNameSync();
   return transporter(box).sendMail({
-    from: `"OMSKing" <${box.from}>`,
+    from: `"${fromName}" <${box.from}>`,
     to,
     subject,
     text: text || subject,
-    html,
+    html: String(html || '').replaceAll('{{omsBrand}}', brand),
     attachments,
   });
 }
 
-module.exports = { mailConfigured, assertMailConfigured, mailboxOf, sendMail };
+module.exports = { mailConfigured, assertMailConfigured, mailboxOf, platformMailbox, sendMail };

@@ -2,7 +2,9 @@ import { Mail, Phone } from 'lucide-react';
 
 const PHONE = '7600201227';
 const PHONE_E164 = '917600201227';
-const EMAIL = 'thecodersalpha@gmail.com';
+export const CONTACT_EMAIL = 'thecodersalpha@gmail.com';
+export const CONTACT_PHONE_DISPLAY = '+91 76002 01227';
+const EMAIL = CONTACT_EMAIL;
 
 function WhatsAppIcon({ className }) {
   return (

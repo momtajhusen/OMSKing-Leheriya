@@ -272,7 +272,7 @@ export default function VendorOrdersPage() {
                       <div className="text-xs text-muted-foreground">{row.product}</div>
                       <div className="text-[11px] text-muted-foreground">{row.sku}{row.customerCity ? ` · ${row.customerCity}` : ''}</div>
                     </TableCell>
-                    <TableCell className="p-2"><VendorProductThumb name={row.product} src={row.imageUrl} /></TableCell>
+                    <TableCell className="p-2"><VendorProductThumb name={row.product} sku={row.sku} src={row.imageUrl} /></TableCell>
                     <TableCell className="p-2 whitespace-nowrap">{formatINR(row.assignPrice)}</TableCell>
                     <TableCell className="p-1">
                       <Input className="h-9" value={row.courier} disabled={locked} onChange={(e) => updateCell(row.id, 'courier', e.target.value)} placeholder="Courier" />

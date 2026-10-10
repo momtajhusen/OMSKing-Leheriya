@@ -1,8 +1,8 @@
 import { cn } from '../../lib/utils';
 
 const Table = ({ className, ...props }) => (
-  <div className="relative w-full overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-    <table className={cn('w-full caption-bottom text-sm min-w-[600px]', className)} {...props} />
+  <div className="relative w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+    <table className={cn('w-max min-w-full border-collapse text-sm', className)} {...props} />
   </div>
 );
 
@@ -25,7 +25,7 @@ const TableRow = ({ className, ...props }) => (
 const TableHead = ({ className, ...props }) => (
   <th
     className={cn(
-      'h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0',
+      'h-11 whitespace-nowrap px-3 text-left align-middle text-[11px] font-semibold uppercase tracking-wide text-muted-foreground [&:has([role=checkbox])]:pr-0',
       className
     )}
     {...props}
@@ -33,7 +33,7 @@ const TableHead = ({ className, ...props }) => (
 );
 
 const TableCell = ({ className, ...props }) => (
-  <td className={cn('p-4 align-middle [&:has([role=checkbox])]:pr-0', className)} {...props} />
+  <td className={cn('max-w-[10rem] whitespace-normal break-words px-3 py-2.5 align-top [&:has([role=checkbox])]:pr-0', className)} {...props} />
 );
 
 const TableCaption = ({ className, ...props }) => (

@@ -1,6 +1,8 @@
 const Order = require('../models/Order');
 const MasterSku = require('../models/MasterSku');
+const Product = require('../models/Product');
 const SkuMapping = require('../models/SkuMapping');
+const { firstImage } = require('../lib/catalogImages');
 const { createMyntraClient } = require('../adapters/myntra/client');
 const { getConnection, credsOf, patchCreds } = require('./channelConnection.service');
 const { ingestListing, createMasterForListing } = require('./catalogMapping.service');
@@ -74,24 +76,37 @@ async function connectedClient(tenantId) {
 }
 
 async function masterNamesFor(tenantId, skus) {
-  const maps = await SkuMapping.find({ tenantId, channel: 'myntra', channelVariantId: { $in: skus } })
-    .setOptions({ skipTenantFilter: true }).lean();
+  const maps = await SkuMapping.find({
+    tenantId,
+    channel: 'myntra',
+    $or: [
+      { channelVariantId: { $in: skus } },
+      { channelSkuCode: { $in: skus } },
+    ],
+  }).setOptions({ skipTenantFilter: true }).lean();
   const ids = maps.map((m) => m.masterSkuId).filter(Boolean);
   const masters = ids.length
     ? await MasterSku.find({ _id: { $in: ids } }).setOptions({ skipTenantFilter: true }).lean()
     : [];
+  const productIds = masters.map((master) => master.productId).filter(Boolean);
+  const products = productIds.length
+    ? await Product.find({ _id: { $in: productIds } }).select('images').setOptions({ skipTenantFilter: true }).lean()
+    : [];
+  const imageByProduct = new Map(products.map((product) => [String(product._id), firstImage(product.images)]));
   const byId = new Map(masters.map((m) => [String(m._id), m]));
   const out = new Map();
   maps.forEach((m) => {
     const master = m.masterSkuId ? byId.get(String(m.masterSkuId)) : null;
     if (master) {
-      out.set(m.channelVariantId, {
+      const info = {
         id: String(master._id),
         mappingId: String(m._id),
         name: master.name,
         code: master.code,
-        imageUrl: master.imageUrl || '',
-      });
+        imageUrl: imageByProduct.get(String(master.productId)) || '',
+      };
+      if (m.channelVariantId) out.set(m.channelVariantId, info);
+      if (m.channelSkuCode) out.set(m.channelSkuCode, info);
     }
   });
   return out;
@@ -130,6 +145,7 @@ function mapMyntraOrder(orderId, details, masters = new Map()) {
     sellerOrderId: String(detail.sellerOrderId || line.sellerOrderId || ''),
     orderLineId: String(line.orderLineId || ''),
     sku: String(line.sku || ''),
+    imageUrl: masters.get(String(line.sku))?.imageUrl || '',
     status: String(line.status_code || line.status || '').toUpperCase(),
     packetId: String(line.packetId || detail.packetId || ''),
     invoiceNumber: String(line.invoiceNumber || ''),
@@ -220,11 +236,13 @@ async function upsertMappedOrder(tenantId, mapped) {
     if (next.name && next.name !== next.sku) item.name = next.name;
     if (next.masterSkuId) item.masterSkuId = next.masterSkuId;
     if (next.skuMappingId) item.skuMappingId = next.skuMappingId;
+    if (next.imageUrl) item.imageUrl = next.imageUrl;
   });
   existing.subOrders.forEach((sub) => {
     const next = bySku.get(sub.sku);
     if (next?.name && next.name !== next.sku) sub.title = next.name;
     if (next?.masterSkuId) sub.masterSkuId = next.masterSkuId;
+    if (next?.imageUrl) sub.imageUrl = next.imageUrl;
     const line = lines.find((l) => l.sku === sub.sku);
     if (!line) return;
     sub.status = omsStatus(line.status);

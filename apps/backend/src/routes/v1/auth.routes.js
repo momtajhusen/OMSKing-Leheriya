@@ -29,6 +29,30 @@ router.post(
   validate,
   asyncHandler(auth.register),
 );
+router.post(
+  '/verify-email',
+  body('email').trim().isEmail().withMessage('Enter a valid email address'),
+  body('otp').trim().isLength({ min: 6, max: 6 }).withMessage('Enter the 6-digit OTP from Gmail').isNumeric().withMessage('OTP must be 6 digits'),
+  body('workspace').optional().trim().isLength({ max: 80 }),
+  validate,
+  asyncHandler(auth.verifyEmail),
+);
+router.post(
+  '/resend-verification',
+  body('email').trim().isEmail().withMessage('Enter a valid email address'),
+  body('workspace').optional().trim().isLength({ max: 80 }),
+  validate,
+  asyncHandler(auth.resendVerification),
+);
+router.post(
+  '/verify-login',
+  body('email').trim().isEmail().withMessage('Enter a valid email address'),
+  body('password').notEmpty().withMessage('Password is required'),
+  body('otp').trim().isLength({ min: 6, max: 6 }).withMessage('Enter the 6-digit OTP from Gmail').isNumeric().withMessage('OTP must be 6 digits'),
+  body('workspace').optional().trim().isLength({ max: 80 }),
+  validate,
+  asyncHandler(auth.verifyLogin),
+);
 router.post('/refresh', asyncHandler(auth.refresh));
 router.post('/logout', asyncHandler(auth.logout));
 router.post(
@@ -48,6 +72,15 @@ router.post(
   asyncHandler(auth.resetPassword),
 );
 
+router.post('/2fa/start', authMiddleware, tenantMiddleware, asyncHandler(auth.startTwoFactor));
+router.post(
+  '/2fa/confirm',
+  authMiddleware,
+  tenantMiddleware,
+  body('otp').trim().isLength({ min: 6, max: 6 }).withMessage('Enter the 6-digit OTP from Gmail').isNumeric().withMessage('OTP must be 6 digits'),
+  validate,
+  asyncHandler(auth.confirmTwoFactor),
+);
 router.get('/me', authMiddleware, tenantMiddleware, asyncHandler(auth.me));
 router.patch('/me', authMiddleware, tenantMiddleware, asyncHandler(auth.patchMe));
 router.post('/me/avatar', authMiddleware, tenantMiddleware, uploadAvatarImage, asyncHandler(auth.uploadMyAvatar));

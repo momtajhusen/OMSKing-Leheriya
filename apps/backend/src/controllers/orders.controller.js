@@ -54,9 +54,32 @@ async function findMaster(tenantId, rawId) {
   return order;
 }
 
+async function withScans(tenantId, orders) {
+  if (!orders.length) return orders;
+  const Shipment = require('../models/Shipment');
+  const rows = await Shipment.find({
+    tenantId,
+    orderNo: { $in: orders.map((order) => order.id) },
+    status: 'booked',
+  }).select('orderNo deliveryStatus trackingEvents').setOptions({ skipTenantFilter: true });
+  const byNo = new Map();
+  rows.forEach((row) => {
+    const events = row.trackingEvents || [];
+    const last = events[events.length - 1];
+    byNo.set(row.orderNo, {
+      deliveryStatus: row.deliveryStatus || '',
+      status: last?.status || '',
+      detail: last?.detail || '',
+      at: last?.at || null,
+    });
+  });
+  return orders.map((order) => ({ ...order, trackingScan: byNo.get(order.id) || null }));
+}
+
 async function decorateOrders(tenantId, docs) {
   const [pools, bySku] = await Promise.all([stockPools(tenantId), imagesBySku(tenantId)]);
-  return applyDeskRules(docs.map((doc) => toOrderDto(doc)), pools).map((order) => paintOrder(order, bySku));
+  const painted = applyDeskRules(docs.map((doc) => toOrderDto(doc)), pools).map((order) => paintOrder(order, bySku));
+  return withScans(tenantId, painted);
 }
 
 async function decorateOne(tenantId, doc) {
@@ -74,14 +97,19 @@ async function listOrders(req, res) {
   if (names && !names.length) return paginatedResponse(res, [], 1, 25, 0, 'Orders', { counts: { total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0 } });
   const rows = await loadOrders(tenantId, names);
   const data = (await decorateOrders(tenantId, rows)).map((row) => scopeToVendor(row, names));
+  let scoped = data;
+  if (req.query.connected != null && String(req.query.connected) !== '') {
+    const allowed = new Set(String(req.query.connected).split(',').map((name) => name.trim()).filter(Boolean));
+    scoped = scoped.filter((row) => allowed.has(row.channel));
+  }
   const counts = {
-    total: data.length,
-    New: data.filter((row) => row.status === 'New').length,
-    Packed: data.filter((row) => row.status === 'Packed').length,
-    'Ready to Ship': data.filter((row) => row.status === 'Ready to Ship').length,
-    Unfulfillable: data.filter((row) => row.status === 'Unfulfillable').length,
+    total: scoped.length,
+    New: scoped.filter((row) => row.status === 'New').length,
+    Packed: scoped.filter((row) => row.status === 'Packed').length,
+    'Ready to Ship': scoped.filter((row) => row.status === 'Ready to Ship').length,
+    Unfulfillable: scoped.filter((row) => row.status === 'Unfulfillable').length,
   };
-  let filtered = data;
+  let filtered = scoped;
   const status = String(req.query.status || '');
   const channel = String(req.query.channel || '');
   const payment = String(req.query.payment || '');
@@ -431,6 +459,11 @@ function reversePickupHtml(order) {
 </html>`;
 }
 
+async function shippingReadiness(req, res) {
+  const { shippingReadiness: readiness } = require('../services/ship.service');
+  return successResponse(res, await readiness(merchantTenant(req)), 'Shipping readiness');
+}
+
 async function shipOrder(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
@@ -462,5 +495,5 @@ async function bookBulkLabels(req, res) {
 }
 
 module.exports = {
-  listOrders, getOrder, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, vendorUpdate, patchStatus, bookReverse, bookBulkLabels, shipOrder, closeManifest,
+  listOrders, getOrder, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, vendorUpdate, patchStatus, bookReverse, bookBulkLabels, shipOrder, closeManifest, shippingReadiness,
 };

@@ -91,6 +91,7 @@ const orderSchema = new mongoose.Schema({
       sellerOrderId: String,
       orderLineId: String,
       sku: String,
+      imageUrl: String,
       status: String,
       packetId: String,
       invoiceNumber: String,

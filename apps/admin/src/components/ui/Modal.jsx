@@ -23,8 +23,8 @@ function Modal({ open, onOpenChange, title, description, children, footer, class
         onClick={() => onOpenChange(false)}
       />
       <div className={cn('relative z-[70] max-h-[min(90vh,720px)] w-full max-w-lg overflow-y-auto rounded-lg border bg-background p-6 shadow-lg', className)}>
-        <div className="flex items-start justify-between">
-          <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold">{title}</h2>
             {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
           </div>
@@ -36,7 +36,7 @@ function Modal({ open, onOpenChange, title, description, children, footer, class
           </button>
         </div>
         <div className="mt-4">{children}</div>
-        {footer && <div className="mt-6 flex justify-end gap-2">{footer}</div>}
+        {footer && <div className="mt-6 flex flex-wrap justify-end gap-2">{footer}</div>}
       </div>
     </div>
   );

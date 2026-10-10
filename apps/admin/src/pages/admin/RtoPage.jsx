@@ -15,12 +15,13 @@ import KpiCard from '../../components/ui/KpiCard';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
-import { RotateCcw, ClipboardCheck, CheckCircle, XCircle, RefreshCw, AlertTriangle, PackageCheck, Truck } from 'lucide-react';
+import TableToolbar from '../../components/ui/TableToolbar';
+import { RotateCcw, ClipboardCheck, CheckCircle, XCircle, RefreshCw, AlertTriangle, PackageCheck, Truck, Search } from 'lucide-react';
 
-import { CHANNEL_CATALOG, orderChannelLabel } from '../../constants/channelCatalog';
+import { orderChannelLabel } from '../../constants/channelCatalog';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import Pagination, { useClientPage } from '../../components/ui/Pagination';
 
-const RESTOCK_DESTINATIONS = ['All', ...CHANNEL_CATALOG.map((channel) => orderChannelLabel(channel)), 'None'];
 
 function trackingOf(order) {
   return order.awb || (order.channelLines || []).find((line) => line.trackingNumber)?.trackingNumber || '';
@@ -41,8 +42,11 @@ export default function RtoPage() {
   const workflow = useReturnsStore((s) => (tenantId && s.workflowByTenant?.[tenantId]) || EMPTY_WORKFLOW);
   const setWorkflow = useReturnsStore((s) => s.setWorkflow);
   const [activeTab, setActiveTab] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [restockChoices, setRestockChoices] = useState({});
   const [busy, setBusy] = useState('');
+  const connected = useConnectedChannels();
+  const restockDestinations = ['All', ...connected.channels.map((channel) => orderChannelLabel(channel)), 'None'];
 
   useEffect(() => {
     hydrateFromApi();
@@ -64,7 +68,13 @@ export default function RtoPage() {
     };
   }).sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt))), [orders, workflow]);
 
-  const filtered = rows.filter((row) => activeTab === 'All' || row.status === activeTab);
+  const query = searchQuery.trim().toLowerCase();
+  const filtered = rows.filter((row) => {
+    if (activeTab !== 'All' && row.status !== activeTab) return false;
+    if (!query) return true;
+    const hay = [row.order.id, row.awb, row.reason, row.order.channel, ...(row.order.items || []).map((item) => item.sku)].join(' ').toLowerCase();
+    return hay.includes(query);
+  });
   const paged = useClientPage(filtered);
 
   const qcPass = async (row) => {
@@ -99,10 +109,10 @@ export default function RtoPage() {
   if (!loaded) return <PageLoader label="Loading RTO..." />;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">RTO</h1>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">RTO</h1>
           <p className="text-muted-foreground">Orders that were cancelled after an AWB was issued, so the parcel comes back. Receive, QC and restock here.</p>
         </div>
         <Button variant="outline" onClick={async () => { await hydrateFromApi(); toast.success('RTO list refreshed from orders'); }}>
@@ -118,13 +128,29 @@ export default function RtoPage() {
         <KpiCard label="Restocked" value={rows.filter((row) => row.qcResult === 'Restock').length} icon={PackageCheck} />
       </div>
 
-      <div className="flex gap-2">
-        {['All', 'QC Pending', 'QC Complete'].map((tab) => (
-          <Button key={tab} variant={activeTab === tab ? 'default' : 'outline'} size="sm" onClick={() => setActiveTab(tab)}>
-            {tab}
-          </Button>
-        ))}
-      </div>
+      <TableToolbar
+        search={(
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Order ID, SKU, or AWB"
+              className="w-full rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] py-2 pl-10 pr-4 text-sm"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        )}
+        filters={(
+          <div className="flex gap-2 overflow-x-auto">
+            {['All', 'QC Pending', 'QC Complete'].map((tab) => (
+              <Button key={tab} variant={activeTab === tab ? 'default' : 'outline'} size="sm" className="whitespace-nowrap" onClick={() => setActiveTab(tab)}>
+                {tab}
+              </Button>
+            ))}
+          </div>
+        )}
+      />
 
       <Card>
         <CardHeader>
@@ -136,7 +162,7 @@ export default function RtoPage() {
             <EmptyState title="No RTO shipments" description="An order shows here when it is cancelled after its AWB was issued." />
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[1000px]">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Order ID</TableHead>
@@ -164,14 +190,14 @@ export default function RtoPage() {
                         <TableCell><ItemThumbs items={row.order.items} /></TableCell>
                         <TableCell><Badge variant="outline">{row.order.channel}</Badge></TableCell>
                         <TableCell className="font-mono text-xs">{row.awb}</TableCell>
-                        <TableCell className="max-w-[260px] text-sm">{row.reason}</TableCell>
+                        <TableCell className="max-w-[260px] whitespace-normal break-words text-sm">{row.reason}</TableCell>
                         <TableCell>{row.order.createdAt ? formatDate(row.order.createdAt) : '—'}</TableCell>
                         <TableCell><Badge variant={statusBadgeVariant(row.status)}>{row.status}</Badge></TableCell>
                         <TableCell>{row.qcResult ? <Badge variant="outline">{row.qcResult}</Badge> : <span className="text-sm text-muted-foreground">—</span>}</TableCell>
                         <TableCell>
                           {pending ? (
                             <Select className="w-32" value={restockChoices[row.id] || 'All'} onChange={(e) => setRestockChoices((prev) => ({ ...prev, [row.id]: e.target.value }))}>
-                              {RESTOCK_DESTINATIONS.map((dest) => <option key={dest} value={dest}>{dest === 'None' ? 'No restock' : dest}</option>)}
+                              {restockDestinations.map((dest) => <option key={dest} value={dest}>{dest === 'None' ? 'No restock' : dest}</option>)}
                             </Select>
                           ) : (
                             <Badge variant="secondary">{row.restockDestination || 'None'}</Badge>
@@ -205,7 +231,7 @@ export default function RtoPage() {
       </Card>
 
       <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="flex items-start gap-3">
             <Truck className="w-5 h-5 text-primary mt-0.5" />
             <div>

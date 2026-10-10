@@ -3,6 +3,9 @@ import api, { apiError } from '../lib/api';
 import { withSubOrders, findOrderMatch } from '../lib/orderSubOrders';
 import { openPrintHtml, openPdfBase64 } from '../lib/orderPrint';
 import useReturnsStore from './returnsStore';
+import useChannelStore from './channelStore';
+import { ordersOnConnectedChannels } from '../lib/connectedChannels';
+import { loadConnectedChannels } from '../hooks/useConnectedChannels';
 
 function hydrate(list) {
   return (list || []).map((order) => withSubOrders(order));
@@ -163,7 +166,8 @@ const useOrderStore = create((set, get) => ({
   hydrateFromApi: async () => {
     try {
       const { data } = await api.get('/orders');
-      const rows = hydrate(data.data || []);
+      await loadConnectedChannels();
+      const rows = ordersOnConnectedChannels(hydrate(data.data || []), useChannelStore.getState());
       set({ orders: rows, loaded: true, error: '' });
       useReturnsStore.getState().syncFromOrders(rows);
     } catch (err) {

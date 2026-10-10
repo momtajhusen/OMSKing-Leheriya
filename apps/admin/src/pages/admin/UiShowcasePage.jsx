@@ -38,9 +38,9 @@ export default function UiShowcasePage() {
   const [tags, setTags] = useState(['Shopify', 'Amazon', 'Myntra']);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold mb-2">UI Showcase</h1>
+        <h1 className="text-xl font-bold">UI Showcase</h1>
         <p className="text-muted-foreground">
           Every shared component in the design system, in one place — the reference for keeping
           all 23 modules visually consistent.

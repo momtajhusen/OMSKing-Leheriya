@@ -25,8 +25,8 @@ export function netSales(orders) {
   return orders.filter((order) => !isCancelled(order)).reduce((sum, order) => sum + (Number(order.total) || 0), 0);
 }
 
-export function salesByChannel(orders) {
-  return CHANNELS.map((channel) => {
+export function salesByChannel(orders, channels = CHANNELS) {
+  return channels.map((channel) => {
     const rows = orders.filter((order) => order.channel === channel);
     return { channel, orders: rows.length, revenue: netSales(rows) };
   });
@@ -39,7 +39,7 @@ export function statusCounts(orders) {
 }
 
 /** Orders per day per channel for the last `days` days, ending today. */
-export function ordersTrend(orders, days = 14) {
+export function ordersTrend(orders, days = 14, catalog = CHANNEL_CATALOG) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const rows = [];
@@ -47,7 +47,7 @@ export function ordersTrend(orders, days = 14) {
   for (let i = days - 1; i >= 0; i -= 1) {
     const key = dayKey(today.getTime() - i * DAY);
     const row = { date: key.slice(5) };
-    CHANNEL_CATALOG.forEach((channel) => { row[channel.id] = 0; });
+    catalog.forEach((channel) => { row[channel.id] = 0; });
     index[key] = row;
     rows.push(row);
   }

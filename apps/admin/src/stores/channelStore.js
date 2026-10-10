@@ -9,6 +9,9 @@ const useChannelStore = create((set, get) => ({
   enabledIds: [],
   connections: {},
   catalog: CHANNEL_CATALOG,
+  loaded: false,
+  full: false,
+  statusError: false,
 
   enabledChannels: () => CHANNEL_CATALOG.filter((c) => get().enabledIds.includes(c.id)),
 
@@ -50,10 +53,11 @@ const useChannelStore = create((set, get) => ({
   },
 
   clearCompany() {
-    set({ enabledIds: [], connections: {} });
+    set({ enabledIds: [], connections: {}, loaded: false, full: false, statusError: false });
   },
 
-  hydrateFromServer: (rows) => {
+  hydrateFromServer: (rows, { partial = false } = {}) => {
+    if (partial && get().full) return;
     const { catalog } = get();
     const nextConn = {};
     const nextEnabled = [];
@@ -77,7 +81,7 @@ const useChannelStore = create((set, get) => ({
         },
       };
     });
-    set({ connections: nextConn, enabledIds: nextEnabled });
+    set({ connections: nextConn, enabledIds: nextEnabled, loaded: true, full: !partial, statusError: false });
   },
 }));
 

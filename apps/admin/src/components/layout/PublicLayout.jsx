@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import BrandMark from '../marketing/BrandMark';
 import { MarketingCta } from '../marketing/MarketingCta';
 import PageFade from '../motion/PageFade';
-import { CONTACT_ITEMS } from '../marketing/StickyContactDock';
+import { CONTACT_EMAIL, CONTACT_ITEMS, CONTACT_PHONE_DISPLAY } from '../marketing/StickyContactDock';
 import StickyContactDock from '../marketing/StickyContactDock';
+import { LEGAL_LINKS } from '../../pages/public/LegalPage';
 import { cn } from '../../lib/utils';
 
 const NAV = [
@@ -163,6 +164,19 @@ export default function PublicLayout() {
               })}
             </nav>
 
+            <div className="border-t border-slate-100 px-3 py-3">
+              <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Legal</p>
+              {LEGAL_LINKS.map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className="mb-1 flex items-center rounded-2xl px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+
             <div className="mt-auto space-y-3 border-t border-slate-100 px-4 py-4">
               <div className="grid grid-cols-3 gap-2">
                 {CONTACT_ITEMS.map((item) => {
@@ -204,8 +218,8 @@ export default function PublicLayout() {
         </PageFade>
       </main>
 
-      <footer className="hidden border-t border-slate-200 bg-gradient-to-b from-slate-50 to-slate-100 lg:block">
-        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
+      <footer className="border-t border-slate-200 bg-slate-50 pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:bg-gradient-to-b lg:from-slate-50 lg:to-slate-100 lg:pb-0">
+        <div className="mx-auto hidden max-w-6xl gap-10 px-4 py-14 sm:px-6 lg:grid lg:grid-cols-5">
           <div className="md:col-span-1">
             <BrandMark />
             <p className="mt-4 text-sm leading-6 text-slate-600">
@@ -231,15 +245,28 @@ export default function PublicLayout() {
             </ul>
           </div>
           <div>
+            <h3 className="mb-3 text-sm font-semibold text-slate-900">Legal</h3>
+            <ul className="space-y-2 text-sm text-slate-600">
+              {LEGAL_LINKS.map((item) => (
+                <li key={item.to}><Link to={item.to} className="hover:text-emerald-700">{item.label}</Link></li>
+              ))}
+            </ul>
+          </div>
+          <div>
             <h3 className="mb-3 text-sm font-semibold text-slate-900">Contact</h3>
             <ul className="space-y-3 text-sm text-slate-600">
-              <li className="flex gap-2"><Mail className="mt-0.5 h-4 w-4 text-emerald-700" />support@omsking.com</li>
-              <li className="flex gap-2"><Phone className="mt-0.5 h-4 w-4 text-emerald-700" />+91 98765 43210</li>
-              <li className="flex gap-2"><MapPin className="mt-0.5 h-4 w-4 text-emerald-700" />Jaipur, India</li>
+              <li className="flex gap-2"><Mail className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" /><a href={`mailto:${CONTACT_EMAIL}`} className="hover:text-emerald-700">{CONTACT_EMAIL}</a></li>
+              <li className="flex gap-2"><Phone className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" /><a href="tel:+917600201227" className="hover:text-emerald-700">{CONTACT_PHONE_DISPLAY}</a></li>
+              <li className="flex gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />Jaipur, India</li>
             </ul>
           </div>
         </div>
-        <div className="border-t border-slate-200 py-5 text-center text-xs text-slate-500">
+        <div className="border-t border-slate-200 px-4 py-5 text-center text-xs text-slate-500">
+          <nav className="mb-2 flex flex-wrap justify-center gap-x-4 gap-y-1 lg:hidden" aria-label="Legal">
+            {LEGAL_LINKS.map((item) => (
+              <Link key={item.to} to={item.to} className="font-medium text-emerald-800">{item.label}</Link>
+            ))}
+          </nav>
           © 2026 OMSKing. First tenant: Leheriya Creations. Next tenant gets the same walls.
         </div>
       </footer>

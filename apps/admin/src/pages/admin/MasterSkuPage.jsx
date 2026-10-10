@@ -97,15 +97,15 @@ export default function MasterSkuPage() {
   if (loading) return <PageLoader label="Loading Master SKUs..." />;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Master SKU</h1>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">Master SKU</h1>
           <p className="text-muted-foreground">
             One internal identity per sellable variant. After the first channel mapping, the code is locked.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => navigate('/sku-mapping')}>SKU mapping</Button>
           {canCatalogEdit && (
             <Button onClick={() => { setForm(empty); setBanner(''); setOpen(true); }}>
@@ -117,9 +117,9 @@ export default function MasterSkuPage() {
       </div>
 
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="flex gap-2">
-            <div className="relative flex-1">
+            <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm"
@@ -164,7 +164,7 @@ export default function MasterSkuPage() {
                   <TableRow key={sku.id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        <ProductThumb name={sku.name || sku.code} src={sku.imageUrl} />
+                        <ProductThumb name={sku.name || sku.code} sku={sku.code} src={sku.imageUrl} />
                         {sku.code}
                       </div>
                     </TableCell>

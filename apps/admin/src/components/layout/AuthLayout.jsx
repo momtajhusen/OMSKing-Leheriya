@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { Store, ShoppingBag, Shirt, Warehouse } from 'lucide-react';
 import BrandMark from '../marketing/BrandMark';
 import PageFade from '../motion/PageFade';
+import { LEGAL_LINKS } from '../../pages/public/LegalPage';
 import { cn } from '../../lib/utils';
 
 const floaters = [
@@ -79,6 +80,11 @@ export default function AuthLayout() {
           <PageFade>
             <Outlet />
           </PageFade>
+          <nav className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-slate-500" aria-label="Legal">
+            {LEGAL_LINKS.map((item) => (
+              <Link key={item.to} to={item.to} className="font-medium text-emerald-800 hover:underline">{item.label}</Link>
+            ))}
+          </nav>
         </div>
       </div>
     </div>

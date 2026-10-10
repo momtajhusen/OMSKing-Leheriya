@@ -9,6 +9,10 @@ const tenants = require('../../controllers/tenants.controller');
 const router = require('express').Router();
 const gate = [authMiddleware, tenantMiddleware, requirePermission('tenants.manage')];
 
+router.get('/public-config', asyncHandler(tenants.getPublicConfig));
+router.get('/ops/settings', ...gate, asyncHandler(tenants.getOpsSettings));
+router.patch('/ops/settings', ...gate, asyncHandler(tenants.patchOpsSettings));
+router.post('/ops/settings/test-mail', ...gate, asyncHandler(tenants.testOpsMail));
 router.get('/', ...gate, asyncHandler(tenants.listTenants));
 router.get('/ops/jobs', ...gate, asyncHandler(tenants.listOpsJobs));
 router.get('/ops/logs', ...gate, asyncHandler(tenants.listOpsLogs));

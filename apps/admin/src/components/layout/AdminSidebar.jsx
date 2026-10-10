@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Shield, Building2, Users, FileText, Bell, Plug, Settings,
   Package, Barcode, GitCompare, Warehouse, Building, ShoppingCart, Truck, Store,
   PackageCheck, RotateCcw, ArrowDownLeft, AlertTriangle, FileSpreadsheet,
-  CreditCard, RefreshCw, BarChart3, Palette, Box, Radio, Webhook, Upload,
+  CreditCard, RefreshCw, BarChart3, Palette, Box, Radio, Webhook, Upload, Receipt,
   ChevronLeft, ChevronRight, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,7 +20,7 @@ const iconMap = {
   LayoutDashboard, Shield, Building2, Users, FileText, Bell, Plug, Settings,
   Package, Barcode, GitCompare, Warehouse, Building, ShoppingCart, Truck, Store,
   PackageCheck, RotateCcw, ArrowDownLeft, AlertTriangle, FileSpreadsheet,
-  CreditCard, RefreshCw, BarChart3, Palette, Box, Radio, Webhook, Upload,
+  CreditCard, RefreshCw, BarChart3, Palette, Box, Radio, Webhook, Upload, Receipt,
 };
 
 const GROUP_ORDER = ['Daily', 'Stock', 'Returns', 'Catalog', 'Finance', 'Setup', 'Admin'];
@@ -115,7 +115,7 @@ function AdminSidebar() {
             )}
           >
             {/* Logo Area */}
-            <div className="flex h-16 items-center border-b border-[hsl(var(--color-border-premium))] px-4">
+            <div className="flex h-14 items-center border-b border-[hsl(var(--color-border-premium))] px-4">
               <BrandLogo className="h-9 w-9" />
               <span className="ml-3 font-semibold text-lg tracking-tight">
                 <span className="gradient-text">OMSKing</span>
@@ -130,10 +130,10 @@ function AdminSidebar() {
             </div>
 
             {/* Navigation */}
-            <div ref={mobileNavRef} className="flex-1 overflow-y-auto py-4 px-2">
+            <div ref={mobileNavRef} className="flex-1 overflow-y-auto px-2 py-3">
               {Object.entries(filteredRoutes).map(([group, routes]) => (
-                <div key={group} className="mb-6">
-                  <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <div key={group} className="mb-2">
+                  <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {groupLabels[group] || group}
                   </div>
               {routes.map((route) => {
@@ -152,7 +152,7 @@ function AdminSidebar() {
                     )}
                   >
                     <Icon className="h-4 w-4 flex-shrink-0" />
-                    <span className="ml-3">{route.label}</span>
+                    <span>{route.label}</span>
                   </Link>
                 );
               })}
@@ -161,7 +161,7 @@ function AdminSidebar() {
             </div>
 
             {/* Footer — current tenant + role (no privilege toggle) */}
-            <div className="border-t border-[hsl(var(--color-border-premium))] p-4">
+            <div className="border-t border-[hsl(var(--color-border-premium))] px-4 py-3">
               <div className="text-xs font-medium text-foreground truncate">{user?.tenantName || 'Merchant'}</div>
               <div className="text-[11px] text-muted-foreground">{ROLE_LABELS[role] || role}</div>
             </div>
@@ -177,7 +177,7 @@ function AdminSidebar() {
         )}
       >
         {/* Logo Area */}
-        <div className={cn('flex h-16 items-center border-b border-[hsl(var(--color-border-premium))]', sidebarCollapsed ? 'justify-center px-2' : 'px-4')}>
+        <div className={cn('flex h-14 items-center border-b border-[hsl(var(--color-border-premium))]', sidebarCollapsed ? 'justify-center px-2' : 'px-4')}>
           <BrandLogo className="h-9 w-9" />
           {!sidebarCollapsed && (
             <span className="ml-3 font-semibold text-lg tracking-tight">
@@ -187,11 +187,11 @@ function AdminSidebar() {
         </div>
 
         {/* Navigation */}
-        <div ref={desktopNavRef} className="flex-1 overflow-y-auto py-4 px-2">
+        <div ref={desktopNavRef} className="flex-1 overflow-y-auto px-2 py-3">
           {Object.entries(filteredRoutes).map(([group, routes]) => (
-            <div key={group} className="mb-6">
+            <div key={group} className="mb-2">
               {!sidebarCollapsed && (
-                <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {groupLabels[group] || group}
                 </div>
               )}
@@ -211,7 +211,7 @@ function AdminSidebar() {
                     )}
                   >
                     <Icon className="h-4 w-4 flex-shrink-0" />
-                    {!sidebarCollapsed && <span className="ml-3">{route.label}</span>}
+                    {!sidebarCollapsed && <span>{route.label}</span>}
                   </Link>
                 );
               })}
@@ -220,7 +220,7 @@ function AdminSidebar() {
         </div>
 
         {/* Footer — current tenant + role */}
-        <div className="border-t border-[hsl(var(--color-border-premium))] p-4">
+        <div className="border-t border-[hsl(var(--color-border-premium))] px-4 py-3">
           {!sidebarCollapsed ? (
             <>
               <div className="text-xs font-medium text-foreground truncate">{user?.tenantName || 'Merchant'}</div>

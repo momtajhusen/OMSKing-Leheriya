@@ -15,11 +15,13 @@ import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import ProductThumb from '../../components/ui/ProductThumb';
 import { FormBanner } from '../../components/ui/FormBanner';
-import { Warehouse, Package, AlertTriangle, TrendingUp, Search } from 'lucide-react';
+import { Package, AlertTriangle, TrendingUp, Search } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
-import { CHANNEL_CATALOG, orderChannelLabel } from '../../constants/channelCatalog';
+import { orderChannelLabel } from '../../constants/channelCatalog';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
+import TableToolbar from '../../components/ui/TableToolbar';
 
 const TABS = [
   { id: 'all', label: 'All Stock' },
@@ -32,6 +34,7 @@ const TABS = [
 export default function InventoryPage() {
   const navigate = useNavigate();
   const { canInventoryAdjust } = usePermissions();
+  const connected = useConnectedChannels();
   const [warehouses, setWarehouses] = useState([]);
   const [masters, setMasters] = useState([]);
   const [rows, setRows] = useState([]);
@@ -172,12 +175,12 @@ export default function InventoryPage() {
   if (loading && rows.length === 0 && tab !== 'ledger') return <PageLoader label="Loading inventory..." />;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Inventory</h1>
-          <p className="text-muted-foreground">
-            Ledger, not overwritten qty. WH-001 is all channels; WH-002 is Shopify only. Each Master SKU is listed at both warehouses before the first receipt.
+          <h1 className="text-xl font-bold">Inventory</h1>
+          <p className="text-xs text-muted-foreground">
+            WH-001 sells on every channel. WH-002 is Shopify only. Available = on hand minus reserved. Stock in writes a ledger row.
           </p>
         </div>
         <div className="flex gap-2">
@@ -200,24 +203,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="pt-6">
-          <div className="flex items-start gap-3">
-            <Warehouse className="w-5 h-5 text-primary mt-0.5" />
-            <div>
-              <p className="font-medium">Available to sell</p>
-              <p className="text-sm text-muted-foreground">
-                Shopify = offline WH-001 + virtual WH-002. Every other channel = WH-001 only. Virtual stock stays on Shopify. A return restocked to one channel raises only that channel.
-                {omsMaster
-                  ? ' Stock in and adjust write a ledger row. They do not replace the balance in place.'
-                  : ' Shopify is inventory master, so sellable quantity is read-only in OMS.'}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <KpiCard label="On hand" value={kpis.totalStock} icon={Package} onClick={() => { setTab('all'); setPage(1); }} />
         <KpiCard label="Reserved" value={kpis.reserved} icon={Package} onClick={() => { setTab('reserved'); setPage(1); }} />
         <KpiCard label="Available" value={kpis.available} icon={Package} onClick={() => { setTab('available'); setPage(1); }} />
@@ -225,36 +211,43 @@ export default function InventoryPage() {
         <KpiCard label="Stock Value" value={formatINR(kpis.stockValue)} icon={TrendingUp} />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button variant={!warehouseId ? 'default' : 'outline'} size="sm" onClick={() => { setWarehouseId(''); setPage(1); }}>All warehouses</Button>
-        {warehouses.map((wh) => (
-          <Button key={wh.id} variant={warehouseId === wh.id ? 'default' : 'outline'} size="sm" onClick={() => { setWarehouseId(wh.id); setPage(1); }}>
-            {wh.code}
-          </Button>
-        ))}
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex gap-2 flex-wrap">
-          {TABS.map((item) => (
-            <Button key={item.id} variant={tab === item.id ? 'default' : 'outline'} size="sm" onClick={() => { setTab(item.id); setPage(1); setLedgerPage(1); }}>
-              {item.label}
-            </Button>
-          ))}
-        </div>
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search SKU or product..."
-            className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(); } }}
-          />
-        </div>
-        <Button variant="outline" size="sm" onClick={load}>Search</Button>
-      </div>
+      <TableToolbar
+        search={(
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="SKU or product"
+                className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(); } }}
+              />
+            </div>
+            <Button variant="outline" size="sm" onClick={load}>Search</Button>
+          </div>
+        )}
+        filters={(
+          <div className="space-y-2">
+            <div className="flex gap-2 overflow-x-auto">
+              <Button variant={!warehouseId ? 'default' : 'outline'} size="sm" className="whitespace-nowrap" onClick={() => { setWarehouseId(''); setPage(1); }}>All warehouses</Button>
+              {warehouses.map((wh) => (
+                <Button key={wh.id} variant={warehouseId === wh.id ? 'default' : 'outline'} size="sm" className="whitespace-nowrap" onClick={() => { setWarehouseId(wh.id); setPage(1); }}>
+                  {wh.code}
+                </Button>
+              ))}
+            </div>
+            <div className="flex gap-2 overflow-x-auto">
+              {TABS.map((item) => (
+                <Button key={item.id} variant={tab === item.id ? 'default' : 'outline'} size="sm" className="whitespace-nowrap" onClick={() => { setTab(item.id); setPage(1); setLedgerPage(1); }}>
+                  {item.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+      />
 
       <Card>
         <CardHeader>
@@ -283,7 +276,7 @@ export default function InventoryPage() {
                       <TableCell className="text-xs">{row.at ? formatDateTime(row.at) : '—'}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <ProductThumb name={row.productName || row.sku} src={row.imageUrl} />
+                          <ProductThumb name={row.productName || row.sku} sku={row.sku} src={row.imageUrl} />
                           <span className="font-medium">{row.sku}</span>
                         </div>
                       </TableCell>
@@ -318,7 +311,7 @@ export default function InventoryPage() {
                   <TableHead>On hand</TableHead>
                   <TableHead>Reserved</TableHead>
                   <TableHead>Available</TableHead>
-                  {CHANNEL_CATALOG.map((channel) => <TableHead key={channel.id}>{orderChannelLabel(channel)} ATS</TableHead>)}
+                  {connected.channels.map((channel) => <TableHead key={channel.id}>{orderChannelLabel(channel)} ATS</TableHead>)}
                   <TableHead>Status</TableHead>
                   {canInventoryAdjust && omsMaster && <TableHead />}
                 </TableRow>
@@ -328,7 +321,7 @@ export default function InventoryPage() {
                   <TableRow key={item.id} className="cursor-pointer" onClick={() => setSelected(item)}>
                     <TableCell>
                       <div className="flex items-center gap-2 font-medium">
-                        <ProductThumb name={item.productName || item.sku} src={item.imageUrl} />
+                        <ProductThumb name={item.productName || item.sku} sku={item.sku} src={item.imageUrl} />
                         {item.sku}
                       </div>
                     </TableCell>
@@ -341,7 +334,7 @@ export default function InventoryPage() {
                     <TableCell>{item.stock}</TableCell>
                     <TableCell>{item.reserved}</TableCell>
                     <TableCell className="font-medium">{item.available}</TableCell>
-                    {CHANNEL_CATALOG.map((channel) => <TableCell key={channel.id}>{item.ats?.[channel.id] ?? 0}</TableCell>)}
+                    {connected.channels.map((channel) => <TableCell key={channel.id}>{item.ats?.[channel.id] ?? 0}</TableCell>)}
                     <TableCell>
                       {!item.tracked ? (
                         <Badge variant="outline">Not received</Badge>
@@ -372,7 +365,10 @@ export default function InventoryPage() {
       <Drawer open={!!selected && !adjustOpen && !reserveOpen} onOpenChange={(open) => !open && setSelected(null)} title={selected ? selected.sku : 'SKU'}>
         {selected && (
           <div className="space-y-4 text-sm">
-            <p className="text-lg font-semibold">{selected.productName}</p>
+            <div className="flex items-center gap-3">
+              <ProductThumb name={selected.productName || selected.sku} sku={selected.sku} src={selected.imageUrl} size="lg" />
+              <p className="text-lg font-semibold">{selected.productName}</p>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div><p className="text-muted-foreground">Warehouse</p><p className="font-medium">{selected.warehouse} · {selected.warehouseType}</p></div>
               <div><p className="text-muted-foreground">Available</p><p className="font-medium">{selected.available}</p></div>
@@ -382,7 +378,7 @@ export default function InventoryPage() {
             {ats && (
               <div>
                 <p className="text-muted-foreground mb-1">ATS for this Master SKU</p>
-                <p>{CHANNEL_CATALOG.map((channel) => `${orderChannelLabel(channel)} ${ats[channel.id] ?? 0}`).join(' · ')}</p>
+                <p>{connected.channels.map((channel) => `${orderChannelLabel(channel)} ${ats[channel.id] ?? 0}`).join(' · ')}</p>
               </div>
             )}
             {canInventoryAdjust && omsMaster && (
@@ -481,7 +477,7 @@ export default function InventoryPage() {
         <div className="space-y-3">
           {banner && <FormBanner tone="error" title="Could not reserve">{banner}</FormBanner>}
           <Select value={reserve.channel} onChange={(e) => setReserve({ ...reserve, channel: e.target.value })}>
-            {CHANNEL_CATALOG.map((channel) => (
+            {connected.channels.map((channel) => (
               <option key={channel.id} value={channel.id}>
                 {orderChannelLabel(channel)}{channel.id === 'shopify' ? ' (WH-001 then WH-002)' : ' (WH-001 only)'}
               </option>

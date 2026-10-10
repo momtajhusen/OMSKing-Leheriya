@@ -76,15 +76,15 @@ export default function WarehousesPage() {
   if (loading) return <PageLoader label="Loading warehouses..." />;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Warehouses</h1>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">Warehouses</h1>
           <p className="text-muted-foreground">
             WH-001 is physical and sells on every channel. WH-002 is virtual and sells on Shopify only. Inventory authority: {authority === 'oms' ? 'OMS is master' : 'Shopify is master'}.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => navigate('/inventory')}>Open inventory</Button>
           {canInventoryAdjust && (
             <Button onClick={() => { setForm(empty); setBanner(''); setOpen(true); }}>Add warehouse</Button>
@@ -93,7 +93,7 @@ export default function WarehousesPage() {
       </div>
 
       <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="flex items-start gap-3">
             <Building className="w-5 h-5 text-primary mt-0.5" />
             <div>

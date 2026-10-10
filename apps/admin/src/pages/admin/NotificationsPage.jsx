@@ -165,14 +165,14 @@ export default function NotificationsPage() {
   ];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="rounded-xl bg-primary/10 p-3 text-primary">
             <Bell className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Notifications</h1>
+            <h1 className="text-xl font-bold tracking-tight">Notifications</h1>
             <p className="mt-1 max-w-xl text-muted-foreground">
               Turn a switch on and save. That channel sends when the event happens: new order, vendor assign, dispatch, shipping, delivery, return, low stock, a failed job, or a vendor still waiting after 7 days.
             </p>
@@ -210,7 +210,7 @@ export default function NotificationsPage() {
                 </Badge>
               </div>
               <p className="mt-4 font-semibold">{channel.label}</p>
-              <p className="mt-1 truncate text-sm text-muted-foreground">{channel.detail}</p>
+              <p className="mt-1 break-words text-sm text-muted-foreground">{channel.detail}</p>
             </button>
           );
         })}
@@ -432,7 +432,7 @@ export default function NotificationsPage() {
           
           return (
             <Card key={channel}>
-              <CardContent className="pt-6">
+              <CardContent className="p-3">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-primary/10 rounded-lg">
                     {channelIcons[channel]}
@@ -464,7 +464,7 @@ export default function NotificationsPage() {
                 <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[hsl(var(--color-border-premium))] px-3 py-2 text-sm">
                   <div className="min-w-0">
                     <p className="font-medium">{row.eventKey}</p>
-                    {row.text && <p className="truncate text-xs text-muted-foreground">{row.text}</p>}
+                    {row.text && <p className="break-words text-xs text-muted-foreground">{row.text}</p>}
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{row.channel}</Badge>
@@ -479,7 +479,7 @@ export default function NotificationsPage() {
 
       {/* Legend */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-3">
           <div className="flex items-center gap-6 text-sm">
             <div className="flex items-center gap-2">
               <div className="w-6 h-3 bg-primary rounded-full" />

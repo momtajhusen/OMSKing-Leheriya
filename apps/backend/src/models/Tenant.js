@@ -21,6 +21,7 @@ const tenantSchema = new mongoose.Schema({
     timeZone: { type: String, default: 'Asia/Kolkata' },
     channels: { type: [String], default: [] },
     skuPrefix: { type: String, default: '' },
+    storefrontUrl: { type: String, default: '' },
     inventoryAuthority: { type: String, enum: ['oms', 'shopify'], default: 'oms' },
     taxGst: {
       configured: { type: Boolean, default: false },

@@ -5,7 +5,9 @@ import dayjs from 'dayjs';
 import api, { apiError } from '../../lib/api';
 import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate } from '../../utils/format';
-import { CHANNELS, downloadCsv } from '../../lib/orderMetrics';
+import { downloadCsv } from '../../lib/orderMetrics';
+import { orderChannelLabel } from '../../constants/channelCatalog';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -24,6 +26,7 @@ export default function PaymentReconciliationPage() {
   const loaded = useOrderStore((s) => s.loaded);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const [channel, setChannel] = useState('all');
+  const connected = useConnectedChannels();
   const [source, setSource] = useState('amazon');
   const [settlement, setSettlement] = useState([]);
   const [courierBill, setCourierBill] = useState([]);
@@ -47,7 +50,7 @@ export default function PaymentReconciliationPage() {
     [open, channel],
   );
 
-  const byChannel = CHANNELS.map((name) => {
+  const byChannel = connected.labels.map((name) => {
     const rows = open.filter((order) => order.channel === name);
     return { channel: name, count: rows.length, value: rows.reduce((sum, order) => sum + (Number(order.total) || 0), 0) };
   });
@@ -112,10 +115,10 @@ export default function PaymentReconciliationPage() {
   if (!loaded) return <PageLoader label="Loading payments..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Payment Reconciliation</h1>
+          <h1 className="text-xl font-bold">Payment Reconciliation</h1>
           <p className="text-muted-foreground">
             Fulfilled orders stay here while payment is unpaid. Shopify paid and cancelled orders are left out. A fulfilled order is not treated as paid.
           </p>
@@ -168,7 +171,7 @@ export default function PaymentReconciliationPage() {
           </div>
           <Select className="w-40" value={channel} onChange={(e) => setChannel(e.target.value)}>
             <option value="all">All channels</option>
-            {CHANNELS.map((name) => <option key={name} value={name}>{name}</option>)}
+            {connected.labels.map((name) => <option key={name} value={name}>{name}</option>)}
           </Select>
         </CardHeader>
         <CardContent>
@@ -176,7 +179,7 @@ export default function PaymentReconciliationPage() {
             <EmptyState title="No delivered orders" description="Delivered orders show here until they are settled." />
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[860px]">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Order ID</TableHead>
@@ -228,8 +231,9 @@ export default function PaymentReconciliationPage() {
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <Select className="w-40" value={source} onChange={(e) => setSource(e.target.value)}>
-              <option value="amazon">Amazon</option>
-              <option value="myntra">Myntra</option>
+              {connected.channels.map((channel) => (
+                <option key={channel.id} value={channel.id}>{orderChannelLabel(channel)}</option>
+              ))}
             </Select>
             <input
               type="file"

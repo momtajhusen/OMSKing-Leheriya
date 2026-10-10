@@ -10,6 +10,7 @@ import PageFade from '../motion/PageFade';
 import { usePermissions } from '../../hooks/usePermissions';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
+import ProductImageCatalog from '../catalog/ProductImageCatalog';
 
 const vendorRoutes = [
   { path: '/vendor/dashboard', label: 'Home', icon: LayoutDashboard },
@@ -56,6 +57,7 @@ function VendorLayout() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[hsl(var(--color-muted)/0.35)] pt-[env(safe-area-inset-top)]">
+      <ProductImageCatalog />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {mobileOpen && (
           <button type="button" className="fixed inset-0 z-40 bg-background/70 backdrop-blur-sm lg:hidden" aria-label="Close menu" onClick={() => setMobileOpen(false)} />

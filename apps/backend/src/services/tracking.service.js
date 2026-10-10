@@ -162,6 +162,11 @@ async function convertNdrToRto(tenantId, orderNo) {
 }
 
 async function pollOpenShipments(tenantId, deps = {}) {
+  const { activeCourierCreds } = require('./courierAccount.service');
+  const creds = deps.delhiveryCreds || await activeCourierCreds(tenantId, 'delhivery');
+  if (!String(creds?.apiToken || '').trim()) {
+    return { checked: 0, failed: 0, skipped: 'courier' };
+  }
   const orders = await skip(Order.find({
     tenantId,
     awb: { $nin: ['', null] },
@@ -169,11 +174,33 @@ async function pollOpenShipments(tenantId, deps = {}) {
     $or: [{ channel: 'Shopify' }, { courier: /delhivery/i }],
   }).limit(50));
   const results = [];
+  let failed = 0;
   for (const order of orders) {
     if (String(order.channel).toLowerCase() !== 'shopify' && !/delhivery/i.test(order.courier || '')) continue;
-    results.push(await pollDelhivery(tenantId, order.orderNo, deps));
+    try {
+      results.push(await pollDelhivery(tenantId, order.orderNo, { ...deps, delhiveryCreds: creds }));
+    } catch (err) {
+      failed += 1;
+    }
   }
-  return { checked: results.length };
+  return { checked: results.length, failed, skipped: '' };
+}
+
+async function pollActiveCouriers() {
+  const CourierAccount = require('../models/CourierAccount');
+  const rows = await CourierAccount.find({ source: 'own', code: 'delhivery', status: 'active' })
+    .select('tenantId')
+    .setOptions({ skipTenantFilter: true });
+  const seen = new Set();
+  let checked = 0;
+  for (const row of rows) {
+    const id = String(row.tenantId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const result = await pollOpenShipments(row.tenantId);
+    checked += result.checked || 0;
+  }
+  return { companies: seen.size, checked };
 }
 
 async function listNdr(tenantId) {
@@ -193,6 +220,7 @@ module.exports = {
   applyTracking,
   pollDelhivery,
   pollOpenShipments,
+  pollActiveCouriers,
   reattemptNdr,
   convertNdrToRto,
   listNdr,

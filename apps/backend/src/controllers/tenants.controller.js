@@ -6,7 +6,7 @@ const { successResponse } = require('../utils/response');
 const { publicUser, accessPayload } = require('../lib/userDto');
 const { provisionMerchant } = require('../services/tenantOnboard.service');
 const { sendMail, assertMailConfigured } = require('../lib/mailer');
-const { accountCreatedEmail } = require('../lib/mailTemplates');
+const { accountCreatedEmail, mailboxTestEmail } = require('../lib/mailTemplates');
 const { signAccessToken, signRefreshToken, verifyRefresh, setRefreshCookie, hashToken, deviceFromUa } = require('../lib/tokens');
 const RefreshSession = require('../models/RefreshSession');
 const crypto = require('crypto');
@@ -14,6 +14,8 @@ const Order = require('../models/Order');
 const IntegrationJob = require('../models/IntegrationJob');
 const { ensurePricing, quoteOrders } = require('../services/pricing.service');
 const { listPlatformJobs, requeueJob } = require('../services/jobQueue.service');
+const platformSettings = require('../services/platformSettings.service');
+const { recordFromReq } = require('../services/auditLog.service');
 
 function mapTenant(t, userCount = 0, bill = null, lastSync = null) {
   const statusMap = { active: 'Active', trial: 'Trial', suspended: 'Suspended' };
@@ -67,7 +69,7 @@ async function listTenants(req, res) {
 }
 
 async function createTenant(req, res) {
-  assertMailConfigured();
+  await assertMailConfigured();
   const password = req.body.password || `Welcome-${Math.random().toString(36).slice(2, 8)}A1`;
   const { tenant } = await provisionMerchant({
     name: req.body.name,
@@ -153,4 +155,51 @@ async function retryOpsJob(req, res) {
   return successResponse(res, { ...dto, tenantId: String(job.tenantId), tenantName: tenant?.name || '' }, 'Job requeued');
 }
 
-module.exports = { listTenants, createTenant, patchTenant, impersonate, listOpsJobs, listOpsLogs, retryOpsJob };
+async function getPublicConfig(req, res) {
+  return successResponse(res, await platformSettings.publicPlatformSettings(), 'Public config');
+}
+
+async function getOpsSettings(req, res) {
+  return successResponse(res, await platformSettings.getPlatformSettings(), 'Platform settings');
+}
+
+async function patchOpsSettings(req, res) {
+  const { before, after } = await platformSettings.savePlatformSettings(req.body || {});
+  await recordFromReq(req, {
+    tenantId: req.user?.tenantId,
+    action: 'platform.settings_updated',
+    resourceType: 'platform_settings',
+    resourceId: 'default',
+    resourceDisplay: after.activeGmail || 'OMSKing settings',
+    before,
+    after,
+  });
+  return successResponse(res, after, 'Platform settings saved');
+}
+
+async function testOpsMail(req, res) {
+  const user = await User.findById(req.user.id).setOptions({ skipTenantFilter: true });
+  if (!user?.email) throw new HttpError(400, 'This account has no email');
+  const letter = mailboxTestEmail();
+  await sendMail({
+    to: user.email,
+    subject: letter.subject,
+    text: letter.text,
+    html: letter.html,
+  });
+  return successResponse(res, { sentTo: user.email }, 'Test email sent');
+}
+
+module.exports = {
+  listTenants,
+  createTenant,
+  patchTenant,
+  impersonate,
+  listOpsJobs,
+  listOpsLogs,
+  retryOpsJob,
+  getPublicConfig,
+  getOpsSettings,
+  patchOpsSettings,
+  testOpsMail,
+};

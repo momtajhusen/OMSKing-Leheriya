@@ -2,6 +2,7 @@ const Order = require('../models/Order');
 const CustomerReturn = require('../models/CustomerReturn');
 const { HttpError } = require('../utils/httpError');
 const { restockReturn } = require('./inventory.service');
+const { imagesBySku, imageForSku } = require('../lib/catalogImages');
 
 function skip(query) {
   return query.setOptions({ skipTenantFilter: true });
@@ -39,8 +40,17 @@ async function ingestReturns(tenantId, rows = []) {
   return { saved: saved.length, createdOrder: after !== before };
 }
 
+function withReturnImage(item, bySku) {
+  const plain = item?.toObject ? item.toObject() : { ...item };
+  const imageUrl = plain.imageUrl || imageForSku(bySku, plain.sku) || imageForSku(bySku, plain.name);
+  return imageUrl ? { ...plain, imageUrl } : plain;
+}
+
 async function listReturns(tenantId) {
-  const rows = await skip(CustomerReturn.find({ tenantId }).sort({ createdAt: -1 }));
+  const [rows, bySku] = await Promise.all([
+    skip(CustomerReturn.find({ tenantId }).sort({ createdAt: -1 })),
+    imagesBySku(tenantId),
+  ]);
   return rows.map((row) => ({
     id: row.returnNo,
     orderId: row.orderNo,
@@ -48,7 +58,7 @@ async function listReturns(tenantId) {
     status: row.status,
     type: 'customer_return',
     channel: row.channel,
-    items: row.items,
+    items: (row.items || []).map((item) => withReturnImage(item, bySku)),
     restockDestination: row.restockDestination,
     awb: row.labelAwb,
     labelGeneratedAt: row.status === 'Approved' || row.status === 'Completed' ? row.updatedAt : null,

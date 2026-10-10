@@ -128,7 +128,7 @@ function AdminHeader() {
   };
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 items-center border-b border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))]/80 backdrop-blur-xl px-4 sm:px-6">
+    <header className="sticky top-0 z-40 flex h-12 items-center border-b border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))]/80 backdrop-blur-xl px-3 sm:px-4">
       {photo.input}
       <div className="flex items-center gap-2 sm:gap-4">
         <Button
@@ -163,7 +163,7 @@ function AdminHeader() {
           <input
             type="text"
             placeholder="Search orders, products, customers..."
-            className="w-full rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-4 py-2 pl-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-[hsl(var(--color-primary-blue))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20 transition-all"
+            className="w-full rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] py-1.5 pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-[hsl(var(--color-primary-blue))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20 transition-all"
             style={{
               backgroundColor: 'hsl(var(--color-card-bg))',
               color: 'hsl(var(--color-foreground))',
@@ -175,7 +175,7 @@ function AdminHeader() {
       <div className="flex items-center gap-1.5 sm:gap-2">
         <DropdownMenu
           align="end"
-          className="w-[360px] p-0"
+          className="w-[min(22.5rem,calc(100vw-1.5rem))] p-0"
           trigger={
             <Button variant="ghost" size="icon" className="relative hover:bg-[hsl(var(--color-muted))]">
               <Bell className="h-5 w-5" />

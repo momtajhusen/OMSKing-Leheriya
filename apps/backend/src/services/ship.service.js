@@ -38,8 +38,8 @@ async function pickupWarehouse(tenantId) {
     throw err;
   }
   const address = [row.address?.line1, row.address?.city, row.address?.pincode].filter(Boolean).join(', ');
-  if (!address || !row.contactPhone) {
-    const err = new HttpError(400, 'WH-001 pickup address and phone are required before an AWB is booked.');
+  if (!row.address?.line1 || !row.address?.pincode || !row.contactPhone) {
+    const err = new HttpError(400, 'WH-001 needs a street address, pincode, and phone before an AWB is booked.');
     err.terminal = true;
     throw err;
   }
@@ -277,6 +277,23 @@ async function closeDayManifest(tenantId, deps = {}) {
   };
 }
 
+async function shippingReadiness(tenantId) {
+  const missing = [];
+  const creds = await delhiveryCreds(tenantId);
+  const courierReady = Boolean(String(creds?.apiToken || '').trim());
+  if (!courierReady) missing.push('Delhivery API token on this company');
+  const row = await skip(Warehouse.findOne({ tenantId, code: 'WH-001', status: 'active' }));
+  if (!row?.address?.line1) missing.push('WH-001 street address');
+  if (!row?.address?.pincode) missing.push('WH-001 pincode');
+  if (!row?.contactPhone) missing.push('WH-001 phone');
+  return {
+    courierName: courierReady ? 'Delhivery' : '',
+    courierReady,
+    warehouseReady: Boolean(row?.address?.line1 && row?.address?.pincode && row?.contactPhone),
+    missing,
+  };
+}
+
 async function runShipmentJob(job, deps = {}) {
   const orderNos = job.payload?.orderNos || [];
   const booked = [];
@@ -301,4 +318,5 @@ module.exports = {
   queueBulkLabels,
   closeDayManifest,
   runShipmentJob,
+  shippingReadiness,
 };

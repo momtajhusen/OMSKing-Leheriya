@@ -49,19 +49,19 @@ function VendorLineCard({ line, current, vendors, busy, onVendor, onPrice, onAss
   return (
     <article className="rounded-xl border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-muted))]/15 p-3 sm:p-4">
       <div className="flex items-start gap-3">
-        <ProductThumb name={line.product || line.sku} src={line.imageUrl} />
+        <ProductThumb name={line.product || line.sku} sku={line.sku} src={line.imageUrl} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <button
                 type="button"
-                className="block max-w-full truncate text-left text-sm font-semibold text-primary hover:underline"
+                className="block max-w-full break-words text-left text-sm font-semibold text-primary hover:underline"
                 onClick={() => onOpen(line.vendorOrderId)}
               >
                 {line.vendorOrderId}
               </button>
-              <p className="truncate text-sm">{line.product || line.sku}</p>
-              <p className="truncate text-xs text-muted-foreground">
+              <p className="break-words text-sm">{line.product || line.sku}</p>
+              <p className="break-words text-xs text-muted-foreground">
                 {line.sku}
                 {line.split ? ' · split line' : ''}
                 {' · Master '}
@@ -313,10 +313,10 @@ export default function FulfilmentPage() {
   if (loading) return <PageLoader label="Loading fulfilment..." />;
 
   return (
-    <div className="min-w-0 space-y-5">
+    <div className="min-w-0 space-y-3">
       <div>
-        <h1 className="text-2xl font-bold sm:text-3xl">Fulfilment</h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">One marketplace order stays one master order. The oldest open order takes WH-001 first.</p>
+        <h1 className="text-xl font-bold">Fulfilment</h1>
+        <p className="text-xs text-muted-foreground">One marketplace order stays one master order. The oldest open order takes WH-001 first.</p>
       </div>
 
       <div className="kpi-grid">

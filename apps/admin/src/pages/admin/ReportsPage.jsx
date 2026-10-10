@@ -7,6 +7,7 @@ import useOrderStore from '../../stores/orderStore';
 import { vendorReportLabel } from '../../stores/vendorStore';
 import { formatINR } from '../../utils/format';
 import { netSales, salesByChannel, isCancelled, downloadCsv } from '../../lib/orderMetrics';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -30,7 +31,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 function Stat({ label, value }) {
   return (
-    <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-bold">{value}</p></CardContent></Card>
+    <Card><CardContent className="p-3"><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-bold">{value}</p></CardContent></Card>
   );
 }
 
@@ -43,6 +44,7 @@ export default function ReportsPage() {
   const orders = useOrderStore((s) => s.orders);
   const loaded = useOrderStore((s) => s.loaded);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+  const connected = useConnectedChannels();
   const [activeTab, setActiveTab] = useState('sales');
   const [vendorFilter, setVendorFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
@@ -70,9 +72,9 @@ export default function ReportsPage() {
       aov: live.length ? Math.round(revenue / live.length) : 0,
       cancelled: orders.length - live.length,
       byMonth: Object.values(months).sort((a, b) => a.month.localeCompare(b.month)),
-      byChannel: salesByChannel(orders),
+      byChannel: salesByChannel(orders, connected.labels),
     };
-  }, [orders]);
+  }, [orders, connected.labels]);
 
   const inventory = useMemo(() => {
     const warehouses = {};
@@ -199,10 +201,10 @@ export default function ReportsPage() {
   if (!loaded) return <PageLoader label="Loading reports..." />;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Reports</h1>
+          <h1 className="text-xl font-bold">Reports</h1>
           <p className="text-muted-foreground">Sales, stock, shipping, cancellations and vendors — all from live orders and the inventory ledger.</p>
         </div>
         <Button variant="outline" onClick={exportCurrent}>
@@ -228,7 +230,7 @@ export default function ReportsPage() {
       </div>
 
       {activeTab === 'sales' && (
-        <div className="space-y-6">
+        <div className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Stat label="Net sales (excl. cancelled)" value={formatINR(sales.revenue)} />
             <Stat label="Orders (excl. cancelled)" value={sales.count} />
@@ -281,7 +283,7 @@ export default function ReportsPage() {
       )}
 
       {activeTab === 'inventory' && (
-        <div className="space-y-6">
+        <div className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Stat label="On hand" value={inventory.stock} />
             <Stat label="Available" value={inventory.available} />
@@ -326,7 +328,7 @@ export default function ReportsPage() {
       )}
 
       {activeTab === 'shipping' && (
-        <div className="space-y-6">
+        <div className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Stat label="Shipments (with AWB)" value={shipping.total} />
             <Stat label="Delivered" value={shipping.delivered} />
@@ -368,7 +370,7 @@ export default function ReportsPage() {
       )}
 
       {activeTab === 'returns' && (
-        <div className="space-y-6">
+        <div className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Stat label="Cancelled" value={cancellations.count} />
             <Stat label="After dispatch (RTO)" value={cancellations.afterDispatch} />
@@ -407,7 +409,7 @@ export default function ReportsPage() {
       )}
 
       {activeTab === 'reconciliation' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Card>
             <CardHeader>
               <CardTitle>Payments</CardTitle>
@@ -430,7 +432,7 @@ export default function ReportsPage() {
       )}
 
       {activeTab === 'vendors' && (
-        <div className="space-y-6">
+        <div className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Stat label="Vendors with lines" value={vendorRows.length} />
             <Stat label="Assigned lines" value={vendorLines.length} />

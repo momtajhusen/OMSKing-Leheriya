@@ -25,7 +25,7 @@ Ek chat = **ek phase**. Naya layout mat banao. `tenantId` body/query se mat lo. 
 
 **CHECK**
 
-1. Vendor login `/vendor/orders`. Merchant `/dashboard`, `/fulfilment`, `/users-roles`, `/payment-reconciliation` na khule.
+1. Vendor login `/vendor/orders`. Merchant `     /dashboard`, `/fulfilment`, `/users-roles`, `/payment-reconciliation` na khule.
 2. Grid simple ho: tracking, courier, dispatch date, delivery date. Save par accepted line dispatch ho.
 3. Kai rows select. Ek tracking sab par. Alag vendor ki line list mein na aaye.
 4. Settings par Telegram group id save ho. Assign par message usi group par jaye, owner chat par nahi, jab NOT-002 telegram on ho.
