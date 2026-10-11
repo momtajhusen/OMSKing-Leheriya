@@ -62,8 +62,8 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
   if (existing?.shopifyFulfillmentId) return existing;
 
   const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
-  const shopCreds = deps.shopifyCreds || credsOf(await getConnection(tenantId, 'shopify'));
-  if (!String(shopCreds?.shopUrl || shopCreds?.shop || '').trim() || !String(shopCreds?.adminToken || '').trim()) {
+  const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
+  if (!shopify.hasShopifyAuth(shopCreds)) {
     const err = new HttpError(400, 'Shopify shop URL and admin token are missing. Delhivery was not called.');
     err.terminal = true;
     throw err;
@@ -130,7 +130,7 @@ async function cancelShopifyLabel(tenantId, orderNo, { releaseReserve = false, d
   const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
   await delhivery.cancelAwb(creds, shipment.awb, { request: deps.delhiveryRequest });
   if (shipment.shopifyFulfillmentId) {
-    const shopCreds = deps.shopifyCreds || credsOf(await getConnection(tenantId, 'shopify'));
+    const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
     await shopify.cancelFulfillment(shopCreds, {
       fulfillmentId: shipment.shopifyFulfillmentId,
       request: deps.shopifyRequest,

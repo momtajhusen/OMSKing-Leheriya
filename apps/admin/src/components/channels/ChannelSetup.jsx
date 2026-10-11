@@ -152,6 +152,15 @@ export default function ChannelSetup({ showPlanNote = true }) {
         toast.error(`${missing.map((field) => field.label).join(', ')} required`);
         return false;
       }
+      if (ch.id === 'shopify') {
+        const hasToken = String(credentials.adminToken || '').trim() || savedSecrets.has('adminToken');
+        const hasApp = String(credentials.clientId || '').trim()
+          && (String(credentials.apiSecret || '').trim() || savedSecrets.has('apiSecret'));
+        if (!hasToken && !hasApp) {
+          toast.error('Add the Client ID and API secret, or paste a legacy Admin API token');
+          return false;
+        }
+      }
       const { data } = await api.patch(`/channels/${ch.id}`, {
         credentials,
         warehouseCode: credentials.warehouseCode || credentials.storeId || '',

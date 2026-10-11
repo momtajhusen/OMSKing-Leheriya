@@ -75,6 +75,17 @@ async function upsertConnection(tenantId, userId, channel, body) {
     row = new ChannelConnection({ tenantId, channel });
   }
   const environmentChanged = staleEnvironmentTest(row, prev, next);
+  if (channel === 'shopify') {
+    const incoming = body.credentials || {};
+    const identityChanged = ['apiSecret', 'clientId', 'shopUrl'].some((key) => {
+      const value = String(incoming[key] ?? '').trim();
+      return value && value !== String(prev[key] || '').trim();
+    });
+    if (identityChanged && !String(incoming.adminToken || '').trim()) {
+      delete next.adminToken;
+      delete next.tokenExpiresAt;
+    }
+  }
   row.credentialsEnc = encryptObject(next);
   if (body.importOrdersFrom) row.importOrdersFrom = body.importOrdersFrom;
   if (body.warehouseCode != null) row.warehouseCode = body.warehouseCode;

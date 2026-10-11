@@ -96,7 +96,7 @@ async function queueInventoryPushes(tenantId, userId, masterSkuId, onlyChannels)
 }
 
 async function pushShopify(tenantId, masterSkuId, qty, deps) {
-  const creds = credsOf(await getConnection(tenantId, 'shopify'));
+  const creds = await require('./shopifyAuth.service').shopifyCreds(tenantId);
   const mapping = qty.mappings.find((row) => row.channel === 'shopify');
   if (!mapping) {
     const err = new Error('Shopify stock was not pushed. This Master SKU has no synced Shopify listing.');
@@ -113,7 +113,7 @@ async function pushShopify(tenantId, masterSkuId, qty, deps) {
 }
 
 async function pullShopifyMaster(tenantId, userId, masterSkuId, qty, deps) {
-  const creds = credsOf(await getConnection(tenantId, 'shopify'));
+  const creds = await require('./shopifyAuth.service').shopifyCreds(tenantId);
   const mapping = qty.mappings.find((row) => row.channel === 'shopify');
   const location = qty.shopify.find((row) => row.primary) || qty.shopify[0];
   if (!mapping || !location) {

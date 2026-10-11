@@ -6,6 +6,7 @@ const {
 } = require('../services/channelConnection.service');
 const { pingChannel } = require('../services/channelPing.service');
 const shopify = require('../adapters/shopify');
+const { shopifyCreds } = require('../services/shopifyAuth.service');
 const { recordFromReq } = require('../services/auditLog.service');
 
 function channelSnap(dto) {
@@ -81,32 +82,39 @@ async function testConnection(req, res) {
   const row = await getConnection(tenantId, channel);
   if (!row) throw new HttpError(404, 'Save credentials first');
   let result;
+  let current = row;
   try {
-    result = await pingChannel(channel, credsOf(row));
+    if (channel === 'shopify') {
+      await shopifyCreds(tenantId);
+      current = await getConnection(tenantId, channel);
+    }
+    result = await pingChannel(channel, credsOf(current));
   } catch (err) {
     result = { ok: false, message: err.message || 'Network error' };
   }
-  const before = channelSnap(toDto(row));
-  await recordTest(row, result);
+  const before = channelSnap(toDto(current));
+  await recordTest(current, result);
   await recordFromReq(req, {
     tenantId,
     action: 'channel.tested',
     resourceType: 'channels',
-    resourceId: row._id,
+    resourceId: current._id,
     resourceDisplay: channel,
     before,
-    after: channelSnap(toDto(row)),
+    after: channelSnap(toDto(current)),
   });
-  return successResponse(res, { ...toDto(row), ok: result.ok, incomplete: Boolean(result.incomplete) }, result.message);
+  return successResponse(res, { ...toDto(current), ok: result.ok, incomplete: Boolean(result.incomplete) }, result.message);
 }
 
 async function listShopifyVendors(req, res) {
   const tenantId = merchantTenant(req);
   const row = await getConnection(tenantId, 'shopify');
-  if (!row) throw new HttpError(400, 'Save the Shopify shop URL and Admin API token in Settings → Channel Connections first');
+  if (!row || !shopify.hasShopifyAuth(credsOf(row))) {
+    throw new HttpError(400, 'Save the Shopify shop URL and Client ID plus API secret in Settings → Channel Connections first');
+  }
   let names;
   try {
-    names = await shopify.listProductVendors(credsOf(row));
+    names = await shopify.listProductVendors(await shopifyCreds(tenantId));
   } catch (err) {
     throw new HttpError(err.statusCode || 502, err.message || 'Could not fetch Shopify vendors');
   }

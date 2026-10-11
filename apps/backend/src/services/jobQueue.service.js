@@ -231,7 +231,10 @@ function filled(value) {
 }
 
 function keysReady(channel, creds) {
-  if (channel === 'shopify') return Boolean(filled(creds?.shopUrl) && filled(creds?.adminToken));
+  if (channel === 'shopify') {
+    const shop = filled(String(creds?.shopUrl || '').replace(/^https?:\/\//, '').replace(/\/.*$/, ''));
+    return Boolean(shop && (filled(creds?.adminToken) || (filled(creds?.clientId) && filled(creds?.apiSecret))));
+  }
   if (channel === 'myntra') return Boolean(filled(creds?.merchantId) && filled(creds?.secretKey));
   if (channel === 'amazon') {
     return Boolean(filled(creds?.sellerId) && filled(creds?.refreshToken) && filled(creds?.lwaClientId) && filled(creds?.lwaClientSecret));
@@ -276,7 +279,7 @@ async function pullLiveOrders(job) {
   if (job.channel === 'shopify') {
     const shopify = require('../adapters/shopify');
     const { ingestChannelOrders } = require('./channelOrder.service');
-    const creds = credsOf(await getConnection(job.tenantId, 'shopify'));
+    const creds = await require('./shopifyAuth.service').shopifyCreds(job.tenantId);
     const orders = await shopify.pullOrders(creds);
     const done = new Set((job.payload?.appliedExternalIds || []).map((id) => String(id)));
     const res = { fetched: orders.length, created: 0, updated: 0, unchanged: 0 };

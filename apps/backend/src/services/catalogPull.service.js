@@ -14,7 +14,7 @@ const partner = require('../adapters/partner');
 const MYNTRA_CATALOG_MESSAGE = 'Myntra catalog was not pulled. Merchant Id and Secret Key are missing, so the product list API was not called.';
 
 function blockMessage(channel, creds = {}) {
-  if (channel === 'shopify' && !(shopify.shopOf(creds) && creds.adminToken)) {
+  if (channel === 'shopify' && !shopify.hasShopifyAuth(creds)) {
     return 'Shopify catalog was not pulled. Shop URL and Admin API token are missing, so the products API was not called.';
   }
   if (channel === 'amazon' && !(creds.sellerId && creds.refreshToken && creds.lwaClientId && creds.lwaClientSecret)) {
@@ -92,7 +92,9 @@ async function ingestPulledCatalog(tenantId, userId, channel, { rows = [], locat
 async function pullChannel(tenantId, userId, channel, deps = {}) {
   const name = String(channel || '').toLowerCase();
   const row = await getConnection(tenantId, name);
-  const creds = row ? credsOf(row) : {};
+  const creds = name === 'shopify' && row
+    ? await require('./shopifyAuth.service').shopifyCreds(tenantId)
+    : (row ? credsOf(row) : {});
   const blocked = blockMessage(name, creds);
   if (blocked) throw new HttpError(400, blocked);
   if (name === 'shopify') {

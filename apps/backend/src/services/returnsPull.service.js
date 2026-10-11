@@ -5,7 +5,9 @@ const { getConnection, credsOf } = require('./channelConnection.service');
 const { ingestReturns } = require('./returnsFlow.service');
 
 async function pullChannelReturns(tenantId, channel, deps = {}) {
-  const creds = credsOf(await getConnection(tenantId, channel));
+  const creds = channel === 'shopify'
+    ? await require('./shopifyAuth.service').shopifyCreds(tenantId, { request: deps.tokenRequest })
+    : credsOf(await getConnection(tenantId, channel));
   let rows = [];
   if (channel === 'shopify') {
     rows = await shopify.pullReturns(creds, { request: deps.shopifyRequest });

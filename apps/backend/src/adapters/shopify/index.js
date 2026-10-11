@@ -19,6 +19,58 @@ function shopOf(creds) {
   return shopHost(creds?.shopUrl);
 }
 
+const TOKEN_REFRESH_BUFFER_MS = 60 * 60 * 1000;
+
+function hasShopifyAuth(creds) {
+  const shop = shopOf(creds);
+  if (!shop) return false;
+  if (String(creds?.adminToken || '').trim()) return true;
+  return Boolean(String(creds?.clientId || '').trim() && String(creds?.apiSecret || '').trim());
+}
+
+function tokenFresh(creds, now) {
+  const token = String(creds?.adminToken || '').trim();
+  if (!token) return false;
+  if (!creds?.tokenExpiresAt) return true;
+  const exp = new Date(creds.tokenExpiresAt).getTime();
+  if (Number.isNaN(exp)) return true;
+  return exp - TOKEN_REFRESH_BUFFER_MS > now;
+}
+
+async function ensureShopifyCreds(creds, opts = {}) {
+  const now = opts.now == null ? Date.now() : new Date(opts.now).getTime();
+  if (tokenFresh(creds, now)) return creds;
+  const shop = shopOf(creds);
+  const clientId = String(creds?.clientId || '').trim();
+  const secret = String(creds?.apiSecret || '').trim();
+  if (!shop || !clientId || !secret) return creds;
+  const http = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: secret,
+  }).toString();
+  const res = await http('POST', `https://${shop}/admin/oauth/access_token`, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body,
+  });
+  let parsed = {};
+  try { parsed = JSON.parse(res.text || '{}'); } catch { parsed = {}; }
+  const access = String(parsed.access_token || '').trim();
+  if (!res || res.status < 200 || res.status >= 300 || !access) {
+    const err = new Error('Shopify did not issue an Admin API token. Check the shop URL, Client ID, and API secret, and that the app is installed on the store.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const seconds = Number(parsed.expires_in) > 0 ? Number(parsed.expires_in) : 86400;
+  return {
+    ...creds,
+    adminToken: access,
+    tokenExpiresAt: new Date(now + seconds * 1000).toISOString(),
+  };
+}
+
 function verify({ rawBody, headers, creds }) {
   return verifyHmac({ rawBody, headers, secret: secretOf(creds) });
 }
@@ -118,15 +170,16 @@ function nextPage(linkHeader) {
   return '';
 }
 
-async function listProductVendors(creds) {
-  const shop = shopOf(creds);
-  const token = String(creds?.adminToken || '').trim();
+async function listProductVendors(creds, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const shop = shopOf(ready);
+  const token = String(ready?.adminToken || '').trim();
   if (!shop || !token) {
     const err = new Error('Save the Shopify shop URL and Admin API token in Settings → Channel Connections first');
     err.statusCode = 400;
     throw err;
   }
-  const request = gatedRequest(creds, undefined, httpGet, { allowSandbox: true });
+  const request = gatedRequest(ready, undefined, httpGet, { allowSandbox: true });
   const names = new Set();
   let url = `https://${shop}/admin/api/2024-10/products.json?fields=vendor&limit=250`;
   for (let page = 0; page < 4 && url; page += 1) {
@@ -180,14 +233,15 @@ function variantRows(product) {
 }
 
 async function pullCatalog(creds, opts = {}) {
-  const shop = shopOf(creds);
-  const token = String(creds?.adminToken || '').trim();
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const shop = shopOf(ready);
+  const token = String(ready?.adminToken || '').trim();
   if (!shop || !token) {
     const err = new Error('Shopify catalog was not pulled. Shop URL and Admin API token are missing, so the products API was not called.');
     err.statusCode = 400;
     throw err;
   }
-  const request = gatedRequest(creds, opts.request, httpGet, { allowSandbox: true });
+  const request = gatedRequest(ready, opts.request, httpGet, { allowSandbox: true });
   const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
   const products = [];
   let url = `https://${shop}/admin/api/2024-10/products.json?limit=250`;
@@ -262,8 +316,9 @@ async function inventoryItemId(shop, token, variantId, request) {
 
 async function pushInventory(creds, opts = {}) {
   const rows = opts.rows || [];
-  const { shop, token } = requireShop(creds);
-  const request = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
   const sent = [];
   for (const row of rows) {
     const locationId = String(row.locationId || '');
@@ -292,8 +347,9 @@ async function pushInventory(creds, opts = {}) {
 
 async function readLocationAvailable(creds, opts = {}) {
   const { variantId, locationId } = opts;
-  const { shop, token } = requireShop(creds);
-  const request = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
   if (!locationId || String(locationId).startsWith('shopify-location-')) {
     const err = new Error('Shopify location qty was not read. Location A is still a placeholder.');
     err.statusCode = 400;
@@ -320,8 +376,9 @@ async function readLocationAvailable(creds, opts = {}) {
 
 async function fulfillOrder(creds, opts = {}) {
   const { orderId, trackingNumber } = opts;
-  const { shop, token } = requireShop(creds);
-  const request = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
   const headers = shopifyHeaders(token);
   const listed = await request('GET', `https://${shop}/admin/api/2024-10/orders/${encodeURIComponent(orderId)}/fulfillment_orders.json`, { headers });
   if (listed.status < 200 || listed.status >= 300) {
@@ -357,8 +414,9 @@ async function fulfillOrder(creds, opts = {}) {
 
 async function cancelFulfillment(creds, opts = {}) {
   const { fulfillmentId } = opts;
-  const { shop, token } = requireShop(creds);
-  const request = gatedRequest(creds, opts.request, httpCall, { allowSandbox: true });
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
   const res = await request('POST', `https://${shop}/admin/api/2024-10/fulfillments/${encodeURIComponent(fulfillmentId)}/cancel.json`, {
     headers: shopifyHeaders(token),
   });
@@ -426,16 +484,17 @@ function mapShopifyOrder(order, creds) {
 }
 
 async function pullOrders(creds, opts = {}) {
-  const shop = shopOf(creds);
-  const token = String(creds?.adminToken || '').trim();
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const shop = shopOf(ready);
+  const token = String(ready?.adminToken || '').trim();
   if (!shop || !token) {
     const err = new Error('Shopify orders were not pulled. Shop URL and Admin API token are missing, so the orders API was not called.');
     err.statusCode = 400;
     err.terminal = true;
     throw err;
   }
-  const request = gatedRequest(creds, opts.request, httpGet, { allowSandbox: true });
-  const since = creds?.importOrdersFrom ? new Date(creds.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
+  const request = gatedRequest(ready, opts.request, httpGet, { allowSandbox: true });
+  const since = ready?.importOrdersFrom ? new Date(ready.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
   const created = Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 864e5) : since;
   const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
   const orders = [];
@@ -455,7 +514,7 @@ async function pullOrders(creds, opts = {}) {
     }
     const body = JSON.parse(res.text || '{}');
     (body.orders || []).forEach((order) => {
-      const mapped = mapShopifyOrder(order, creds);
+      const mapped = mapShopifyOrder(order, ready);
       if (mapped) orders.push(mapped);
     });
     url = nextPage(res.headers?.link || res.headers?.Link);
@@ -492,16 +551,17 @@ function returnRowsFromOrders(orders) {
 }
 
 async function pullReturns(creds, opts = {}) {
-  const shop = shopOf(creds);
-  const token = String(creds?.adminToken || '').trim();
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const shop = shopOf(ready);
+  const token = String(ready?.adminToken || '').trim();
   if (!shop || !token) {
     const err = new Error('Shopify returns were not pulled. Shop URL and Admin API token are missing, so the orders API was not called.');
     err.statusCode = 400;
     err.terminal = true;
     throw err;
   }
-  const request = gatedRequest(creds, opts.request, httpGet, { allowSandbox: true });
-  const since = creds?.importOrdersFrom ? new Date(creds.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
+  const request = gatedRequest(ready, opts.request, httpGet, { allowSandbox: true });
+  const since = ready?.importOrdersFrom ? new Date(ready.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
   const updated = Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 864e5) : since;
   const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
   const orders = [];
@@ -530,6 +590,8 @@ module.exports = {
   channel: 'shopify',
   secretOf,
   shopOf,
+  hasShopifyAuth,
+  ensureShopifyCreds,
   verify,
   eventId,
   shopHint,
