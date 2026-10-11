@@ -1,16 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import api from '../../lib/api';
-import useOrderStore from '../../stores/orderStore';
+import api, { apiError } from '../../lib/api';
 import useAuthStore from '../../stores/authStore';
+import useChannelStore from '../../stores/channelStore';
 import { formatINR, statusBadgeVariant } from '../../utils/format';
-import {
-  netSales, salesByChannel, statusCounts, ordersTrend, topSkus, isCancelled, relativeTime,
-} from '../../lib/orderMetrics';
+import { relativeTime } from '../../lib/orderMetrics';
 import { orderChannelLabel } from '../../constants/channelCatalog';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import KpiCard from '../../components/ui/KpiCard';
@@ -29,78 +27,73 @@ const COLORS = ['#7C3AED', '#D97706', '#2563EB', '#10B981', '#F43F5E', '#64748B'
 const CHANNEL_STROKES = ['#7C3AED', '#D97706', '#2563EB', '#059669', '#DB2777', '#0891B2', '#CA8A04'];
 
 const STATUS_TABS = ['all', 'New', 'Processing', 'Pending', 'Dispatched', 'Delivered'];
-const AWAITING_DISPATCH = ['Processing', 'Packed', 'Ready to Ship'];
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
   const [range, setRange] = useState('all');
-  const orders = useOrderStore((s) => s.orders);
-  const loaded = useOrderStore((s) => s.loaded);
-  const loadError = useOrderStore((s) => s.error);
-  const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const tenantName = useAuthStore((s) => s.user?.tenantName || '');
+  const statusError = useChannelStore((s) => s.statusError);
   const [lowStock, setLowStock] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const connected = useConnectedChannels();
-
-  useEffect(() => {
-    hydrateFromApi();
-    api.get('/inventory/alerts').then(({ data }) => setLowStock(data.data || [])).catch(() => setLowStock([]));
-    api.get('/integrations/jobs').then(({ data }) => setJobs((data.data || []).slice(0, 6))).catch(() => setJobs([]));
-  }, [hydrateFromApi]);
 
   const trendChannels = channelFilter === 'all'
     ? connected.channels
     : connected.channels.filter((channel) => orderChannelLabel(channel) === channelFilter);
-  const channelLabels = channelFilter === 'all' ? connected.labels : connected.labels.filter((label) => label === channelFilter);
-  const trendDays = range === 'all' ? 14 : Number(range);
+  const channelKey = connected.labels.join(',');
+  const trendKey = trendChannels.map((channel) => `${channel.id}:${orderChannelLabel(channel)}`).join(',');
 
-  const filteredOrders = useMemo(() => {
-    const start = range === 'all' ? 0 : Date.now() - Number(range) * 86400000;
-    return orders.filter((order) => {
-      if (channelFilter !== 'all' && order.channel !== channelFilter) return false;
-      if (!start) return true;
-      const time = new Date(order.createdAt || 0).getTime();
-      return Number.isFinite(time) && time >= start;
+  useEffect(() => {
+    api.get('/inventory/alerts').then(({ data }) => setLowStock(data.data || [])).catch(() => setLowStock([]));
+    api.get('/integrations/jobs').then(({ data }) => setJobs((data.data || []).slice(0, 6))).catch(() => setJobs([]));
+  }, []);
+
+  useEffect(() => {
+    if (!connected.loaded) return undefined;
+    let cancel = false;
+    api.get('/orders/summary', {
+      params: {
+        connected: statusError ? undefined : (channelKey || '__none__'),
+        channelIds: trendChannels.map((channel) => channel.id).join(','),
+        channelLabels: trendChannels.map((channel) => orderChannelLabel(channel)).join(','),
+        channel: channelFilter,
+        days: range,
+        tzOffset: new Date().getTimezoneOffset(),
+      },
+    }).then(({ data }) => {
+      if (cancel) return;
+      setSummary(data.data || null);
+      setLoadError('');
+    }).catch((err) => {
+      if (!cancel) setLoadError(apiError(err, 'Could not load dashboard'));
     });
-  }, [orders, channelFilter, range]);
+    return () => { cancel = true; };
+  }, [connected.loaded, channelKey, trendKey, channelFilter, range, statusError]);
 
-  const stats = useMemo(() => {
-    const live = filteredOrders.filter((order) => !isCancelled(order));
-    return {
-      newOrders: filteredOrders.filter((order) => order.status === 'New').length,
-      shipping: filteredOrders.filter((order) => AWAITING_DISPATCH.includes(order.status)).length,
-      returns: filteredOrders.filter((order) => order.reversePickup?.returnId).length,
-      missingInvoice: live.filter((order) => ['Dispatched', 'Delivered'].includes(order.status) && !order.invoiceNo).length,
-      revenue: netSales(filteredOrders),
-      channels: salesByChannel(filteredOrders, channelLabels),
-      statuses: statusCounts(filteredOrders),
-      trend: ordersTrend(filteredOrders, trendDays, trendChannels),
-      top: topSkus(filteredOrders, 5),
-    };
-  }, [filteredOrders, channelLabels, trendChannels, trendDays]);
-
-  const pendingPulse = (order) => order.status === 'Pending'
-    || (order.subOrders || []).some((sub) => sub.vendorStatus === 'Pending Acceptance');
-
-  const recentOrders = useMemo(() => [...filteredOrders]
-    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-    .filter((order) => {
-      if (activeTab === 'all') return true;
-      if (activeTab === 'Pending') return pendingPulse(order);
-      return order.status === activeTab;
-    })
-    .slice(0, 5), [filteredOrders, activeTab]);
-
-  const pulseCount = (tab) => {
-    if (tab === 'all') return filteredOrders.length;
-    if (tab === 'Pending') return filteredOrders.filter(pendingPulse).length;
-    return filteredOrders.filter((order) => order.status === tab).length;
+  const stats = summary && {
+    newOrders: summary.newOrders,
+    shipping: summary.awaitingDispatch,
+    returns: summary.returns,
+    missingInvoice: summary.missingInvoice,
+    revenue: summary.revenue,
+    channels: summary.channels || [],
+    statuses: summary.statuses || [],
+    trend: summary.trend || [],
+    top: summary.top || [],
   };
+  const orderCount = summary?.total || 0;
+  const recentOrders = summary?.recent?.[activeTab] || [];
+  const pulseCount = (tab) => summary?.counts?.[tab] || 0;
 
-  if (!loaded) return <PageLoader label="Loading dashboard..." />;
+  if (!summary) {
+    return loadError
+      ? <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>
+      : <PageLoader label="Loading dashboard..." />;
+  }
 
   return (
     <div className="space-y-3">
@@ -108,7 +101,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold">Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            {tenantName ? `${tenantName} · ` : ''}{filteredOrders.length} orders from connected channels
+            {tenantName ? `${tenantName} · ` : ''}{orderCount} orders from connected channels
           </p>
         </div>
         <div className="flex flex-wrap items-end justify-end gap-2">
@@ -160,10 +153,10 @@ export default function DashboardPage() {
         <KpiCard label="Low Stock" value={lowStock.length} icon={Clock} tone="slate" onClick={() => navigate('/inventory')} />
       </div>
 
-      {filteredOrders.length === 0 ? (
+      {orderCount === 0 ? (
         <EmptyState
-          title={orders.length ? 'Nothing in this filter' : 'No orders yet'}
-          description={orders.length ? 'Choose another channel or period.' : 'Connect a channel and run Sync Orders on the Orders page.'}
+          title={channelFilter !== 'all' || range !== 'all' ? 'Nothing in this filter' : 'No orders yet'}
+          description={channelFilter !== 'all' || range !== 'all' ? 'Choose another channel or period.' : 'Connect a channel and run Sync Orders on the Orders page.'}
         />
       ) : (
         <>

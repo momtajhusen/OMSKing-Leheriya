@@ -4,8 +4,9 @@ const { successResponse, paginatedResponse } = require('../utils/response');
 const { pageOf } = require('../utils/page');
 const { merchantTenant } = require('./products.controller');
 const { toOrderDto } = require('../lib/orderDto');
-const { imagesBySku, paintOrder } = require('../lib/catalogImages');
-const { applyDeskRules, stockPools } = require('../services/orderDesk.service');
+const { imagesBySku, imageForSku, paintOrder } = require('../lib/catalogImages');
+const { applyDeskRules, stockPools, OPEN } = require('../services/orderDesk.service');
+const { buildOrderSummary } = require('../services/orderSummary.service');
 const { vendorContact, labelHtml, invoiceHtml, deliveryStatusFor, escapeHtml } = require('../lib/orderSubOrders');
 const { vendorByName, scopedVendorNames } = require('./vendors.controller');
 const { recordFromReq } = require('../services/auditLog.service');
@@ -48,7 +49,11 @@ async function loadOrders(tenantId, vendorNames = null) {
   if (vendorNames) {
     filter['subOrders.assignedVendor'] = { $in: vendorNames.map((n) => new RegExp(`^${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) };
   }
-  return Order.find(filter).sort({ orderDate: -1, createdAt: -1 }).setOptions({ skipTenantFilter: true });
+  return Order.find(filter)
+    .select('-sourceOrderData')
+    .sort({ orderDate: -1, createdAt: -1 })
+    .lean()
+    .setOptions({ skipTenantFilter: true });
 }
 
 async function findMaster(tenantId, rawId) {
@@ -82,19 +87,46 @@ async function withScans(tenantId, orders) {
   return orders.map((order) => ({ ...order, trackingScan: byNo.get(order.id) || null }));
 }
 
-async function decorateOrders(tenantId, docs) {
-  const [pools, bySku] = await Promise.all([stockPools(tenantId), imagesBySku(tenantId)]);
-  const painted = applyDeskRules(docs.map((doc) => toOrderDto(doc)), pools).map((order) => paintOrder(order, bySku));
+async function deskOrders(tenantId, docs) {
+  const pools = await stockPools(tenantId);
+  return applyDeskRules((docs || []).map((doc) => toOrderDto(doc)), pools);
+}
+
+function imageKeys(orders) {
+  const keys = [];
+  (orders || []).forEach((order) => {
+    (order.items || []).forEach((item) => keys.push(item.sku, item.name));
+    (order.subOrders || []).forEach((sub) => keys.push(sub.sku, sub.title));
+    (order.channelLines || []).forEach((line) => keys.push(line.sku));
+  });
+  return keys;
+}
+
+async function presentOrders(tenantId, orders) {
+  const bySku = await imagesBySku(tenantId, imageKeys(orders));
+  const painted = (orders || []).map((order) => paintOrder(order, bySku));
   return withScans(tenantId, painted);
 }
 
+async function decorateOrders(tenantId, docs) {
+  return presentOrders(tenantId, await deskOrders(tenantId, docs));
+}
+
 async function decorateOne(tenantId, doc) {
-  const rows = await loadOrders(tenantId);
-  const replaced = rows.some((row) => String(row._id) === String(doc._id))
-    ? rows.map((row) => (String(row._id) === String(doc._id) ? doc : row))
-    : [doc, ...rows];
-  const decorated = await decorateOrders(tenantId, replaced);
-  return decorated.find((row) => row.id === doc.orderNo) || decorated[0];
+  const target = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+  const open = await Order.find({
+    tenantId,
+    status: { $in: [...OPEN] },
+  }).select('-sourceOrderData').lean().setOptions({ skipTenantFilter: true });
+  const id = String(target._id);
+  const rows = open.some((row) => String(row._id) === id)
+    ? open.map((row) => (String(row._id) === id ? target : row))
+    : [target, ...open];
+  const desk = await deskOrders(tenantId, rows);
+  const mine = desk.find((row) => row.id === target.orderNo) || desk[0];
+  if (!mine) return toOrderDto(target);
+  const [painted] = await presentOrders(tenantId, [mine]);
+  return painted;
 }
 
 async function listOrders(req, res) {
@@ -102,7 +134,7 @@ async function listOrders(req, res) {
   const names = await vendorNamesFor(req, tenantId);
   if (names && !names.length) return paginatedResponse(res, [], 1, 25, 0, 'Orders', { counts: { total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0 } });
   const rows = await loadOrders(tenantId, names);
-  const data = (await decorateOrders(tenantId, rows)).map((row) => scopeToVendor(row, names));
+  const data = (await deskOrders(tenantId, rows)).map((row) => scopeToVendor(row, names));
   let scoped = data;
   if (req.query.connected != null && String(req.query.connected) !== '') {
     const allowed = new Set(String(req.query.connected).split(',').map((name) => name.trim()).filter(Boolean));
@@ -135,7 +167,40 @@ async function listOrders(req, res) {
       || String(row.customer || '').toLowerCase().includes(q));
   }
   const paged = pageOf(filtered, req.query);
-  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Orders', { counts });
+  const presented = await presentOrders(tenantId, paged.rows);
+  return paginatedResponse(res, presented, paged.page, paged.limit, paged.total, 'Orders', { counts });
+}
+
+async function orderSummary(req, res) {
+  const tenantId = merchantTenant(req);
+  const names = await vendorNamesFor(req, tenantId);
+  const empty = buildOrderSummary([], {
+    channel: req.query.channel || 'all',
+    days: req.query.days || 'all',
+    tzOffset: req.query.tzOffset,
+  });
+  if (names && !names.length) return successResponse(res, empty, 'Order summary');
+  const rows = await loadOrders(tenantId, names);
+  let data = (await deskOrders(tenantId, rows)).map((row) => scopeToVendor(row, names));
+  if (req.query.connected != null && String(req.query.connected) !== '') {
+    const allowed = new Set(String(req.query.connected).split(',').map((name) => name.trim()).filter(Boolean));
+    data = data.filter((row) => allowed.has(row.channel));
+  }
+  const ids = String(req.query.channelIds || '').split(',').map((item) => item.trim()).filter(Boolean);
+  const labels = String(req.query.channelLabels || '').split(',').map((item) => item.trim()).filter(Boolean);
+  const series = ids.map((id, index) => ({ id, label: labels[index] || id }));
+  const summary = buildOrderSummary(data, {
+    channel: req.query.channel || 'all',
+    days: req.query.days || 'all',
+    series,
+    tzOffset: req.query.tzOffset,
+  });
+  const bySku = await imagesBySku(tenantId, summary.top.flatMap((row) => [row.sku, row.name]));
+  summary.top = summary.top.map((row) => ({
+    ...row,
+    imageUrl: row.imageUrl || imageForSku(bySku, row.sku) || imageForSku(bySku, row.name) || '',
+  }));
+  return successResponse(res, summary, 'Order summary');
 }
 
 async function getOrder(req, res) {
@@ -511,5 +576,5 @@ async function bookBulkLabels(req, res) {
 }
 
 module.exports = {
-  listOrders, getOrder, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, vendorUpdate, patchStatus, bookReverse, bookBulkLabels, shipOrder, closeManifest, shippingReadiness,
+  listOrders, orderSummary, getOrder, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, vendorUpdate, patchStatus, bookReverse, bookBulkLabels, shipOrder, closeManifest, shippingReadiness,
 };

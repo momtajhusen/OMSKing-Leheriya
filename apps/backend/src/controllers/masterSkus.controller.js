@@ -2,7 +2,7 @@ const MasterSku = require('../models/MasterSku');
 const SkuMapping = require('../models/SkuMapping');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
-const { pageOf } = require('../utils/page');
+const { pageOf, pageRequest, escapeRegex } = require('../utils/page');
 const { generateMasterCode, normalizeSkuCode, assertHsnCode } = require('../services/skuIdentity.service');
 const { mapMaster } = require('../services/catalogMapping.service');
 const { merchantTenant } = require('./products.controller');
@@ -21,31 +21,53 @@ function skuSnap(sku) {
   };
 }
 
+async function masterRows(tenantId, rows) {
+  const ids = rows.map((row) => row._id);
+  const maps = ids.length
+    ? await SkuMapping.find({ tenantId, masterSkuId: { $in: ids } }).setOptions({ skipTenantFilter: true })
+    : [];
+  const bySku = {};
+  maps.forEach((row) => {
+    const key = String(row.masterSkuId);
+    bySku[key] = bySku[key] || [];
+    bySku[key].push(row);
+  });
+  return rows.map((row) => mapMaster(row, bySku[String(row._id)] || []));
+}
+
+function masterFilter(tenantId, q) {
+  const filter = { tenantId };
+  const text = String(q || '').trim();
+  if (!text) return filter;
+  const rx = new RegExp(escapeRegex(text), 'i');
+  filter.$or = [{ code: rx }, { name: rx }, { barcode: rx }];
+  return filter;
+}
+
 async function listMasterSkus(req, res) {
   const tenantId = merchantTenant(req);
-  const q = String(req.query.q || '').toLowerCase();
-  const rows = await MasterSku.find({ tenantId })
-    .populate('productId')
-    .sort({ createdAt: -1 })
-    .setOptions({ skipTenantFilter: true });
-  const ids = rows.map((r) => r._id);
-  const maps = await SkuMapping.find({ tenantId, masterSkuId: { $in: ids } }).setOptions({ skipTenantFilter: true });
-  const bySku = {};
-  maps.forEach((m) => {
-    const key = String(m.masterSkuId);
-    bySku[key] = bySku[key] || [];
-    bySku[key].push(m);
-  });
-  let data = rows.map((r) => mapMaster(r, bySku[String(r._id)] || []));
-  if (q) {
-    data = data.filter((s) =>
-      s.code.toLowerCase().includes(q)
-      || s.name.toLowerCase().includes(q)
-      || (s.barcode || '').toLowerCase().includes(q)
-    );
+  const filter = masterFilter(tenantId, req.query.q);
+  const paging = pageRequest(req.query);
+  if (!paging) {
+    const rows = await MasterSku.find(filter)
+      .populate('productId')
+      .sort({ createdAt: -1 })
+      .setOptions({ skipTenantFilter: true });
+    const data = await masterRows(tenantId, rows);
+    const paged = pageOf(data, req.query);
+    return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Master SKUs');
   }
-  const paged = pageOf(data, req.query);
-  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Master SKUs');
+  const [total, rows] = await Promise.all([
+    MasterSku.countDocuments(filter).setOptions({ skipTenantFilter: true }),
+    MasterSku.find(filter)
+      .populate('productId')
+      .sort({ createdAt: -1 })
+      .skip(paging.skip)
+      .limit(paging.limit)
+      .setOptions({ skipTenantFilter: true }),
+  ]);
+  const data = await masterRows(tenantId, rows);
+  return paginatedResponse(res, data, paging.page, paging.limit, total, 'Master SKUs');
 }
 
 async function createMasterSku(req, res) {

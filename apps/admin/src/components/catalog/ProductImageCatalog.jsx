@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import api from '../../lib/api';
+import { useLocation } from 'react-router-dom';
 import useOrderStore from '../../stores/orderStore';
-import useProductImageStore from '../../lib/productImageStore';
+import useProductImageStore, { pageShowsProductPhotos } from '../../lib/productImageStore';
 
 function pairsFromOrders(orders) {
   const pairs = [];
@@ -24,46 +24,13 @@ function pairsFromOrders(orders) {
 export default function ProductImageCatalog() {
   const remember = useProductImageStore((state) => state.remember);
   const orders = useOrderStore((state) => state.orders);
-  const hydrateFromApi = useOrderStore((state) => state.hydrateFromApi);
+  const { pathname } = useLocation();
+  const showPhotos = pageShowsProductPhotos(pathname);
 
   useEffect(() => {
-    hydrateFromApi();
-  }, [hydrateFromApi]);
-
-  useEffect(() => {
+    if (!showPhotos) return;
     remember(pairsFromOrders(orders));
-  }, [orders, remember]);
-
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      const pairs = [];
-      try {
-        const { data } = await api.get('/products');
-        for (const product of data.data || []) {
-          const url = (product.images || [])[0];
-          pairs.push([product.name, url]);
-          for (const variant of product.variants || []) {
-            pairs.push([variant.code, url]);
-            pairs.push([variant.name, url]);
-          }
-        }
-      } catch {
-        // This role cannot open the catalog. Order lines still fill the index.
-      }
-      try {
-        const { data } = await api.get('/master-skus');
-        for (const sku of data.data || []) {
-          pairs.push([sku.code, sku.imageUrl]);
-          pairs.push([sku.name, sku.imageUrl]);
-        }
-      } catch {
-        // Vendor stock uses the order lines already loaded.
-      }
-      if (!cancel) remember(pairs);
-    })();
-    return () => { cancel = true; };
-  }, [remember]);
+  }, [orders, remember, showPhotos]);
 
   return null;
 }

@@ -31,15 +31,18 @@ function imageForSku(bySku, sku) {
   return '';
 }
 
-async function imagesBySku(tenantId) {
-  const [products, masters, mappings] = await Promise.all([
-    Product.find({ tenantId }).select('images').setOptions({ skipTenantFilter: true }).lean(),
-    MasterSku.find({ tenantId }).select('code productId').setOptions({ skipTenantFilter: true }).lean(),
-    SkuMapping.find({ tenantId, masterSkuId: { $ne: null } })
-      .select('channelSkuCode channelVariantId masterSkuId')
-      .setOptions({ skipTenantFilter: true })
-      .lean(),
-  ]);
+function expandKeys(keys) {
+  const out = new Set();
+  (keys || []).forEach((raw) => {
+    const key = String(raw || '').trim();
+    if (!key || key.startsWith('id:')) return;
+    out.add(key);
+    if (key.length > 4 && /^[ma]/i.test(key)) out.add(key.slice(1));
+  });
+  return [...out];
+}
+
+function indexImages(products, masters, mappings) {
   const byProduct = new Map();
   products.forEach((product) => {
     const url = firstImage(product.images);
@@ -61,6 +64,51 @@ async function imagesBySku(tenantId) {
     remember(bySku, mapping.channelVariantId, url);
   });
   return bySku;
+}
+
+async function imagesForCatalog(tenantId) {
+  const [products, masters, mappings] = await Promise.all([
+    Product.find({ tenantId }).select('images').setOptions({ skipTenantFilter: true }).lean(),
+    MasterSku.find({ tenantId }).select('code productId').setOptions({ skipTenantFilter: true }).lean(),
+    SkuMapping.find({ tenantId, masterSkuId: { $ne: null } })
+      .select('channelSkuCode channelVariantId masterSkuId')
+      .setOptions({ skipTenantFilter: true })
+      .lean(),
+  ]);
+  return indexImages(products, masters, mappings);
+}
+
+async function imagesForKeys(tenantId, keys) {
+  const wanted = expandKeys(keys);
+  if (!wanted.length) return new Map();
+  const codes = [...new Set(wanted.map((key) => key.toUpperCase()))];
+  const norms = [...new Set(wanted.map((key) => key.toLowerCase()))];
+  const mappings = await SkuMapping.find({
+    tenantId,
+    masterSkuId: { $ne: null },
+    $or: [
+      { channelSkuCodeNorm: { $in: norms } },
+      { channelVariantId: { $in: wanted } },
+    ],
+  }).select('channelSkuCode channelVariantId masterSkuId').setOptions({ skipTenantFilter: true }).lean();
+  const masterIds = mappings.map((row) => row.masterSkuId).filter(Boolean);
+  const masters = await MasterSku.find({
+    tenantId,
+    $or: [
+      { code: { $in: codes } },
+      ...(masterIds.length ? [{ _id: { $in: masterIds } }] : []),
+    ],
+  }).select('code productId').setOptions({ skipTenantFilter: true }).lean();
+  const productIds = [...new Set(masters.map((row) => String(row.productId || '')).filter(Boolean))];
+  const products = productIds.length
+    ? await Product.find({ tenantId, _id: { $in: productIds } }).select('images').setOptions({ skipTenantFilter: true }).lean()
+    : [];
+  return indexImages(products, masters, mappings);
+}
+
+async function imagesBySku(tenantId, keys) {
+  if (Array.isArray(keys)) return imagesForKeys(tenantId, keys);
+  return imagesForCatalog(tenantId);
 }
 
 function withImage(row, bySku) {

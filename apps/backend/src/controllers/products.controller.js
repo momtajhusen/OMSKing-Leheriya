@@ -5,7 +5,7 @@ const Inventory = require('../models/Inventory');
 const InventoryReservation = require('../models/InventoryReservation');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
-const { pageOf } = require('../utils/page');
+const { pageRequest, escapeRegex } = require('../utils/page');
 const { sessionTenantId } = require('../lib/tenantAccess');
 const { generateMasterCode, assertHsnCode } = require('../services/skuIdentity.service');
 const { mapProduct, mapMaster } = require('../services/catalogMapping.service');
@@ -28,31 +28,61 @@ function merchantTenant(req) {
   return tenantId;
 }
 
+function productFilter(tenantId, q) {
+  const filter = { tenantId };
+  const text = String(q || '').trim();
+  if (!text) return filter;
+  const rx = new RegExp(escapeRegex(text), 'i');
+  filter.$or = [{ name: rx }, { hsnCode: rx }, { category: rx }, { brand: rx }];
+  return filter;
+}
+
 async function listProducts(req, res) {
   const tenantId = merchantTenant(req);
-  const q = String(req.query.q || '').toLowerCase();
-  const products = await Product.find({ tenantId }).sort({ createdAt: -1 }).setOptions({ skipTenantFilter: true });
-  const ids = products.map((p) => p._id);
-  const variants = await MasterSku.find({ tenantId, productId: { $in: ids } }).setOptions({ skipTenantFilter: true });
-  const byProduct = {};
-  variants.forEach((v) => {
-    const key = String(v.productId);
-    byProduct[key] = byProduct[key] || [];
-    byProduct[key].push(v);
-  });
-  let data = products.map((p) => mapProduct(p, byProduct[String(p._id)] || []));
-  if (q) {
-    data = data.filter((p) =>
-      p.name.toLowerCase().includes(q)
-      || (p.hsnCode || '').toLowerCase().includes(q)
-      || (p.category || '').toLowerCase().includes(q)
-      || (p.brand || '').toLowerCase().includes(q)
-    );
+  const filter = productFilter(tenantId, req.query.q);
+  const paging = pageRequest(req.query);
+  if (!paging) {
+    const products = await Product.find(filter).sort({ createdAt: -1 }).setOptions({ skipTenantFilter: true });
+    const ids = products.map((p) => p._id);
+    const variants = await MasterSku.find({ tenantId, productId: { $in: ids } }).setOptions({ skipTenantFilter: true });
+    const byProduct = {};
+    variants.forEach((v) => {
+      const key = String(v.productId);
+      byProduct[key] = byProduct[key] || [];
+      byProduct[key].push(v);
+    });
+    const data = products.map((p) => mapProduct(p, byProduct[String(p._id)] || []));
+    return paginatedResponse(res, data, 1, data.length || 25, data.length, 'Products', {
+      active: data.filter((row) => row.status === 'active').length,
+      variants: data.reduce((sum, row) => sum + (Number(row.variantCount) || 0), 0),
+    });
   }
-  const paged = pageOf(data, req.query);
-  return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'Products', {
-    active: data.filter((row) => row.status === 'active').length,
-    variants: data.reduce((sum, row) => sum + (Number(row.variantCount) || 0), 0),
+  const [total, active, matched, products] = await Promise.all([
+    Product.countDocuments(filter).setOptions({ skipTenantFilter: true }),
+    Product.countDocuments({ ...filter, status: 'active' }).setOptions({ skipTenantFilter: true }),
+    Product.find(filter).select('_id').setOptions({ skipTenantFilter: true }).lean(),
+    Product.find(filter).sort({ createdAt: -1 }).skip(paging.skip).limit(paging.limit).setOptions({ skipTenantFilter: true }),
+  ]);
+  const matchedIds = matched.map((row) => row._id);
+  const pageIds = products.map((row) => row._id);
+  const [variants, variantCount] = await Promise.all([
+    pageIds.length
+      ? MasterSku.find({ tenantId, productId: { $in: pageIds } }).setOptions({ skipTenantFilter: true })
+      : [],
+    matchedIds.length
+      ? MasterSku.countDocuments({ tenantId, productId: { $in: matchedIds } }).setOptions({ skipTenantFilter: true })
+      : 0,
+  ]);
+  const byProduct = {};
+  variants.forEach((variant) => {
+    const key = String(variant.productId);
+    byProduct[key] = byProduct[key] || [];
+    byProduct[key].push(variant);
+  });
+  const data = products.map((product) => mapProduct(product, byProduct[String(product._id)] || []));
+  return paginatedResponse(res, data, paging.page, paging.limit, total, 'Products', {
+    active,
+    variants: variantCount,
   });
 }
 

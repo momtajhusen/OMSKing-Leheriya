@@ -32,6 +32,8 @@ export default function SkuMappingPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [masterPage, setMasterPage] = useState(1);
+  const [masterTotal, setMasterTotal] = useState(0);
 
   const loadTab = async (tab, nextPage = page) => {
     if (tab === 'unlisted') {
@@ -52,11 +54,12 @@ export default function SkuMappingPage() {
       const [current, summary, skuRes] = await Promise.all([
         loadTab(tab, nextPage),
         api.get('/sku-mappings/summary', { params: { channel: unlistedChannel } }),
-        api.get('/master-skus'),
+        api.get('/master-skus', { params: { page: masterPage, limit: PAGE_SIZE } }),
       ]);
       setRows(current);
       setCounts(summary.data.data || counts);
       setMasters(skuRes.data.data || []);
+      setMasterTotal(skuRes.data.meta?.total || 0);
     } catch (err) {
       toast.error(apiError(err, 'Could not load mappings'));
     } finally {
@@ -64,7 +67,7 @@ export default function SkuMappingPage() {
     }
   };
 
-  useEffect(() => { load(activeTab, page); }, [page]);
+  useEffect(() => { load(activeTab, page); }, [page, masterPage]);
 
   const changeTab = (tab) => {
     setActiveTab(tab);
@@ -352,6 +355,7 @@ export default function SkuMappingPage() {
               </TableBody>
             </Table>
           )}
+          <Pagination page={masterPage} total={masterTotal} limit={PAGE_SIZE} onPage={setMasterPage} />
         </CardContent>
       </Card>
     </div>

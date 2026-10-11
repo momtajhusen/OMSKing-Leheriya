@@ -11,6 +11,14 @@ export function catalogPhoto(url) {
   return '';
 }
 
+/** Settings has no product photos. Skip the catalog fetch so that screen stays responsive. */
+export function pageShowsProductPhotos(pathname) {
+  const path = String(pathname || '');
+  if (path === '/settings' || path.startsWith('/settings/')) return false;
+  if (path === '/vendor/settings' || path.startsWith('/vendor/settings/')) return false;
+  return true;
+}
+
 export function findProductImage(byKey, ...keys) {
   const map = byKey || {};
   for (const raw of keys) {
@@ -29,17 +37,17 @@ export function findProductImage(byKey, ...keys) {
 const useProductImageStore = create((set, get) => ({
   byKey: {},
   remember(pairs) {
-    let map = get().byKey;
-    let changed = false;
+    const current = get().byKey;
+    let next = null;
     for (const [key, url] of pairs || []) {
       const norm = String(key || '').trim().toLowerCase();
       const photo = catalogPhoto(url);
-      if (!norm || !photo || catalogPhoto(map[norm]) === photo) continue;
-      if (catalogPhoto(map[norm])) continue;
-      map = { ...map, [norm]: photo };
-      changed = true;
+      if (!norm || !photo) continue;
+      if (catalogPhoto((next || current)[norm])) continue;
+      if (!next) next = { ...current };
+      next[norm] = photo;
     }
-    if (changed) set({ byKey: map });
+    if (next) set({ byKey: next });
   },
   clearCompany() {
     set({ byKey: {} });
