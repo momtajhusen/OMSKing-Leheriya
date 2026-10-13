@@ -22,6 +22,17 @@ const empty = {
   city: '',
 };
 
+const emptyPickup = {
+  id: '',
+  code: '',
+  line1: '',
+  city: '',
+  state: '',
+  pincode: '',
+  contactPerson: '',
+  contactPhone: '',
+};
+
 export default function WarehousesPage() {
   const navigate = useNavigate();
   const { canInventoryAdjust } = usePermissions();
@@ -30,6 +41,8 @@ export default function WarehousesPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(empty);
+  const [pickup, setPickup] = useState(null);
+  const [pickupForm, setPickupForm] = useState(emptyPickup);
   const [banner, setBanner] = useState('');
 
   const load = async () => {
@@ -51,6 +64,43 @@ export default function WarehousesPage() {
     () => rows.flatMap((wh) => (wh.locations || []).map((loc) => ({ ...loc, warehouse: wh.code, usedBy: wh.channels.join(', ') }))),
     [rows],
   );
+
+  const openPickup = (wh) => {
+    setBanner('');
+    setPickup(wh);
+    setPickupForm({
+      id: wh.id,
+      code: wh.code,
+      line1: wh.address?.line1 || '',
+      city: wh.address?.city || '',
+      state: wh.address?.state || '',
+      pincode: wh.address?.pincode || '',
+      contactPerson: wh.contactPerson || '',
+      contactPhone: wh.contactPhone || '',
+    });
+  };
+
+  const savePickup = async () => {
+    setBanner('');
+    try {
+      await api.patch(`/warehouses/${pickupForm.id}`, {
+        address: {
+          line1: pickupForm.line1,
+          city: pickupForm.city,
+          state: pickupForm.state,
+          pincode: pickupForm.pincode,
+        },
+        contactPerson: pickupForm.contactPerson,
+        contactPhone: pickupForm.contactPhone,
+        isPickup: true,
+      });
+      toast.success(`${pickupForm.code} pickup saved`);
+      setPickup(null);
+      load();
+    } catch (err) {
+      setBanner(apiFormError(err).message);
+    }
+  };
 
   const save = async () => {
     setBanner('');
@@ -121,6 +171,7 @@ export default function WarehousesPage() {
                   <TableHead>Visible on</TableHead>
                   <TableHead>Pickup</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -134,6 +185,11 @@ export default function WarehousesPage() {
                     <TableCell>{wh.channels.join(', ') || '—'}</TableCell>
                     <TableCell>{wh.isPickup ? 'Yes' : 'No'}</TableCell>
                     <TableCell>{wh.status}</TableCell>
+                    <TableCell>
+                      {wh.type === 'physical' && (
+                        <Button size="sm" variant="outline" onClick={() => openPickup(wh)}>Pickup address</Button>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -202,6 +258,49 @@ export default function WarehousesPage() {
           <div>
             <label className="text-sm font-medium">City</label>
             <Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(pickup)}
+        onOpenChange={(next) => { if (!next) setPickup(null); }}
+        title={`Pickup for ${pickupForm.code}`}
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => setPickup(null)}>Cancel</Button>
+            <Button onClick={savePickup}>Save pickup</Button>
+          </>
+        )}
+      >
+        <div className="space-y-3">
+          {banner && <FormBanner tone="error" title="Could not save">{banner}</FormBanner>}
+          <p className="text-sm text-muted-foreground">
+            Delhivery uses this street, pincode, and phone for the WH-001 pickup. It does not book a shipment.
+          </p>
+          <div>
+            <label className="text-sm font-medium">Street</label>
+            <Input value={pickupForm.line1} onChange={(e) => setPickupForm({ ...pickupForm, line1: e.target.value })} placeholder="Street address" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">City</label>
+            <Input value={pickupForm.city} onChange={(e) => setPickupForm({ ...pickupForm, city: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-sm font-medium">State</label>
+            <Input value={pickupForm.state} onChange={(e) => setPickupForm({ ...pickupForm, state: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Pincode</label>
+            <Input value={pickupForm.pincode} onChange={(e) => setPickupForm({ ...pickupForm, pincode: e.target.value })} placeholder="6 digit pincode" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Contact person</label>
+            <Input value={pickupForm.contactPerson} onChange={(e) => setPickupForm({ ...pickupForm, contactPerson: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Phone</label>
+            <Input value={pickupForm.contactPhone} onChange={(e) => setPickupForm({ ...pickupForm, contactPhone: e.target.value })} />
           </div>
         </div>
       </Modal>

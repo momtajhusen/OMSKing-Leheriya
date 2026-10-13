@@ -5,6 +5,7 @@ const { authMiddleware } = require('../../middleware/auth');
 const { tenantMiddleware } = require('../../middleware/tenant');
 const { requirePermission } = require('../../middleware/requirePermission');
 const tenants = require('../../controllers/tenants.controller');
+const setup = require('../../controllers/setup.controller');
 
 const router = require('express').Router();
 const gate = [authMiddleware, tenantMiddleware, requirePermission('tenants.manage')];
@@ -14,6 +15,7 @@ router.get('/ops/settings', ...gate, asyncHandler(tenants.getOpsSettings));
 router.patch('/ops/settings', ...gate, asyncHandler(tenants.patchOpsSettings));
 router.post('/ops/settings/test-mail', ...gate, asyncHandler(tenants.testOpsMail));
 router.get('/', ...gate, asyncHandler(tenants.listTenants));
+router.get('/setup-checklist', ...gate, asyncHandler(setup.platformSetup));
 router.get('/ops/jobs', ...gate, asyncHandler(tenants.listOpsJobs));
 router.get('/ops/logs', ...gate, asyncHandler(tenants.listOpsLogs));
 router.post('/ops/jobs/:id/retry', ...gate, asyncHandler(tenants.retryOpsJob));

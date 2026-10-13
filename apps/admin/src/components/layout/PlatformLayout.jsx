@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
   LayoutDashboard, Building2, Shield, LogOut, Sun, Moon, Activity, ListTodo,
-  FileWarning, Settings, CreditCard, Users, Menu, X, CalendarClock,
+  FileWarning, Settings, CreditCard, Users, Menu, X, CalendarClock, ListChecks,
 } from 'lucide-react';
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
@@ -45,6 +45,7 @@ const GROUPS = [
 ];
 
 const FLAT = GROUPS.flatMap((g) => g.items);
+const SETUP = { path: '/platform/setup', label: 'Setup guide', icon: ListChecks };
 const TABS = [
   { path: '/platform', label: 'Home' },
   { path: '/platform/tenants', label: 'Tenants' },
@@ -64,7 +65,7 @@ export default function PlatformLayout() {
   const { logout, user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const current = FLAT.find((item) => isActive(location.pathname, item.path)) || FLAT[0];
+  const current = [...FLAT, SETUP].find((item) => isActive(location.pathname, item.path)) || FLAT[0];
   const photo = useProfilePhoto();
 
   const Nav = ({ onClick }) =>
@@ -98,7 +99,7 @@ export default function PlatformLayout() {
 
         <aside
           className={cn(
-            'premium-sidebar z-50 flex w-[250px] shrink-0 flex-col transition-transform lg:relative lg:translate-x-0',
+            'premium-sidebar z-50 flex w-[250px] shrink-0 flex-col pb-[calc(4.75rem+env(safe-area-inset-bottom))] transition-transform lg:relative lg:translate-x-0 lg:pb-0',
             'fixed inset-y-0 left-0 lg:static',
             mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
           )}
@@ -118,6 +119,16 @@ export default function PlatformLayout() {
           <nav className="flex-1 overflow-y-auto py-3">
             <Nav onClick={() => setMobileOpen(false)} />
           </nav>
+          <div className="border-t border-[hsl(var(--color-border-premium))] px-2 py-2">
+            <Link
+              to="/platform/setup"
+              onClick={() => setMobileOpen(false)}
+              className={cn('sidebar-item mx-0', isActive(location.pathname, '/platform/setup') ? 'sidebar-item-active' : 'sidebar-item-inactive')}
+            >
+              <ListChecks className="h-4 w-4 shrink-0" />
+              Setup guide
+            </Link>
+          </div>
           <div className="border-t border-[hsl(var(--color-border-premium))] p-4">
             {photo.input}
             <div className="flex items-center gap-3">

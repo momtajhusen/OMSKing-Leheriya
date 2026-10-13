@@ -15,6 +15,8 @@ export function catalogPhoto(url) {
 export function pageShowsProductPhotos(pathname) {
   const path = String(pathname || '');
   if (path === '/settings' || path.startsWith('/settings/')) return false;
+  if (path === '/setup' || path.startsWith('/setup/')) return false;
+  if (path === '/platform/setup' || path.startsWith('/platform/setup/')) return false;
   if (path === '/vendor/settings' || path.startsWith('/vendor/settings/')) return false;
   return true;
 }

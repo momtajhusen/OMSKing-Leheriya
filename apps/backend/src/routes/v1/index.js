@@ -23,6 +23,7 @@ const auditLogsRoutes = require('./audit-logs.routes');
 const notificationsRoutes = require('./notifications.routes');
 const demoRequestsRoutes = require('./demoRequests.routes');
 const pricingRoutes = require('./pricing.routes');
+const setupRoutes = require('./setup.routes');
 
 const router = express.Router();
 
@@ -51,5 +52,6 @@ router.use('/audit-logs', auditLogsRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/demo-requests', demoRequestsRoutes);
 router.use('/pricing', pricingRoutes);
+router.use('/setup', setupRoutes);
 
 module.exports = router;

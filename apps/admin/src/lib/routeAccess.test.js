@@ -32,7 +32,7 @@ test('operations can open orders, pack and ship, and is sent away from admin scr
     });
     assert.equal(decision.redirectTo, null, pathname);
   }
-  for (const pathname of ['/settings', '/subscription', '/users-roles', '/payment-reconciliation', '/reports']) {
+  for (const pathname of ['/settings', '/setup', '/subscription', '/users-roles', '/payment-reconciliation', '/reports']) {
     const decision = accessDecision({
       isAuthenticated: true,
       role: 'operations',

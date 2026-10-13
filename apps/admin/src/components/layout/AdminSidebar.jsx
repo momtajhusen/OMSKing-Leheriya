@@ -11,7 +11,7 @@ import {
   Package, Barcode, GitCompare, Warehouse, Building, ShoppingCart, Truck, Store,
   PackageCheck, RotateCcw, ArrowDownLeft, AlertTriangle, FileSpreadsheet,
   CreditCard, RefreshCw, BarChart3, Palette, Box, Radio, Webhook, Upload, Receipt,
-  ChevronLeft, ChevronRight, X
+  ChevronLeft, ChevronRight, X, ListChecks
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BrandLogo from '../brand/BrandLogo';
@@ -110,7 +110,7 @@ function AdminSidebar() {
             exit={{ x: '-100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             className={cn(
-              'flex flex-col premium-sidebar transition-all duration-300 relative h-screen overflow-hidden fixed z-50 lg:hidden',
+              'flex flex-col premium-sidebar transition-all duration-300 relative h-screen overflow-hidden fixed z-50 lg:hidden pb-[calc(4.75rem+env(safe-area-inset-bottom))]',
               'w-[260px]'
             )}
           >
@@ -159,6 +159,23 @@ function AdminSidebar() {
                 </div>
               ))}
             </div>
+
+            {hasPermission(granted, 'settings.manage') && (
+              <div className="border-t border-[hsl(var(--color-border-premium))] px-2 py-2">
+                <Link
+                  to="/setup"
+                  onClick={() => setMobileOpen(false)}
+                  data-sidebar-link="true"
+                  className={cn(
+                    'sidebar-item',
+                    location.pathname === '/setup' ? 'sidebar-item-active' : 'sidebar-item-inactive'
+                  )}
+                >
+                  <ListChecks className="h-4 w-4 flex-shrink-0" />
+                  <span>Setup guide</span>
+                </Link>
+              </div>
+            )}
 
             {/* Footer — current tenant + role (no privilege toggle) */}
             <div className="border-t border-[hsl(var(--color-border-premium))] px-4 py-3">
@@ -218,6 +235,24 @@ function AdminSidebar() {
             </div>
           ))}
         </div>
+
+        {hasPermission(granted, 'settings.manage') && (
+          <div className="border-t border-[hsl(var(--color-border-premium))] px-2 py-2">
+            <Link
+              to="/setup"
+              title="Setup guide"
+              data-sidebar-link="true"
+              className={cn(
+                'sidebar-item',
+                location.pathname === '/setup' ? 'sidebar-item-active' : 'sidebar-item-inactive',
+                sidebarCollapsed && 'justify-center px-3'
+              )}
+            >
+              <ListChecks className="h-4 w-4 flex-shrink-0" />
+              {!sidebarCollapsed && <span>Setup guide</span>}
+            </Link>
+          </div>
+        )}
 
         {/* Footer — current tenant + role */}
         <div className="border-t border-[hsl(var(--color-border-premium))] px-4 py-3">

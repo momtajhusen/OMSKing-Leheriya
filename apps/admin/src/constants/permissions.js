@@ -95,6 +95,7 @@ export const ROUTE_PERMISSION = Object.freeze({
   '/notifications': P.SETTINGS_MANAGE,
   '/subscription': P.SETTINGS_MANAGE,
   '/settings': P.SETTINGS_MANAGE,
+  '/setup': P.SETTINGS_MANAGE,
   '/users-roles': P.USERS_MANAGE,
   '/audit-logs': P.USERS_MANAGE,
   '/channels': P.SETTINGS_MANAGE,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -32,7 +33,14 @@ const companySchema = z.object({
 });
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('company');
+  const [params] = useSearchParams();
+  const requestedTab = params.get('tab');
+  const [activeTab, setActiveTab] = useState(
+    ['company', 'channels', 'couriers', 'tax', 'inventory'].includes(requestedTab) ? requestedTab : 'company'
+  );
+  useEffect(() => {
+    if (['company', 'channels', 'couriers', 'tax', 'inventory'].includes(requestedTab)) setActiveTab(requestedTab);
+  }, [requestedTab]);
   const [saveStatus, setSaveStatus] = useState(null);
   const [inventoryAuthority, setInventoryAuthority] = useState('oms');
   const [authorityBusy, setAuthorityBusy] = useState(false);

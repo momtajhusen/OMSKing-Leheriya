@@ -34,6 +34,7 @@ async function redisReachable(url) {
     lazyConnect: true,
     retryStrategy: () => null,
   });
+  probe.on('error', () => {});
   try {
     await probe.connect();
     return (await probe.ping()) === 'PONG';
@@ -100,6 +101,7 @@ async function stopBullTransport() {
 module.exports = {
   QUEUE_NAME,
   bullEnabled,
+  redisReachable,
   startBullTransport,
   scheduleBull,
   stopBullTransport,

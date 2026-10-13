@@ -21,6 +21,8 @@ test('a placeholder never replaces a real product photo', () => {
 
 test('settings does not download every order just to fill product photos', () => {
   assert.equal(pageShowsProductPhotos('/settings'), false);
+  assert.equal(pageShowsProductPhotos('/setup'), false);
+  assert.equal(pageShowsProductPhotos('/platform/setup'), false);
   assert.equal(pageShowsProductPhotos('/settings/company'), false);
   assert.equal(pageShowsProductPhotos('/vendor/settings'), false);
   assert.equal(pageShowsProductPhotos('/orders'), true);

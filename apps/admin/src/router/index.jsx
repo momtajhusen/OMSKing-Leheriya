@@ -18,8 +18,10 @@ const PlatformOpsPage = lazy(() => import('../pages/platform/PlatformOpsPage'));
 const PlatformStaffPage = lazy(() => import('../pages/platform/PlatformStaffPage'));
 const DemoRequestsPage = lazy(() => import('../pages/platform/DemoRequestsPage'));
 const PlatformPlansPage = lazy(() => import('../pages/platform/PlatformPlansPage'));
+const PlatformSetupPage = lazy(() => import('../pages/platform/PlatformSetupPage'));
 const LegalPage = lazy(() => import('../pages/public/LegalPage'));
 const OrderDetailPage = lazy(() => import('../pages/admin/OrderDetailPage'));
+const SetupGuidePage = lazy(() => import('../pages/admin/SetupGuidePage'));
 
 // Route definitions - single source of truth for sidebar and router
 export const ROUTE_DEFS = {
@@ -448,6 +450,14 @@ const router = createBrowserRouter([
           </Suspense>
         ),
       },
+      {
+        path: 'setup',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformSetupPage />
+          </Suspense>
+        ),
+      },
     ],
   },
   // Merchant OMS — Super Admin and Admin
@@ -478,6 +488,14 @@ const router = createBrowserRouter([
       },
       { path: '/integration-mgmt', element: <Navigate to="/integrations" replace /> },
       { path: '/tenant-mgmt', element: <Navigate to="/platform/tenants" replace /> },
+      {
+        path: '/setup',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <SetupGuidePage />
+          </Suspense>
+        ),
+      },
     ],
   },
   // Vendor routes with layout wrapper and protection
