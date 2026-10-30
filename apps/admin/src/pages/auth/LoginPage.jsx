@@ -3,7 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { Mail, Lock, ArrowRight } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, Rocket, PlayCircle } from 'lucide-react';
 import BrandLogo from '../../components/brand/BrandLogo';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
@@ -23,6 +23,7 @@ export default function LoginPage() {
   const [twoFactor, setTwoFactor] = useState(null);
   const [otp, setOtp] = useState('');
   const [otpError, setOtpError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) navigate(homePath, { replace: true });
@@ -86,8 +87,12 @@ export default function LoginPage() {
           <div className="pointer-events-none absolute -bottom-12 -left-10 h-32 w-32 rounded-full bg-lime-100/70 blur-2xl" />
 
           <div className="relative mb-7 text-center">
-            <BrandLogo className="mx-auto mb-4 h-16 w-16 rounded-2xl shadow-lg shadow-emerald-900/25" />
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-[1.7rem]">Welcome back</h1>
+            <span className="mkt-brand-mark mx-auto mb-4 rounded-2xl">
+              <BrandLogo className="relative h-16 w-16 rounded-2xl shadow-lg shadow-emerald-900/25" />
+            </span>
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-[1.9rem]">
+              Welcome <span className="mkt-gradient-text">back</span>
+            </h1>
             <p className="mt-1.5 text-sm text-slate-500">Sign in to the company you already have.</p>
           </div>
 
@@ -121,7 +126,7 @@ export default function LoginPage() {
               <p className="text-sm text-slate-500">Enter the 6-digit OTP sent to {twoFactor.email}. It expires in 10 minutes.</p>
               <div>
                 <label htmlFor="login-otp" className="mb-1.5 block text-sm font-medium text-slate-700">OTP from Gmail</label>
-                <Input id="login-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" value={otp} onChange={(event) => setOtp(event.target.value)} error={otpError} className="h-12 rounded-xl bg-slate-50 tracking-[0.3em]" />
+                <Input id="login-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" value={otp} onChange={(event) => setOtp(event.target.value)} error={otpError} className="mkt-field h-12 rounded-xl bg-slate-50 tracking-[0.3em]" />
               </div>
               <Button type="submit" disabled={submitting} className="h-12 w-full rounded-full">
                 {submitting ? 'Checking…' : 'Verify and sign in'}
@@ -150,24 +155,33 @@ export default function LoginPage() {
                 autoComplete="email"
                 placeholder="you@company.com"
                 iconLeft={<Mail className="h-4 w-4" />}
-                className="h-12 rounded-xl bg-slate-50"
+                className="mkt-field h-12 rounded-xl bg-slate-50"
                 {...register('email')}
                 error={errors.email?.message}
               />
             </div>
             <CompanyChoice companies={companies} register={register} error={errors.workspace?.message} />
-            <div>
+            <div className="relative">
               <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
               <Input
                 id="password"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
                 placeholder="Enter your password"
                 iconLeft={<Lock className="h-4 w-4" />}
-                className="h-12 rounded-xl bg-slate-50"
+                className="mkt-field h-12 rounded-xl bg-slate-50 pr-12"
                 {...register('password')}
                 error={errors.password?.message}
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                className="absolute right-1.5 top-[1.875rem] flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-emerald-50 hover:text-emerald-700"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </div>
             <div className="flex items-center justify-between text-sm">
               <label className="flex items-center gap-2 text-slate-500">
@@ -178,29 +192,41 @@ export default function LoginPage() {
                 Forgot password?
               </Link>
             </div>
-            <Button type="submit" disabled={submitting} className="group h-12 w-full rounded-full text-sm font-semibold shadow-lg shadow-emerald-700/25">
+            <Button type="submit" disabled={submitting} className="mkt-cta-solid group h-12 w-full gap-2 rounded-full bg-gradient-to-r from-emerald-700 to-lime-600 text-sm font-semibold shadow-lg shadow-emerald-700/25 hover:from-emerald-800 hover:to-lime-700">
               {submitting ? 'Signing in…' : 'Sign in'}
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
             </Button>
           </form>
           )}
 
+          <p className="relative mt-6 flex items-start justify-center gap-1.5 border-t border-slate-100 pt-5 text-center text-xs leading-5 text-slate-500">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            Signing in opens only your company’s orders, stock and settings.
+          </p>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-2 text-center text-sm text-slate-500 sm:grid-cols-2">
-        <p>
-          New company?{' '}
-          <button type="button" className="font-semibold text-emerald-700 hover:underline" onClick={() => navigate('/auth/register')}>
-            Start a trial
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {[
+          { icon: Rocket, label: 'New company?', action: 'Start a trial', to: '/auth/register' },
+          { icon: PlayCircle, label: 'See it first?', action: 'Request a demo', to: '/demo' },
+        ].map((item) => (
+          <button
+            key={item.to}
+            type="button"
+            onClick={() => navigate(item.to)}
+            className="group flex items-center gap-2.5 rounded-2xl border border-slate-200/80 bg-white/80 px-3 py-3 text-left shadow-sm backdrop-blur transition duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-105">
+              <item.icon className="h-4 w-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xs text-slate-500">{item.label}</span>
+              <span className="block whitespace-nowrap text-sm font-semibold text-emerald-700">{item.action}</span>
+            </span>
+            <ArrowRight className="ml-auto h-4 w-4 text-slate-300 transition-transform duration-300 group-hover:translate-x-1 group-hover:text-emerald-600" />
           </button>
-        </p>
-        <p>
-          Want a walkthrough?{' '}
-          <button type="button" className="font-semibold text-emerald-700 hover:underline" onClick={() => navigate('/demo')}>
-            Request a demo
-          </button>
-        </p>
+        ))}
       </div>
     </div>
   );

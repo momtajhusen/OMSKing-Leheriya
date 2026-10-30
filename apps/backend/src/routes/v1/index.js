@@ -24,6 +24,7 @@ const notificationsRoutes = require('./notifications.routes');
 const demoRequestsRoutes = require('./demoRequests.routes');
 const pricingRoutes = require('./pricing.routes');
 const setupRoutes = require('./setup.routes');
+const marketingImagesRoutes = require('./marketingImages.routes');
 
 const router = express.Router();
 
@@ -53,5 +54,6 @@ router.use('/notifications', notificationsRoutes);
 router.use('/demo-requests', demoRequestsRoutes);
 router.use('/pricing', pricingRoutes);
 router.use('/setup', setupRoutes);
+router.use('/marketing-images', marketingImagesRoutes);
 
 module.exports = router;

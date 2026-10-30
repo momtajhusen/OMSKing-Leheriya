@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { Building2, CalendarClock, Phone, Store } from 'lucide-react';
+import { Building2, CalendarClock, Phone, Store, PlayCircle, Check } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { FormBanner } from '../../components/ui/FormBanner';
 import { MktCard } from '../../components/marketing/MarketingCta';
+import { PageHero, Reveal } from '../../components/marketing/MktKit';
+import MktImage from '../../components/marketing/MktImage';
 import api, { apiFormError } from '../../lib/api';
 
 const ORDER_BANDS = [
@@ -15,7 +17,7 @@ const ORDER_BANDS = [
   { value: '10000-plus', label: 'More than 10,000' },
 ];
 
-const CHANNELS = ['Shopify', 'Amazon', 'Myntra'];
+const CHANNELS = ['Shopify', 'Amazon', 'Myntra', 'Flipkart', 'Meesho', 'AJIO', 'Nykaa'];
 
 const empty = {
   name: '',
@@ -65,35 +67,45 @@ export default function DemoRequestPage() {
 
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-emerald-800 via-emerald-600 to-teal-600 px-4 py-12 text-white sm:px-6 sm:py-16">
-        <div className="pointer-events-none absolute -left-10 top-0 h-48 w-48 rounded-full bg-lime-300/30 blur-3xl" />
-        <div className="relative mx-auto max-w-3xl text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-100">Walkthrough</p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-5xl">Request a demo</h1>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-emerald-100 sm:text-base">
-            Tell us about your company. We call you and walk through orders, stock and GST on a sample desk. This does not create a login.
-          </p>
-        </div>
-      </section>
+      <PageHero
+        compact
+        eyebrow="Walkthrough"
+        icon={PlayCircle}
+        title="Request a demo"
+        highlight="of your order desk."
+        text="Tell us about your company. We call you and walk through orders, stock and GST on a sample desk. This does not create a login."
+      />
 
-      <section className="bg-gradient-to-b from-slate-50 to-white py-10 sm:py-14">
+      <section className="relative z-10 -mt-12 bg-transparent pb-14">
         <div className="mx-auto grid max-w-6xl gap-8 px-4 sm:px-6 lg:grid-cols-[0.85fr_1.15fr]">
-          <div className="space-y-4">
-            {[
-              { icon: CalendarClock, title: 'A booked walkthrough', text: 'We use the mobile number on this form. No account is opened from this page.' },
-              { icon: Store, title: 'Your channels', text: 'Shopify, Amazon and Myntra. Say which ones you sell on today.' },
-              { icon: Building2, title: 'Ready to run it yourself?', text: 'A 14-day merchant trial is a different page. You become that company’s Super Admin.' },
-            ].map((item) => (
-              <MktCard key={item.title} className="flex items-start gap-4">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                  <item.icon className="h-5 w-5" />
-                </span>
-                <div>
-                  <p className="font-semibold text-slate-900">{item.title}</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{item.text}</p>
-                </div>
-              </MktCard>
-            ))}
+          <div className="space-y-4 lg:pt-16">
+            <Reveal className="relative mb-6">
+              <MktImage name="demo-walkthrough" className="shadow-[0_30px_60px_-30px_rgba(13,92,69,0.5)] ring-4 ring-white" />
+              <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-emerald-800 shadow backdrop-blur">
+                <PlayCircle className="h-3.5 w-3.5" /> Live walkthrough on a sample desk
+              </span>
+            </Reveal>
+            <p className="px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700 lg:text-emerald-700">What happens next</p>
+            <ol className="relative space-y-4 before:absolute before:bottom-6 before:left-[2.6rem] before:top-6 before:w-0.5 before:bg-gradient-to-b before:from-emerald-400 before:to-lime-300">
+              {[
+                { icon: CalendarClock, title: 'A booked walkthrough', text: 'We use the mobile number on this form. No account is opened from this page.' },
+                { icon: Store, title: 'Your channels', text: 'Shopify, Amazon, Myntra, Flipkart, Meesho, AJIO or Nykaa. Pick every one you sell on today.' },
+                { icon: Building2, title: 'Ready to run it yourself?', text: 'A 14-day merchant trial is a different page. You become that company’s Super Admin.' },
+              ].map((item, index) => (
+                <Reveal as="li" key={item.title} delay={index * 100} className="relative">
+                  <MktCard className="flex items-start gap-4 p-5">
+                    <span className="relative z-10 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg ring-4 ring-white transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-110">
+                      <item.icon className="h-5 w-5" />
+                      <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white ring-2 ring-white">{index + 1}</span>
+                    </span>
+                    <div>
+                      <p className="font-semibold text-slate-900">{item.title}</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">{item.text}</p>
+                    </div>
+                  </MktCard>
+                </Reveal>
+              ))}
+            </ol>
             <p className="px-1 text-sm text-slate-600">
               Already have a company?{' '}
               <Link to="/auth/login" className="font-semibold text-emerald-700 hover:underline">Sign in</Link>
@@ -102,7 +114,8 @@ export default function DemoRequestPage() {
             </p>
           </div>
 
-          <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.25)] sm:p-8">
+          <Reveal delay={120} className="relative rounded-3xl border border-slate-200/70 bg-white p-6 shadow-[0_40px_80px_-40px_rgba(13,92,69,0.45)] sm:p-8">
+            <span className="absolute inset-x-8 top-0 h-1 rounded-b-full bg-gradient-to-r from-emerald-500 via-lime-400 to-teal-500" />
             {done ? (
               <div className="py-8 text-center">
                 <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
@@ -138,7 +151,7 @@ export default function DemoRequestPage() {
                     id="demo-orders"
                     value={form.monthlyOrders}
                     onChange={(event) => setField('monthlyOrders', event.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900"
+                    className="mkt-field h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900"
                   >
                     {ORDER_BANDS.map((band) => (
                       <option key={band.value} value={band.value}>{band.label}</option>
@@ -155,9 +168,10 @@ export default function DemoRequestPage() {
                           key={name}
                           type="button"
                           onClick={() => toggleChannel(name)}
-                          className={`rounded-full border px-4 py-2 text-sm font-semibold ${on ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600'}`}
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-semibold transition-all duration-300 ease-premium hover:-translate-y-0.5 active:scale-95 ${on ? 'border-emerald-600 bg-emerald-50 text-emerald-800 shadow-[0_6px_16px_-8px_rgba(5,150,105,0.6)]' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200'}`}
                           aria-pressed={on}
                         >
+                          <Check className={`h-3.5 w-3.5 transition-all duration-300 ${on ? 'w-3.5 opacity-100' : 'w-0 opacity-0'}`} strokeWidth={3} />
                           {name}
                         </button>
                       );
@@ -172,7 +186,7 @@ export default function DemoRequestPage() {
                     value={form.message}
                     onChange={(event) => setField('message', event.target.value)}
                     placeholder="Orders, warehouses, GST, vendor split…"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900"
+                    className="mkt-field w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900"
                   />
                 </div>
                 <p className="text-xs leading-5 text-slate-500 sm:col-span-2">
@@ -186,7 +200,7 @@ export default function DemoRequestPage() {
                 </div>
               </form>
             )}
-          </div>
+          </Reveal>
         </div>
       </section>
     </div>
@@ -206,7 +220,7 @@ function Field({ label, id, value, onChange, type = 'text', required, placeholde
         placeholder={placeholder}
         required={required}
         onChange={(event) => onChange(event.target.value)}
-        className="h-11 rounded-xl bg-slate-50"
+        className="mkt-field h-11 rounded-xl bg-slate-50"
       />
     </div>
   );

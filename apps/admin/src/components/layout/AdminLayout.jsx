@@ -9,6 +9,7 @@ import Button from '../ui/Button';
 import useUIStore from '../../stores/uiStore';
 import { cn } from '../../lib/utils';
 import { usePermissions } from '../../hooks/usePermissions';
+import useScrollTopOnNavigate from '../../hooks/useScrollTopOnNavigate';
 import ProductImageCatalog from '../catalog/ProductImageCatalog';
 import api from '../../lib/api';
 
@@ -86,6 +87,7 @@ function BillingNotice({ billing, onOpen, onClose }) {
 function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  useScrollTopOnNavigate();
   const { user, exitImpersonation } = useAuth();
   const { canOpenPath } = usePermissions();
   const setMobileOpen = useUIStore((state) => state.setMobileOpen);

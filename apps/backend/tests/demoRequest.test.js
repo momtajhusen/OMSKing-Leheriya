@@ -31,6 +31,31 @@ function callCreate(body) {
   });
 }
 
+test('a demo request accepts every channel OMSKing connects, not only the first three', async () => {
+  const { validationResult } = require('express-validator');
+  const router = require('../src/routes/v1/demoRequests.routes');
+  const post = router.stack.find((layer) => layer.route?.path === '/' && layer.route.methods.post);
+  const channels = ['Shopify', 'Amazon', 'Myntra', 'Flipkart', 'Meesho', 'AJIO', 'Nykaa'];
+  const body = {
+    name: 'Seven Channel Brand',
+    email: `seven-${Date.now()}@example.com`,
+    phone: '9876543211',
+    company: 'Seven Channel Brand',
+    monthlyOrders: '2000-10000',
+    channels,
+  };
+  const req = { body };
+  for (const layer of post.route.stack) {
+    if (typeof layer.handle.run === 'function') await layer.handle.run(req);
+  }
+  assert.deepEqual(validationResult(req).array(), []);
+
+  const created = await callCreate(body);
+  assert.equal(created.status, 201);
+  const row = await DemoRequest.findOne({ email: body.email });
+  assert.deepEqual(row.channels, channels);
+});
+
 test('a demo request stores company details and does not open an account', async () => {
   const email = `demo-${Date.now()}@example.com`;
   const created = await callCreate({

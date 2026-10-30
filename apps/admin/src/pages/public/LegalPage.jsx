@@ -1,5 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
-import { CONTACT_EMAIL, CONTACT_PHONE_DISPLAY } from '../../components/marketing/StickyContactDock';
+import { FileText } from 'lucide-react';
+import { CONTACT_EMAIL, CONTACT_PHONE_DISPLAY, CONTACT_PHONE_HREF } from '../../components/marketing/StickyContactDock';
+import { PageHero, Reveal } from '../../components/marketing/MktKit';
 
 export const LEGAL_LINKS = [
   { to: '/terms', label: 'Terms' },
@@ -210,25 +212,52 @@ export default function LegalPage() {
 
   return (
     <article className="bg-white">
-      <header className="bg-gradient-to-br from-emerald-50 via-white to-lime-50 py-14 sm:py-16">
-        <div className="mx-auto max-w-3xl px-4 sm:px-6">
-          <p className="text-sm font-semibold tracking-wide text-emerald-800">OMSKing</p>
-          <h1 className="mt-2 text-4xl font-bold tracking-tight text-slate-900">{doc.title}</h1>
-          <p className="mt-3 text-sm text-slate-500">Last updated {UPDATED} · Jaipur, India</p>
-          <p className="mt-4 text-lg leading-8 text-slate-600">{doc.lede}</p>
-        </div>
-      </header>
-      <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-        <div className="space-y-10">
-          {doc.sections.map((section) => (
-            <section key={section.heading}>
-              <h2 className="text-xl font-bold text-slate-900">{section.heading}</h2>
+      <PageHero compact eyebrow={`Last updated ${UPDATED} · Jaipur, India`} icon={FileText} title={doc.title} text={doc.lede}>
+        <nav className="flex flex-wrap justify-center gap-2" aria-label="Policies">
+          {LEGAL_LINKS.map((item) => (
+            <Link
+              key={item.to}
+              to={item.to}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition duration-300 hover:-translate-y-0.5 ${item.to === pathname ? 'bg-lime-300 text-emerald-950' : 'border border-white/20 bg-white/10 text-white backdrop-blur hover:bg-white/20'}`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </PageHero>
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[220px_1fr]">
+        <aside className="hidden lg:block">
+          <nav className="sticky top-28 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4" aria-label="On this page">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700">On this page</p>
+            <ol className="space-y-1">
+              {doc.sections.map((section, index) => (
+                <li key={section.heading}>
+                  <a
+                    href={`#legal-${index}`}
+                    className="flex gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-600 transition duration-200 hover:translate-x-0.5 hover:bg-white hover:text-emerald-800"
+                  >
+                    <span className="font-semibold text-emerald-600">{String(index + 1).padStart(2, '0')}</span>
+                    {section.heading}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        </aside>
+        <div className="max-w-3xl">
+        <div className="space-y-6">
+          {doc.sections.map((section, index) => (
+            <Reveal key={section.heading} id={`legal-${index}`} delay={Math.min(index, 4) * 60} className="scroll-mt-28 rounded-3xl border border-slate-200/70 p-6 transition duration-300 hover:border-emerald-200 hover:shadow-lg">
+              <h2 className="flex items-center gap-3 text-xl font-bold text-slate-900">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-sm font-bold text-emerald-700">{index + 1}</span>
+                {section.heading}
+              </h2>
               <div className="mt-3 space-y-3">
                 {section.body.map((paragraph) => (
                   <p key={paragraph} className="text-sm leading-7 text-slate-600">{paragraph}</p>
                 ))}
               </div>
-            </section>
+            </Reveal>
           ))}
         </div>
         <section className="mt-10 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-5">
@@ -237,11 +266,12 @@ export default function LegalPage() {
             Questions about these pages, a company account, or a bill:{' '}
             <a href={`mailto:${CONTACT_EMAIL}`} className="font-medium text-emerald-800 underline-offset-2 hover:underline">{CONTACT_EMAIL}</a>
             {' · '}
-            <a href="tel:+917600201227" className="font-medium text-emerald-800 underline-offset-2 hover:underline">{CONTACT_PHONE_DISPLAY}</a>
+            <a href={CONTACT_PHONE_HREF} className="font-medium text-emerald-800 underline-offset-2 hover:underline">{CONTACT_PHONE_DISPLAY}</a>
             {' · Jaipur, Rajasthan.'}
           </p>
         </section>
         <Related current={pathname} />
+        </div>
       </div>
     </article>
   );

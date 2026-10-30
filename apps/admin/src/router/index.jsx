@@ -19,6 +19,7 @@ const PlatformStaffPage = lazy(() => import('../pages/platform/PlatformStaffPage
 const DemoRequestsPage = lazy(() => import('../pages/platform/DemoRequestsPage'));
 const PlatformPlansPage = lazy(() => import('../pages/platform/PlatformPlansPage'));
 const PlatformSetupPage = lazy(() => import('../pages/platform/PlatformSetupPage'));
+const PlatformWebsiteImagesPage = lazy(() => import('../pages/platform/PlatformWebsiteImagesPage'));
 const LegalPage = lazy(() => import('../pages/public/LegalPage'));
 const OrderDetailPage = lazy(() => import('../pages/admin/OrderDetailPage'));
 const SetupGuidePage = lazy(() => import('../pages/admin/SetupGuidePage'));
@@ -439,6 +440,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<LoadingFallback />}>
             <PlatformPlansPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'website-images',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <PlatformWebsiteImagesPage />
           </Suspense>
         ),
       },

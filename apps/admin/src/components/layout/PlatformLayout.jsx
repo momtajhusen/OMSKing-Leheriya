@@ -3,11 +3,12 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
   LayoutDashboard, Building2, Shield, LogOut, Sun, Moon, Activity, ListTodo,
-  FileWarning, Settings, CreditCard, Users, Menu, X, CalendarClock, ListChecks,
+  FileWarning, Settings, CreditCard, Users, Menu, X, CalendarClock, ListChecks, Images,
 } from 'lucide-react';
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
 import PageFade from '../motion/PageFade';
+import useScrollTopOnNavigate from '../../hooks/useScrollTopOnNavigate';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
 
@@ -25,6 +26,12 @@ const GROUPS = [
       { path: '/platform/plans', label: 'Plans', icon: CreditCard },
       { path: '/platform/demo-requests', label: 'Demo requests', icon: CalendarClock },
       { path: '/platform/users', label: 'Staff', icon: Users },
+    ],
+  },
+  {
+    label: 'Website',
+    items: [
+      { path: '/platform/website-images', label: 'Website images', icon: Images },
     ],
   },
   {
@@ -60,6 +67,7 @@ function isActive(pathname, path) {
 
 export default function PlatformLayout() {
   const location = useLocation();
+  useScrollTopOnNavigate();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useThemeStore();
   const { logout, user } = useAuth();

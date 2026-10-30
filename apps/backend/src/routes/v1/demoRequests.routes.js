@@ -16,7 +16,7 @@ router.post(
   body('company').trim().isLength({ min: 2, max: 120 }).withMessage('Company name is required'),
   body('city').optional({ values: 'falsy' }).trim().isLength({ max: 80 }),
   body('monthlyOrders').isIn(demo.ORDER_BANDS).withMessage('Choose a monthly order band'),
-  body('channels').isArray({ min: 1, max: 3 }).withMessage('Choose at least one channel'),
+  body('channels').isArray({ min: 1, max: demo.CHANNELS.length }).withMessage('Choose at least one channel'),
   body('channels.*').isIn(demo.CHANNELS),
   body('message').optional({ values: 'falsy' }).trim().isLength({ max: 1000 }),
   validate,

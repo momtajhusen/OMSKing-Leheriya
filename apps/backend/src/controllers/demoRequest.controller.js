@@ -4,7 +4,7 @@ const { paginatedResponse } = require('../utils/response');
 const { pageOf } = require('../utils/page');
 
 const ORDER_BANDS = ['under-500', '500-2000', '2000-10000', '10000-plus'];
-const CHANNELS = ['Shopify', 'Amazon', 'Myntra'];
+const CHANNELS = ['Shopify', 'Amazon', 'Myntra', 'Flipkart', 'Meesho', 'AJIO', 'Nykaa'];
 
 function cleanPhone(value) {
   return String(value || '').replace(/[\s-]/g, '');

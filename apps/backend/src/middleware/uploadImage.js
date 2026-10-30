@@ -61,6 +61,17 @@ function uploadAvatarImage(req, res, next) {
   });
 }
 
+const MARKETING_FOLDER = 'marketing';
+
+function uploadMarketingImage(req, res, next) {
+  req.avatarFolder = MARKETING_FOLDER;
+  upload.single('image')(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return next(new HttpError(400, 'Image must be 5MB or smaller'));
+    return next(err);
+  });
+}
+
 function publicUploadPath(tenantId, filename) {
   return `/uploads/${tenantId}/${filename}`;
 }
@@ -72,4 +83,12 @@ function removeStoredUpload(url, folder) {
   fs.unlink(full, () => {});
 }
 
-module.exports = { uploadProductImage, uploadAvatarImage, publicUploadPath, removeStoredUpload, uploadsRoot };
+module.exports = {
+  uploadProductImage,
+  uploadAvatarImage,
+  uploadMarketingImage,
+  publicUploadPath,
+  removeStoredUpload,
+  uploadsRoot,
+  MARKETING_FOLDER,
+};

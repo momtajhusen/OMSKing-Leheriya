@@ -7,6 +7,7 @@ import {
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
 import PageFade from '../motion/PageFade';
+import useScrollTopOnNavigate from '../../hooks/useScrollTopOnNavigate';
 import { usePermissions } from '../../hooks/usePermissions';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
@@ -25,6 +26,7 @@ const TABS = vendorRoutes.slice(0, 4);
 function VendorLayout() {
   const { theme, toggleTheme } = useThemeStore();
   const location = useLocation();
+  useScrollTopOnNavigate();
   const navigate = useNavigate();
   const { logout, user } = useAuth();
   const { canOpenPath } = usePermissions();

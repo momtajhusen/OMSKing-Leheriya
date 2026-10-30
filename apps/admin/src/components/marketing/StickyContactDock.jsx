@@ -1,9 +1,11 @@
 import { Mail, Phone } from 'lucide-react';
 
-const PHONE = '7600201227';
-const PHONE_E164 = '917600201227';
-export const CONTACT_EMAIL = 'thecodersalpha@gmail.com';
-export const CONTACT_PHONE_DISPLAY = '+91 76002 01227';
+export const CONTACT_EMAIL = 'support@leheriya.com';
+export const CONTACT_PHONE_DISPLAY = '011-69296516';
+export const CONTACT_PHONE_HREF = 'tel:+911169296516';
+export const CONTACT_WHATSAPP_DISPLAY = '+91-9873003388';
+export const CONTACT_WHATSAPP_HREF = 'https://wa.me/919873003388';
+export const CONTACT_HOURS = '11:00 am – 5:00 pm';
 const EMAIL = CONTACT_EMAIL;
 
 function WhatsAppIcon({ className }) {
@@ -17,17 +19,17 @@ function WhatsAppIcon({ className }) {
 const ITEMS = [
   {
     id: 'call',
-    href: `tel:+${PHONE_E164}`,
-    label: PHONE,
-    aria: `Call ${PHONE}`,
+    href: CONTACT_PHONE_HREF,
+    label: CONTACT_PHONE_DISPLAY,
+    aria: `Call ${CONTACT_PHONE_DISPLAY}`,
     well: 'contact-fab--call',
     Icon: Phone,
   },
   {
     id: 'whatsapp',
-    href: `https://wa.me/${PHONE_E164}`,
+    href: CONTACT_WHATSAPP_HREF,
     label: 'WhatsApp',
-    aria: 'Chat on WhatsApp',
+    aria: `Chat on WhatsApp ${CONTACT_WHATSAPP_DISPLAY}`,
     well: 'contact-fab--wa',
     Icon: WhatsAppIcon,
     external: true,
@@ -35,7 +37,7 @@ const ITEMS = [
   {
     id: 'gmail',
     href: `mailto:${EMAIL}`,
-    label: 'Gmail',
+    label: 'Email',
     aria: `Email ${EMAIL}`,
     well: 'contact-fab--mail',
     Icon: Mail,
