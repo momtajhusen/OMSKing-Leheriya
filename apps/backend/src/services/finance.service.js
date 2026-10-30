@@ -21,8 +21,29 @@ function normState(value) {
   return String(value || '').toLowerCase().replace(/[^a-z]/g, '');
 }
 
+const GST_STATES = {
+  '01': 'Jammu and Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh', '05': 'Uttarakhand',
+  '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh', 10: 'Bihar', 11: 'Sikkim',
+  12: 'Arunachal Pradesh', 13: 'Nagaland', 14: 'Manipur', 15: 'Mizoram', 16: 'Tripura', 17: 'Meghalaya',
+  18: 'Assam', 19: 'West Bengal', 20: 'Jharkhand', 21: 'Odisha', 22: 'Chhattisgarh', 23: 'Madhya Pradesh',
+  24: 'Gujarat', 26: 'Dadra and Nagar Haveli and Daman and Diu', 27: 'Maharashtra', 29: 'Karnataka', 30: 'Goa',
+  31: 'Lakshadweep', 32: 'Kerala', 33: 'Tamil Nadu', 34: 'Puducherry', 35: 'Andaman and Nicobar Islands',
+  36: 'Telangana', 37: 'Andhra Pradesh', 38: 'Ladakh',
+};
+
+function gstinState(gstin) {
+  return GST_STATES[String(gstin || '').trim().slice(0, 2)] || '';
+}
+
+function sameState(a, b) {
+  const clean = (value) => normState(value).replace(/and/g, '');
+  return Boolean(clean(a)) && clean(a) === clean(b);
+}
+
 function invoiceNumber(order) {
-  if (String(order.channel || '') === 'Shopify') return order.externalOrderId || order.orderNo || '';
+  if (String(order.channel || '') === 'Shopify') {
+    return String(order.channelOrderNo || '').replace(/^#/, '').trim() || order.externalOrderId || order.orderNo || '';
+  }
   return order.invoiceNo || (order.orderNo ? `INV-${order.orderNo}` : '');
 }
 
@@ -210,6 +231,8 @@ module.exports = {
   addMoney,
   invoiceNumber,
   creditNoteNumber,
+  gstinState,
+  sameState,
   shipToState,
   lineTax,
   paymentStanding,

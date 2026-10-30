@@ -67,7 +67,8 @@ export default function GstInvoicePage() {
     hydrateFromApi();
     api.get('/settings/company').then(({ data }) => setCompany(data.data)).catch(() => setCompany(null));
     api.get('/warehouses').then(({ data }) => {
-      const home = (data.data || []).find((row) => row.code === 'WH-001');
+      const list = Array.isArray(data.data) ? data.data : (data.data?.warehouses || []);
+      const home = list.find((row) => row.code === 'WH-001');
       setWarehouseState(home?.address?.state || '');
     }).catch(() => setWarehouseState(''));
   }, [hydrateFromApi]);

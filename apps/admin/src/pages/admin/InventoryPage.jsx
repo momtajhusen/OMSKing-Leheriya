@@ -18,6 +18,7 @@ import { FormBanner } from '../../components/ui/FormBanner';
 import { Package, AlertTriangle, TrendingUp, Search } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
+import { PERMISSIONS } from '../../constants/permissions';
 import { orderChannelLabel } from '../../constants/channelCatalog';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
@@ -33,7 +34,9 @@ const TABS = [
 
 export default function InventoryPage() {
   const navigate = useNavigate();
-  const { canInventoryAdjust } = usePermissions();
+  const { canInventoryAdjust, can } = usePermissions();
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
   const connected = useConnectedChannels();
   const [warehouses, setWarehouses] = useState([]);
   const [masters, setMasters] = useState([]);
@@ -155,6 +158,19 @@ export default function InventoryPage() {
     }
   };
 
+  const runShopifyImport = async () => {
+    setImporting(true);
+    try {
+      await api.post('/integrations/jobs', { channel: 'shopify', jobType: 'stock_import' });
+      toast.success('Shopify stock import started. It runs in the background; the result shows on Integrations.');
+      setImportOpen(false);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not start the Shopify stock import'));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const runStress = async () => {
     setBanner('');
     try {
@@ -183,7 +199,10 @@ export default function InventoryPage() {
             WH-001 sells on every channel. WH-002 is Shopify only. Available = on hand minus reserved. Stock in writes a ledger row.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {can(PERMISSIONS.SETTINGS_MANAGE) && omsMaster && (
+            <Button variant="outline" onClick={() => setImportOpen(true)}>Import stock from Shopify</Button>
+          )}
           {canInventoryAdjust && omsMaster && (
             <Button onClick={() => {
               setStockIn({
@@ -432,6 +451,25 @@ export default function InventoryPage() {
           <Input type="number" min="1" value={adjust.qty} onChange={(e) => setAdjust({ ...adjust, qty: e.target.value })} />
           <Input placeholder="Reason" value={adjust.reason} onChange={(e) => setAdjust({ ...adjust, reason: e.target.value })} />
         </div>
+      </Modal>
+
+      <Modal
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import stock from Shopify"
+        description="One-time opening stock. Shopify is only read; nothing is changed on Shopify."
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => setImportOpen(false)}>Cancel</Button>
+            <Button disabled={importing} onClick={runShopifyImport}>{importing ? 'Starting…' : 'Start import'}</Button>
+          </>
+        )}
+      >
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          <li>On-hand qty at each linked Shopify location is added to its warehouse (Offline Shop → WH-001, Virtual Warehouse → WH-002).</li>
+          <li>SKUs that already have stock in OMS are left as they are. Running it again does not add stock twice.</li>
+          <li>Each SKU gets an “Opening stock from Shopify” row on Movements. No low stock alerts are sent.</li>
+        </ul>
       </Modal>
 
       <Modal

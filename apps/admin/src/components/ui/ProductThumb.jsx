@@ -28,17 +28,20 @@ function PreviewCard({ rect, src, name, sku }) {
 export default function ProductThumb({ name, src, sku, size = 'sm', className }) {
   const byKey = useProductImageStore((state) => state.byKey);
   const [preview, setPreview] = useState(null);
+  const [broken, setBroken] = useState('');
   const box = size === 'lg' ? 'h-16 w-16' : size === 'md' ? 'h-12 w-12' : 'h-10 w-10';
   const resolved = mediaUrl(catalogPhoto(src) || findProductImage(byKey, sku, name));
+  const photo = resolved && broken !== resolved ? resolved : '';
   const show = (event) => {
-    if (!resolved) return;
+    if (!photo) return;
     setPreview(event.currentTarget.getBoundingClientRect());
   };
 
-  const frame = resolved ? (
+  const frame = photo ? (
     <img
-      src={resolved}
+      src={photo}
       alt={name || ''}
+      onError={() => setBroken(resolved)}
       className={cn(box, 'rounded-xl object-cover bg-muted shadow-sm', className)}
     />
   ) : (
@@ -61,8 +64,8 @@ export default function ProductThumb({ name, src, sku, size = 'sm', className })
       onMouseLeave={() => setPreview(null)}
     >
       {frame}
-      {preview && resolved && (
-        <PreviewCard rect={preview} src={resolved} name={name} sku={sku} />
+      {preview && photo && (
+        <PreviewCard rect={preview} src={photo} name={name} sku={sku} />
       )}
     </span>
   );

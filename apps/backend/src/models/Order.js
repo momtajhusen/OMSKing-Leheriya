@@ -12,6 +12,7 @@ const itemSchema = new mongoose.Schema({
   masterSkuId: { type: mongoose.Schema.Types.ObjectId, ref: 'MasterSku', default: null },
   skuMappingId: { type: mongoose.Schema.Types.ObjectId, ref: 'SkuMapping', default: null },
   imageUrl: { type: String, default: '' },
+  vendor: { type: String, default: '' },
   fulfilmentSource: { type: String, default: 'Offline' },
   locationId: { type: String, default: '' },
 }, { _id: false });
@@ -81,6 +82,7 @@ const orderSchema = new mongoose.Schema({
   },
   source: { type: String, enum: ['demo', 'manual', 'channel_api', 'channel_push'], default: 'demo' },
   externalOrderId: { type: String, default: '' },
+  channelOrderNo: { type: String, default: '' },
   channelStatus: { type: String, default: '' },
   reserveState: { type: String, enum: ['', 'reserved', 'out_of_stock', 'unmapped'], default: '' },
   rtoRestockedAt: { type: Date },

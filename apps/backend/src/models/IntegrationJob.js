@@ -11,6 +11,7 @@ const JOB_TYPES = [
   'inventory_push',
   'shipment_push',
   'return_pull',
+  'stock_import',
   'webhook_dispatch',
   'manual',
 ];

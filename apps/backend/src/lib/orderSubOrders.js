@@ -36,6 +36,7 @@ function enrichItem(item, order) {
     masterSkuId: item.masterSkuId || null,
     skuMappingId: item.skuMappingId || null,
     imageUrl: item.imageUrl || item.image || productImageUrl(item.sku, item.name),
+    vendor: item.vendor || '',
     fulfilmentSource: item.fulfilmentSource || item.source || order?.fulfilmentSource || 'Offline',
     locationId: item.locationId || '',
   };
@@ -224,7 +225,7 @@ function invoiceHtml(order, { warehouseState = '', kind = 'invoice' } = {}) {
 </head>
 <body>
   <h1>${escapeHtml(title)}</h1>
-  <p>Order ${escapeHtml(order.id || order.orderNo)} · ${escapeHtml(order.customer)} · ${escapeHtml(order.address || '')}</p>
+  <p>Order ${escapeHtml(String(order.channelOrderNo || '').replace(/^#/, '') || order.id || order.orderNo)} · ${escapeHtml(order.customer)} · ${escapeHtml(order.address || '')}</p>
   <p>Warehouse ${escapeHtml(warehouseState || '—')} · Ship-to ${escapeHtml(ship || '—')}</p>
   <table>
     <thead><tr><th></th><th>Item</th><th>SKU</th><th>HSN</th><th>Qty</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr></thead>

@@ -9,7 +9,7 @@ const { adapterFor } = require('../adapters');
 const partner = require('../adapters/partner');
 
 const CHANNELS = new Set(channelIds());
-const MANUAL_TYPES = new Set(['orders_pull', 'inventory_push', 'products_pull']);
+const MANUAL_TYPES = new Set(['orders_pull', 'inventory_push', 'products_pull', 'stock_import']);
 const STUCK_MS = 15_000;
 const MAX_RETRIES = 5;
 
@@ -89,7 +89,8 @@ async function enqueueManual(tenantId, userId, body) {
   const channel = String(body?.channel || '').toLowerCase();
   const jobType = String(body?.jobType || 'orders_pull');
   if (!CHANNELS.has(channel)) throw new HttpError(400, 'Unknown channel');
-  if (!MANUAL_TYPES.has(jobType)) throw new HttpError(400, 'Job type must be orders_pull, products_pull, or inventory_push');
+  if (!MANUAL_TYPES.has(jobType)) throw new HttpError(400, 'Job type must be orders_pull, products_pull, inventory_push, or stock_import');
+  if (jobType === 'stock_import' && channel !== 'shopify') throw new HttpError(400, 'Opening stock import reads Shopify locations only');
   if (jobType === 'orders_pull' && !(await hasLiveConnection(tenantId, channel))) {
     throw new HttpError(400, notLiveMessage(channel, jobType));
   }
@@ -358,6 +359,21 @@ async function pullPartnerOrders(job) {
   ).setOptions({ skipTenantFilter: true });
 }
 
+async function importStockJob(job) {
+  const { importShopifyOpeningStock } = require('./shopifyOpeningStock.service');
+  try {
+    const res = await importShopifyOpeningStock(job.tenantId, job.triggeredByUserId);
+    const text = `Shopify opening stock: ${res.imported} SKU rows (${res.units} units) added, ${res.skipped} already had OMS stock, ${res.unmatched} Shopify variants not mapped, ${res.failed} failed.`;
+    await IntegrationJob.updateOne(
+      { _id: job._id },
+      { $set: { shortSummary: text, recordsTotal: res.imported + res.skipped + res.failed, recordsProcessed: res.imported + res.skipped, recordsFailed: res.failed } },
+    ).setOptions({ skipTenantFilter: true });
+  } catch (err) {
+    if (err.statusCode === 400) throw terminalError(err.message);
+    throw err;
+  }
+}
+
 async function pullCatalogJob(job) {
   const { pullChannel } = require('./catalogPull.service');
   try {
@@ -390,6 +406,7 @@ async function dispatch(job) {
   }
   if (job.jobType === 'webhook_dispatch') return handleWebhook(job);
   if (job.jobType === 'products_pull') return pullCatalogJob(job);
+  if (job.jobType === 'stock_import') return importStockJob(job);
   if (job.jobType === 'orders_pull') {
     if (!(await hasLiveConnection(job.tenantId, job.channel))) {
       throw terminalError(notLiveMessage(job.channel, job.jobType));

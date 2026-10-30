@@ -203,6 +203,8 @@ async function ingestListing(tenantId, userId, row, options = {}) {
     if (row.channelProductId) existing.channelProductId = String(row.channelProductId);
     if (row.price != null && row.price !== '') existing.channelSellingPrice = Number(row.price);
     if (row.barcode) existing.barcode = normalizeBarcode(row.barcode);
+    const photo = firstImage([row.image || row.imageUrl]);
+    if (photo) existing.imageUrl = photo;
     await existing.save();
     let master = null;
     if (existing.masterSkuId) {
@@ -225,6 +227,7 @@ async function ingestListing(tenantId, userId, row, options = {}) {
     channelTitle: String(row.channelTitle || row.title || ''),
     channelSellingPrice: row.price != null && row.price !== '' ? Number(row.price) : null,
     barcode: normalizeBarcode(row.barcode),
+    imageUrl: firstImage([row.image || row.imageUrl]),
     syncStatus: auto ? 'synced' : 'unmapped',
     lastSyncedAt: auto ? new Date() : undefined,
     lastSyncError: '',

@@ -83,6 +83,7 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       orderDate: order.orderDate || new Date(),
       source: 'channel_api',
       externalOrderId,
+      channelOrderNo: String(order.channelOrderNo || '').trim(),
       customer: order.customer || '',
       email: order.email || '',
       phone: order.phone || '',
@@ -106,6 +107,16 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       doc.paymentMode = next.paymentMode || doc.paymentMode;
       doc.orderDate = next.orderDate || doc.orderDate;
       doc.source = 'channel_api';
+      if (next.channelOrderNo) doc.channelOrderNo = next.channelOrderNo;
+      const savedPin = /\b\d{6}\b/.test(`${doc.address || ''} ${doc.city || ''}`);
+      const incomingPin = /\b\d{6}\b/.test(`${next.address || ''} ${next.city || ''}`);
+      if (!savedPin && incomingPin) {
+        doc.address = next.address;
+        doc.city = next.city;
+        if (next.shipState) doc.shipState = next.shipState;
+        if (next.phone) doc.phone = next.phone;
+        if (next.customer) doc.customer = next.customer;
+      }
     }
     const outcome = await finishChannelOrder(tenantId, doc, {
       created,

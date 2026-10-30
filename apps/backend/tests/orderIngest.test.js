@@ -135,6 +135,86 @@ describe('order ingestion', () => {
     assert.equal(await Order.countDocuments({ tenantId: tenant._id, externalOrderId: '' }), 2);
   });
 
+  it('keeps the Shopify delivery pincode and backfills an order saved without one', async () => {
+    const mapped = shopify.mapShopifyOrder({
+      id: 5501,
+      financial_status: 'paid',
+      line_items: [{ sku: 'KURTA', title: 'Kurta', quantity: 1, price: '100.00' }],
+      shipping_address: {
+        address1: '1743-C, VISHNU GARDEN',
+        address2: 'NEAR GURUDWARA',
+        city: 'YAMUNANAGAR',
+        province: 'Haryana',
+        zip: '135001',
+      },
+    }, {});
+    assert.match(`${mapped.address} ${mapped.city}`, /\b135001\b/);
+    assert.match(mapped.address, /NEAR GURUDWARA/);
+    const { tenant } = await seller();
+    await Order.create({
+      tenantId: tenant._id,
+      orderNo: 'SHP-5501',
+      channel: 'Shopify',
+      externalOrderId: '5501',
+      address: '1743-C, VISHNU GARDEN, NEAR GURUDWARA',
+      city: 'YAMUNANAGAR',
+      status: 'New',
+      source: 'channel_api',
+      items: [{ sku: 'KURTA', name: 'Kurta', qty: 1 }],
+    });
+    await ingestChannelOrders(String(tenant._id), 'shopify', [mapped]);
+    const saved = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-5501' }).setOptions({ skipTenantFilter: true });
+    assert.match(`${saved.address} ${saved.city}`, /\b135001\b/);
+  });
+
+  it('keeps the Shopify product vendor on each order line without assigning it', async () => {
+    const { tenant } = await seller();
+    const mapped = shopify.mapShopifyOrder({
+      id: 4406,
+      financial_status: 'paid',
+      line_items: [{ sku: 'KURTA', title: 'Kurta', quantity: 1, price: '100.00', vendor: 'Jaipur Prints' }],
+    }, {});
+    assert.equal(mapped.items[0].vendor, 'Jaipur Prints');
+    await ingestChannelOrders(String(tenant._id), 'shopify', [mapped]);
+    const row = (await ordersFor(tenant, { status: 'all' })).find((order) => order.id === 'SHP-4406');
+    assert.equal(row.items[0].vendor, 'Jaipur Prints');
+    assert.equal(row.subOrders[0].assignedVendor, '');
+  });
+
+  it('creates the master SKU from the order line when a new Shopify SKU arrives before the catalog pull', async () => {
+    const { tenant } = await seller();
+    const tenantId = String(tenant._id);
+    const mapped = shopify.mapShopifyOrder({
+      id: 4407,
+      financial_status: 'paid',
+      line_items: [{ sku: 'LEH-AD-21122', title: 'Bandhani Dupatta', quantity: 1, price: '3499.00', variant_id: 555, product_id: 777 }],
+    }, {});
+    await ingestChannelOrders(tenantId, 'shopify', [mapped]);
+
+    const master = await MasterSku.findOne({ tenantId: tenant._id, code: 'LEH-AD-21122' }).setOptions({ skipTenantFilter: true });
+    assert.ok(master, 'master SKU is created on the first order');
+    const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-4407' }).setOptions({ skipTenantFilter: true });
+    assert.equal(String(order.items[0].masterSkuId), String(master._id));
+    const row = (await ordersFor(tenant, { status: 'all' })).find((one) => one.id === 'SHP-4407');
+    assert.notEqual(row.status, 'Unfulfillable');
+
+    const { importChannel } = require('../src/services/catalogMapping.service');
+    const pull = await importChannel(tenantId, null, 'shopify', [
+      { channelSkuCode: 'LEH-AD-21122', channelVariantId: '555', channelProductId: '777', title: 'Bandhani Dupatta', price: 3499 },
+    ]);
+    assert.equal(pull.exists, 1);
+    assert.equal(await MasterSku.countDocuments({ tenantId: tenant._id, code: /^LEH-AD-21122/ }).setOptions({ skipTenantFilter: true }), 1);
+  });
+
+  it('copies the master SKU GST rate and HSN onto a Shopify order line', async () => {
+    const { tenant, sku } = await seller();
+    await MasterSku.updateOne({ _id: sku._id }, { $set: { hsnCode: '620443', gstRatePercent: 5 } }).setOptions({ skipTenantFilter: true });
+    await ingestChannelOrders(String(tenant._id), 'shopify', [shopifyOrder(4405)]);
+    const saved = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-4405' }).setOptions({ skipTenantFilter: true });
+    assert.equal(saved.items[0].gst, 5);
+    assert.equal(saved.items[0].hsn, '620443');
+  });
+
   it('delivers the same channel order twice as one Master Order and one stock lock', async () => {
     const { tenant } = await seller();
     const id = String(tenant._id);
@@ -181,5 +261,62 @@ describe('order ingestion', () => {
     assert.equal(reopened.status, 'New');
     const fresh = await ordersFor(tenant, { status: 'New' });
     assert.ok(fresh.some((row) => row.id === 'SHP-4403'));
+  });
+
+  it('shows the original Shopify, Amazon and Myntra order id on the list and finds it in search', async () => {
+    const { tenant } = await seller();
+    const id = String(tenant._id);
+    await Order.create({
+      tenantId: tenant._id,
+      orderNo: 'SHP-19028899266653',
+      channel: 'Shopify',
+      externalOrderId: '19028899266653',
+      status: 'New',
+      source: 'channel_api',
+      items: [{ sku: 'KURTA', name: 'Kurta', qty: 1 }],
+    });
+    const named = shopify.mapShopifyOrder({
+      id: 19028899266653,
+      name: '#68762-LEH',
+      order_number: 68762,
+      financial_status: 'paid',
+      line_items: [{ sku: 'KURTA', title: 'Kurta', quantity: 1, price: '100.00' }],
+    }, {});
+    assert.equal(named.channelOrderNo, '#68762-LEH');
+    await ingestChannelOrders(id, 'shopify', [named]);
+    await Order.create({
+      tenantId: tenant._id,
+      orderNo: 'SHP-18966197174365',
+      channel: 'Shopify',
+      externalOrderId: '18966197174365',
+      status: 'New',
+      source: 'channel_api',
+    });
+    await Order.create({
+      tenantId: tenant._id,
+      orderNo: 'AMZ-902-1845936-5435065',
+      channel: 'Amazon',
+      externalOrderId: '902-1845936-5435065',
+      status: 'New',
+      source: 'channel_api',
+    });
+    await Order.create({
+      tenantId: tenant._id,
+      orderNo: 'MYN-100326565624',
+      channel: 'Myntra',
+      externalOrderId: '100326565624',
+      status: 'New',
+      source: 'channel_api',
+    });
+
+    const all = await ordersFor(tenant, { status: 'all' });
+    const original = Object.fromEntries(all.map((row) => [row.id, row.channelOrderNo]));
+    assert.equal(original['SHP-19028899266653'], '#68762-LEH');
+    assert.equal(original['SHP-18966197174365'], '', 'the Shopify internal id is not the order number customers see');
+    assert.equal(original['AMZ-902-1845936-5435065'], '902-1845936-5435065');
+    assert.equal(original['MYN-100326565624'], '100326565624');
+
+    const found = await ordersFor(tenant, { status: 'all', q: '68762-LEH' });
+    assert.deepEqual(found.map((row) => row.id), ['SHP-19028899266653']);
   });
 });

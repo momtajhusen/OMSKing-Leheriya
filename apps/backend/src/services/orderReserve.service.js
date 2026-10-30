@@ -1,4 +1,5 @@
 const SkuMapping = require('../models/SkuMapping');
+const MasterSku = require('../models/MasterSku');
 const Warehouse = require('../models/Warehouse');
 const WarehouseLocationMap = require('../models/WarehouseLocationMap');
 const InventoryReservation = require('../models/InventoryReservation');
@@ -22,12 +23,31 @@ async function warehouseForLocation(tenantId, channel, locationId) {
   return Warehouse.findOne({ _id: map.warehouseId, tenantId }).setOptions({ skipTenantFilter: true });
 }
 
+async function masterFromShopifyLine(tenantId, sku, item) {
+  const { ingestListing } = require('./catalogMapping.service');
+  try {
+    const out = await ingestListing(tenantId, null, {
+      channel: 'shopify',
+      channelSkuCode: sku,
+      channelVariantId: item.channelVariantId || sku,
+      channelProductId: item.channelProductId || '',
+      title: item.name || sku,
+      price: item.price,
+      image: item.imageUrl || '',
+    }, { createMaster: true });
+    return out.mapping?.masterSkuId ? out.mapping : null;
+  } catch (err) {
+    console.error('[ORDER INGEST] master SKU not created for', sku, err.message);
+    return null;
+  }
+}
+
 async function prepareChannelItems(tenantId, channel, items = []) {
   const id = channelIdOf(channel);
   const next = [];
   for (const item of items) {
     const sku = String(item.sku || '').trim();
-    const mapping = sku && id
+    let mapping = sku && id
       ? await SkuMapping.findOne({
         tenantId,
         channel: id,
@@ -36,11 +56,17 @@ async function prepareChannelItems(tenantId, channel, items = []) {
         masterSkuId: { $ne: null },
       }).setOptions({ skipTenantFilter: true })
       : null;
+    if (!mapping && sku && id === 'shopify') mapping = await masterFromShopifyLine(tenantId, sku, item);
     const warehouse = await warehouseForLocation(tenantId, id, item.locationId);
     const virtual = warehouse?.type === 'virtual';
+    const master = mapping?.masterSkuId && (!Number(item.gst) || !item.hsn)
+      ? await MasterSku.findOne({ _id: mapping.masterSkuId, tenantId }).select('hsnCode gstRatePercent').setOptions({ skipTenantFilter: true }).lean()
+      : null;
     next.push({
       ...item,
       sku,
+      hsn: item.hsn || master?.hsnCode || '',
+      gst: Number(item.gst) || Number(master?.gstRatePercent) || 0,
       masterSkuId: mapping?.masterSkuId || item.masterSkuId || null,
       skuMappingId: mapping?._id || item.skuMappingId || null,
       fulfilmentSource: virtual ? 'Virtual' : (item.fulfilmentSource || 'Offline'),

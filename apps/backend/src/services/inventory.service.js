@@ -307,6 +307,54 @@ async function stockIn(tenantId, userId, { masterSkuId, warehouseId, qty, reason
   return row;
 }
 
+// Opening stock skips channel pushes and low stock alerts; one row per SKU and warehouse, only where OMS holds no stock yet.
+async function importOpeningStock(tenantId, userId, lines = [], { reason = 'Opening stock', referenceType = 'opening_stock' } = {}) {
+  await assertOmsMaster(tenantId);
+  const out = { imported: 0, skipped: 0, failed: 0, units: 0 };
+  for (const line of lines) {
+    const n = Math.floor(Number(line.qty) || 0);
+    if (n < 1) {
+      out.skipped += 1;
+      continue;
+    }
+    try {
+      const done = await withTransaction(async (session) => {
+        const sku = await requireSku(tenantId, line.masterSkuId, session);
+        const warehouse = await requireWarehouse(tenantId, line.warehouseId, session);
+        const already = await exec(InventoryLedger.findOne({
+          tenantId, masterSkuId: sku._id, warehouseId: warehouse._id, referenceType,
+        }).select('_id'), session);
+        if (already) return false;
+        const current = await getOrCreateBalance(tenantId, sku._id, warehouse._id, session);
+        if (onHandOf(current) > 0) return false;
+        const balance = await bumpQty(tenantId, sku, warehouse, n, session);
+        await appendLedger({
+          tenantId,
+          masterSkuId: sku._id,
+          warehouseId: warehouse._id,
+          movementType: warehouse.type === 'virtual' ? 'virtual_sync' : 'purchase_receipt',
+          qtyDelta: n,
+          balance,
+          reason,
+          referenceType,
+          userId,
+          session,
+        });
+        return true;
+      });
+      if (done) {
+        out.imported += 1;
+        out.units += n;
+      } else {
+        out.skipped += 1;
+      }
+    } catch (err) {
+      out.failed += 1;
+    }
+  }
+  return out;
+}
+
 function notifyChannels(tenantId, userId, masterSkuId) {
   const { queueInventoryPushes } = require('./inventoryPush.service');
   return queueInventoryPushes(tenantId, userId, masterSkuId).catch((err) => {
@@ -1070,6 +1118,7 @@ module.exports = {
   listBalances,
   channelAts,
   stockIn,
+  importOpeningStock,
   restockReturn,
   stockOut,
   adjustStock,

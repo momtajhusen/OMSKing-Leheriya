@@ -308,3 +308,62 @@ test('retrying an integrations order pull does not reserve a second piece', asyn
     shopify.pullOrders = original;
   }
 });
+
+test('a Shopify invoice uses the Shopify order number and the SKU GST rate, and a GSTIN from another state is refused', async () => {
+  assert.equal(finance.invoiceNumber({ channel: 'Shopify', channelOrderNo: '#68762-LEH', externalOrderId: '19028924072029' }), '68762-LEH');
+
+  const shop = await provisionMerchant({
+    name: 'Invoice shop',
+    ownerEmail: `inv-${Date.now()}@example.com`,
+    ownerName: 'Invoice Owner',
+    password: 'Password1',
+    status: 'active',
+  });
+  const tenantId = shop.tenant._id;
+  await ensureDefaultWarehouses(tenantId);
+  await Warehouse.updateOne(
+    { tenantId, code: 'WH-001' },
+    { $set: { 'address.state': 'Rajasthan', 'address.city': 'Jaipur' } },
+  ).setOptions({ skipTenantFilter: true });
+  const sku = await MasterSku.create({ tenantId, code: 'LEHKCPC113', name: 'Bandhani Dupatta', hsnCode: '620443', gstRatePercent: 5 });
+  await Order.create({
+    tenantId,
+    orderNo: 'SHP-19028924072029',
+    channel: 'Shopify',
+    externalOrderId: '19028924072029',
+    channelOrderNo: '#68762-LEH',
+    status: 'Dispatched',
+    shipState: 'Delhi',
+    customer: 'Pamela Anand',
+    total: 2799,
+    items: [{ name: 'Bandhani Dupatta', sku: 'LEHKCPC113', qty: 1, price: 2799, gst: 0, hsn: '', masterSkuId: sku._id }],
+    source: 'channel_api',
+  });
+  const token = await login(shop.owner.email);
+
+  shop.tenant.legalEntity = { ...(shop.tenant.legalEntity || {}), gstin: '27AAPFU0939G1ZV' };
+  shop.tenant.markModified('legalEntity');
+  await shop.tenant.save();
+  const refused = await api('POST', '/api/v1/orders/SHP-19028924072029/invoice', { token, json: { email: false } });
+  assert.equal(refused.status, 400, JSON.stringify(refused.body));
+  assert.match(refused.body.message, /Maharashtra/);
+  assert.match(refused.body.message, /Rajasthan/);
+
+  shop.tenant.legalEntity = { ...(shop.tenant.legalEntity || {}), gstin: '08AAPFU0939G1ZV' };
+  shop.tenant.markModified('legalEntity');
+  await shop.tenant.save();
+  const invoice = await api('POST', '/api/v1/orders/SHP-19028924072029/invoice', { token, json: { email: false } });
+  assert.equal(invoice.status, 200, JSON.stringify(invoice.body));
+  assert.equal(invoice.body.data.invoiceNo, '68762-LEH');
+  const pdf = Buffer.from(invoice.body.data.invoicePdf, 'base64').toString('latin1');
+  assert.match(pdf, /Tax invoice 68762-LEH/);
+  assert.match(pdf, /Order 68762-LEH/);
+  assert.equal(pdf.includes('SHP-19028924072029'), false);
+  assert.match(pdf, /Taxable 2665\.71/);
+  assert.match(pdf, /IGST 133\.29/);
+  assert.match(invoice.body.data.invoiceHtml, /Tax invoice 68762-LEH/);
+  assert.match(invoice.body.data.invoiceHtml, /620443/);
+  const saved = await Order.findOne({ tenantId, orderNo: 'SHP-19028924072029' }).setOptions({ skipTenantFilter: true });
+  assert.equal(saved.items[0].gst, 5);
+  assert.equal(saved.items[0].hsn, '620443');
+});

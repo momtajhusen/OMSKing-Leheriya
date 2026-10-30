@@ -18,6 +18,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle } from 'lucide-react';
 import { isChannelManaged, packetIdOf, openMyntraDocument } from '../../lib/channelOrders';
+import { shortOrderId, shortSubOrderId } from '../../lib/orderIds';
 
 export default function OrderDetailPage() {
   const { orderId } = useParams();
@@ -82,6 +83,33 @@ export default function OrderDetailPage() {
 
   const channelManaged = isChannelManaged(order);
   const packetId = packetIdOf(order);
+  const displayId = shortOrderId(order);
+
+  const subsOf = (item) => order.subOrders.filter((sub) => sub.sku === item.sku);
+  const itemVendor = (item) => {
+    const names = [...new Set(subsOf(item).map((sub) => sub.assignedVendor || ''))];
+    return names.length === 1 ? names[0] : 'mixed';
+  };
+  const isSavedVendor = (name) => vendors.some((vendor) => vendor.name.toLowerCase() === String(name || '').toLowerCase());
+
+  const assignItem = async (item, name) => {
+    const subs = subsOf(item);
+    if (!subs.length) {
+      toast.error(`${item.sku} has no sub-order to assign`);
+      return;
+    }
+    setBusy(`item-${item.sku}`);
+    for (const sub of subs) {
+      const next = await assignSubOrder(order.id, sub.id, { assignedVendor: name });
+      if (next?.error) {
+        setBusy('');
+        toast.error(next.error);
+        return;
+      }
+    }
+    setBusy('');
+    toast.success(`${item.sku} (${subs.length} ${subs.length === 1 ? 'unit' : 'units'}) assigned to ${name || 'unassigned'}`);
+  };
 
   const runChannelDoc = async (type) => {
     setBusy(type);
@@ -98,9 +126,9 @@ export default function OrderDetailPage() {
     <div className="space-y-3">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div className="space-y-2">
-          <Breadcrumbs items={[{ label: 'Orders', href: '/orders' }, { label: order.id }]} />
+          <Breadcrumbs items={[{ label: 'Orders', href: '/orders' }, { label: displayId }]} />
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-bold">{order.id}</h1>
+            <h1 className="text-xl font-bold">{displayId}</h1>
             <Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge>
             <Badge variant="outline">{order.channel}</Badge>
             <Badge variant="secondary">{order.paymentMode}</Badge>
@@ -114,6 +142,9 @@ export default function OrderDetailPage() {
           <p className="text-sm text-muted-foreground">
             Master order stays one. Qty &gt; 1 is split as {masterHint(order)}.
           </p>
+          {displayId !== order.id && (
+            <p className="text-xs text-muted-foreground">OMS ref {order.id}</p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => navigate('/orders')}>
@@ -153,7 +184,7 @@ export default function OrderDetailPage() {
                 const next = await markDelivered(order.id);
                 setBusy('');
                 if (next?.error) { toast.error(next.error); return; }
-                toast.success(`${order.id} marked delivered. Book reverse pickup when you are ready.`);
+                toast.success(`${displayId} marked delivered. Book reverse pickup when you are ready.`);
               }}
             >
               <CheckCircle className="w-4 h-4 mr-2" />
@@ -262,9 +293,9 @@ export default function OrderDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle>Order items</CardTitle>
-          <CardDescription>Same product photo is kept on every split sub-order.</CardDescription>
+          <CardDescription>Same product photo is kept on every split sub-order. Assigning a vendor here covers every unit of that item.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -281,7 +312,36 @@ export default function OrderDetailPage() {
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <ProductThumb name={item.name} sku={item.sku} src={item.imageUrl} size="lg" />
-                      <span className="font-medium">{item.name}</span>
+                      <div className="min-w-[14rem] space-y-1">
+                        <div className="font-medium">{item.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Shopify vendor: <span className="font-medium text-foreground">{item.vendor || '—'}</span>
+                        </div>
+                        {can(PERMISSIONS.ORDERS_EDIT) ? (
+                          <>
+                            <Select
+                              className="h-9 max-w-xs"
+                              aria-label={`Assign vendor for ${item.sku}`}
+                              disabled={busy === `item-${item.sku}`}
+                              value={itemVendor(item)}
+                              onChange={(event) => assignItem(item, event.target.value)}
+                            >
+                              {itemVendor(item) === 'mixed' && <option value="mixed" disabled>Different vendor per unit</option>}
+                              <option value="">Assign vendor…</option>
+                              {vendors.map((vendor) => (
+                                <option key={vendor.id} value={vendor.name}>
+                                  {vendor.name}{item.vendor && vendor.name.toLowerCase() === item.vendor.toLowerCase() ? ' (Shopify vendor)' : ''}
+                                </option>
+                              ))}
+                            </Select>
+                            {item.vendor && !isSavedVendor(item.vendor) && (
+                              <div className="text-[11px] text-muted-foreground">{item.vendor} is not in Vendors yet</div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-xs">Assigned: {itemVendor(item) === 'mixed' ? 'Different per unit' : itemVendor(item) || '—'}</div>
+                        )}
+                      </div>
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">{item.sku}</TableCell>
@@ -302,7 +362,7 @@ export default function OrderDetailPage() {
             Fulfilment & vendor tracking
           </CardTitle>
           <CardDescription>
-            {`Each unit is a sub-order (${masterOrderBaseHint(order)}-1, -2, …) and can be assigned to a vendor on its own.`}
+            {`Each unit is a sub-order (${displayId}-1, -2, …) and can be assigned to a vendor on its own.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -323,7 +383,7 @@ export default function OrderDetailPage() {
               {order.subOrders.map((sub) => (
                 <TableRow key={sub.id} className={highlightId === sub.id ? 'bg-emerald-50/80 dark:bg-emerald-950/20' : ''}>
                   <TableCell className="font-medium whitespace-nowrap">
-                    <Link className="text-primary hover:underline" to={`/orders/${encodeURIComponent(sub.id)}`}>{sub.id}</Link>
+                    <Link className="text-primary hover:underline" to={`/orders/${encodeURIComponent(sub.id)}`}>{shortSubOrderId(order, sub)}</Link>
                     <div className="text-[11px] text-muted-foreground">index {sub.index}</div>
                   </TableCell>
                   <TableCell>
@@ -344,7 +404,7 @@ export default function OrderDetailPage() {
                           const name = event.target.value;
                           const next = await assignSubOrder(order.id, sub.id, { assignedVendor: name });
                           if (next?.error) toast.error(next.error);
-                          else toast.success(`${sub.id} assigned to ${name || 'unassigned'}`);
+                          else toast.success(`${shortSubOrderId(order, sub)} assigned to ${name || 'unassigned'}`);
                         }}
                       >
                         <option value="">Unassigned</option>
@@ -439,11 +499,7 @@ export default function OrderDetailPage() {
 }
 
 function masterHint(order) {
-  const ids = (order.subOrders || []).map((sub) => sub.id);
-  if (ids.length <= 1) return ids[0] || order.id;
+  const ids = (order.subOrders || []).map((sub) => shortSubOrderId(order, sub));
+  if (ids.length <= 1) return ids[0] || shortOrderId(order);
   return `${ids[0]}, ${ids[1]}${ids.length > 2 ? '…' : ''}`;
-}
-
-function masterOrderBaseHint(order) {
-  return String(order.id).replace(/-LEH$/i, '');
 }

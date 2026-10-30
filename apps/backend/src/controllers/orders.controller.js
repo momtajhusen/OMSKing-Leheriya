@@ -163,6 +163,7 @@ async function listOrders(req, res) {
   if (source && source !== 'all') filtered = filtered.filter((row) => row.fulfilmentSource === source);
   if (q) {
     filtered = filtered.filter((row) => row.id.toLowerCase().includes(q)
+      || String(row.channelOrderNo || '').toLowerCase().includes(q)
       || (row.subOrders || []).some((sub) => String(sub.id || '').toLowerCase().includes(q))
       || String(row.customer || '').toLowerCase().includes(q));
   }
@@ -266,6 +267,30 @@ async function markPaid(req, res) {
   return successResponse(res, await decorateOne(tenantId, order), 'Payment marked. This order is paid.');
 }
 
+async function fillLineTax(tenantId, order) {
+  const open = (order.items || []).filter((item) => !Number(item.gst) || !item.hsn);
+  if (!open.length) return;
+  const MasterSku = require('../models/MasterSku');
+  const Product = require('../models/Product');
+  const ids = open.map((item) => item.masterSkuId).filter(Boolean);
+  const codes = open.map((item) => String(item.sku || '').trim().toUpperCase()).filter(Boolean);
+  const masters = await MasterSku.find({ tenantId, $or: [{ _id: { $in: ids } }, { code: { $in: codes } }] })
+    .select('code hsnCode gstRatePercent productId').setOptions({ skipTenantFilter: true }).lean();
+  const productIds = masters.map((row) => row.productId).filter(Boolean);
+  const products = productIds.length
+    ? await Product.find({ tenantId, _id: { $in: productIds } }).select('hsnCode gstRatePercent').setOptions({ skipTenantFilter: true }).lean()
+    : [];
+  const productOf = new Map(products.map((row) => [String(row._id), row]));
+  open.forEach((item) => {
+    const master = masters.find((row) => String(row._id) === String(item.masterSkuId || ''))
+      || masters.find((row) => row.code === String(item.sku || '').trim().toUpperCase());
+    if (!master) return;
+    const product = productOf.get(String(master.productId || '')) || {};
+    if (!Number(item.gst)) item.gst = Number(master.gstRatePercent) || Number(product.gstRatePercent) || 0;
+    if (!item.hsn) item.hsn = master.hsnCode || product.hsnCode || '';
+  });
+}
+
 async function generateInvoice(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
@@ -278,6 +303,13 @@ async function generateInvoice(req, res) {
   const tenant = await Tenant.findById(tenantId).setOptions({ skipTenantFilter: true });
   const home = await Warehouse.findOne({ tenantId, code: 'WH-001' }).setOptions({ skipTenantFilter: true });
   const warehouseState = home?.address?.state || '';
+  const { gstinState, sameState } = require('../services/finance.service');
+  const gstin = String(tenant?.legalEntity?.gstin || '').trim();
+  const registered = gstinState(gstin);
+  if (registered && warehouseState && !sameState(registered, warehouseState)) {
+    throw new HttpError(400, `Invoice not created. GSTIN ${gstin} is registered in ${registered}, but pickup warehouse WH-001 is in ${warehouseState}. Correct the GSTIN in Company Details or the state in Warehouses, then generate the invoice again.`);
+  }
+  await fillLineTax(tenantId, order);
   const kind = req.body?.kind === 'credit' ? 'credit' : 'invoice';
   const pdf = buildInvoicePdf(order.toObject(), {
     company: { companyName: tenant?.name || '', gstin: tenant?.legalEntity?.gstin || '' },

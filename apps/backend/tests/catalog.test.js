@@ -262,3 +262,45 @@ test('amazon live test calls the live host and a sandbox token does not count as
   assert.match(live.message, /live API returned 403/);
   assert.match(urls.find((url) => url.includes('/orders/')), /^https:\/\/sellingpartnerapi-eu\.amazon\.com/);
 });
+
+test('a Shopify store with more than 10,000 products is pulled to the last page', async () => {
+  const total = 51;
+  let calls = 0;
+  const request = async (url) => {
+    if (url.includes('/locations.json')) return { status: 200, text: '{"locations":[]}', headers: {} };
+    calls += 1;
+    const page = calls;
+    return {
+      status: 200,
+      text: JSON.stringify({ products: [{ id: page, title: `P${page}`, variants: [{ id: page, sku: `SKU-${page}` }] }] }),
+      headers: page < total ? { link: `<https://shop.example/admin/api/2024-10/products.json?page_info=p${page + 1}&limit=250>; rel="next"` } : {},
+    };
+  };
+  const pulled = await pullCatalog({ shopUrl: 'shop.example', adminToken: 'shpat_test' }, { request });
+  assert.equal(pulled.rows.length, total);
+  assert.equal(pulled.rows.at(-1).channelSkuCode, `SKU-${total}`);
+});
+
+test('each Shopify variant keeps its own photo on the order line', async () => {
+  const { imagesBySku, paintOrder } = require('../src/lib/catalogImages');
+  const red = 'https://cdn.shopify.com/s/files/dupatta-design-14-red.jpg';
+  const green = 'https://cdn.shopify.com/s/files/dupatta-design-7-green.jpg';
+  const variants = [
+    { channelSkuCode: 'DUP-PR14', channelVariantId: 'var-14', channelProductId: 'prod-dupatta', channelTitle: 'Paithani Dupatta / Design-14', image: red },
+    { channelSkuCode: 'DUP-PR7', channelVariantId: 'var-7', channelProductId: 'prod-dupatta', channelTitle: 'Paithani Dupatta / Design-7', image: green },
+  ];
+  await run(() => importChannel(tenant._id, null, 'shopify', variants));
+  const order = {
+    items: [{ sku: 'DUP-PR14', name: 'Paithani Dupatta' }, { sku: 'DUP-PR7', name: 'Paithani Dupatta' }],
+    subOrders: [{ sku: 'DUP-PR14', title: 'Paithani Dupatta' }, { sku: 'DUP-PR7', title: 'Paithani Dupatta' }],
+  };
+  const bySku = await imagesBySku(tenant._id, ['DUP-PR14', 'DUP-PR7']);
+  const painted = paintOrder(order, bySku);
+  assert.deepEqual(painted.items.map((item) => item.imageUrl), [red, green]);
+  assert.deepEqual(painted.subOrders.map((sub) => sub.imageUrl), [red, green]);
+
+  const pink = 'https://cdn.shopify.com/s/files/dupatta-design-7-pink.jpg';
+  await run(() => importChannel(tenant._id, null, 'shopify', [{ ...variants[1], image: pink }]));
+  const again = await imagesBySku(tenant._id, ['DUP-PR7']);
+  assert.equal(paintOrder({ items: [{ sku: 'DUP-PR7' }] }, again).items[0].imageUrl, pink);
+});

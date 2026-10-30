@@ -49,9 +49,20 @@ function indexImages(products, masters, mappings) {
     if (url) byProduct.set(String(product._id), url);
   });
   const bySku = new Map();
+  const variantPhoto = new Map();
+  [...mappings]
+    .sort((a, b) => Number(b.channel === 'shopify') - Number(a.channel === 'shopify'))
+    .forEach((mapping) => {
+      const url = firstImage([mapping.imageUrl]);
+      if (!url) return;
+      remember(bySku, mapping.channelSkuCode, url);
+      remember(bySku, mapping.channelVariantId, url);
+      const master = String(mapping.masterSkuId || '');
+      if (master && !variantPhoto.has(master)) variantPhoto.set(master, url);
+    });
   const urlForMaster = new Map();
   masters.forEach((master) => {
-    const url = byProduct.get(String(master.productId));
+    const url = variantPhoto.get(String(master._id)) || byProduct.get(String(master.productId));
     if (!url) return;
     urlForMaster.set(String(master._id), url);
     remember(bySku, master.code, url);
@@ -71,7 +82,7 @@ async function imagesForCatalog(tenantId) {
     Product.find({ tenantId }).select('images').setOptions({ skipTenantFilter: true }).lean(),
     MasterSku.find({ tenantId }).select('code productId').setOptions({ skipTenantFilter: true }).lean(),
     SkuMapping.find({ tenantId, masterSkuId: { $ne: null } })
-      .select('channelSkuCode channelVariantId masterSkuId')
+      .select('channel channelSkuCode channelVariantId masterSkuId imageUrl')
       .setOptions({ skipTenantFilter: true })
       .lean(),
   ]);
@@ -82,7 +93,7 @@ async function imagesForKeys(tenantId, keys) {
   const wanted = expandKeys(keys);
   if (!wanted.length) return new Map();
   const codes = [...new Set(wanted.map((key) => key.toUpperCase()))];
-  const norms = [...new Set(wanted.map((key) => key.toLowerCase()))];
+  const norms = [...new Set(wanted.map((key) => key.toUpperCase().replace(/\s+/g, '')))];
   const mappings = await SkuMapping.find({
     tenantId,
     masterSkuId: { $ne: null },
@@ -90,7 +101,7 @@ async function imagesForKeys(tenantId, keys) {
       { channelSkuCodeNorm: { $in: norms } },
       { channelVariantId: { $in: wanted } },
     ],
-  }).select('channelSkuCode channelVariantId masterSkuId').setOptions({ skipTenantFilter: true }).lean();
+  }).select('channel channelSkuCode channelVariantId masterSkuId imageUrl').setOptions({ skipTenantFilter: true }).lean();
   const masterIds = mappings.map((row) => row.masterSkuId).filter(Boolean);
   const masters = await MasterSku.find({
     tenantId,

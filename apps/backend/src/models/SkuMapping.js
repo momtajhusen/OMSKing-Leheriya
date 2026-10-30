@@ -17,6 +17,7 @@ const skuMappingSchema = new mongoose.Schema({
   channelTitle: { type: String, default: '' },
   channelSellingPrice: { type: Number, default: null },
   barcode: { type: String, default: '' },
+  imageUrl: { type: String, default: '' },
   syncStatus: { type: String, enum: SYNC, default: 'unmapped' },
   lastSyncedAt: Date,
   lastSyncError: { type: String, default: '' },

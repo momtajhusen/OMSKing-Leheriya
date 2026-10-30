@@ -245,7 +245,7 @@ async function pullCatalog(creds, opts = {}) {
   const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
   const products = [];
   let url = `https://${shop}/admin/api/2024-10/products.json?limit=250`;
-  for (let page = 0; page < 40 && url; page += 1) {
+  for (let page = 0; page < 400 && url; page += 1) {
     const res = await request(url, headers);
     if (res.status === 401 || res.status === 403) {
       const err = new Error('Shopify rejected the Admin API token. Products were not pulled.');
@@ -272,6 +272,76 @@ async function pullCatalog(creds, opts = {}) {
     }));
   }
   return { rows: products.flatMap(variantRows), locations };
+}
+
+const LOCATION_ON_HAND_QUERY = `query LocationOnHand($id: ID!, $after: String) {
+  location(id: $id) {
+    inventoryLevels(first: 200, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        quantities(names: ["on_hand"]) { name quantity }
+        item { variant { id } }
+      }
+    }
+  }
+}`;
+
+async function pullLocationOnHand(creds, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const shop = shopOf(ready);
+  const token = String(ready?.adminToken || '').trim();
+  if (!shop || !token) {
+    const err = new Error('Shopify stock was not read. Shop URL and Admin API token are missing.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
+  const sleep = opts.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const url = `https://${shop}/admin/api/2024-10/graphql.json`;
+  const rows = [];
+  let after = null;
+  let waits = 0;
+  for (let page = 0; page < 500; page += 1) {
+    const res = await request('POST', url, {
+      headers: shopifyHeaders(token),
+      body: JSON.stringify({ query: LOCATION_ON_HAND_QUERY, variables: { id: `gid://shopify/Location/${opts.locationId}`, after } }),
+    });
+    if (res.status === 401 || res.status === 403) {
+      const err = new Error('Shopify rejected the Admin API token. Stock was not read.');
+      err.statusCode = 400;
+      err.terminal = true;
+      throw err;
+    }
+    const body = JSON.parse(res.text || '{}');
+    const throttled = (body.errors || []).some((e) => e?.extensions?.code === 'THROTTLED');
+    if (throttled && waits < 30) {
+      waits += 1;
+      await sleep(2000);
+      page -= 1;
+      continue;
+    }
+    if (res.status < 200 || res.status >= 300 || body.errors?.length) {
+      const err = new Error(`Shopify stock read failed: ${body.errors?.[0]?.message || res.status}`);
+      err.statusCode = 502;
+      throw err;
+    }
+    const levels = body.data?.location?.inventoryLevels;
+    (levels?.nodes || []).forEach((node) => {
+      const variantId = String(node?.item?.variant?.id || '').split('/').pop();
+      if (!variantId) return;
+      const onHand = Number((node.quantities || []).find((q) => q.name === 'on_hand')?.quantity) || 0;
+      rows.push({ variantId, onHand });
+    });
+    if (!levels?.pageInfo?.hasNextPage) break;
+    after = levels.pageInfo.endCursor;
+    const cost = body.extensions?.cost;
+    const left = Number(cost?.throttleStatus?.currentlyAvailable);
+    const need = Number(cost?.requestedQueryCost) || 0;
+    const rate = Number(cost?.throttleStatus?.restoreRate) || 50;
+    if (Number.isFinite(left) && left < need) await sleep(Math.ceil(((need - left) / rate) * 1000));
+  }
+  return rows;
 }
 
 function shopifyHeaders(token) {
@@ -447,6 +517,19 @@ function shopifyPayment(order, creds) {
   return 'Prepaid';
 }
 
+function shippingDestination(address) {
+  const street = [address?.address1, address?.address2].map((part) => String(part || '').trim()).filter(Boolean).join(', ');
+  const city = String(address?.city || '').trim();
+  const zip = String(address?.zip || '').replace(/\s+/g, '');
+  const pin = /^\d{6}$/.test(zip) ? zip : '';
+  const already = new RegExp(`\\b${pin}\\b`).test(`${street} ${city}`);
+  return {
+    address: street,
+    city: pin && !already ? `${city} ${pin}`.trim() : city,
+    shipState: String(address?.province || '').trim(),
+  };
+}
+
 function mapShopifyOrder(order, creds) {
   const externalOrderId = String(order?.id || '').trim();
   if (!externalOrderId || !Array.isArray(order?.line_items)) return null;
@@ -455,12 +538,16 @@ function mapShopifyOrder(order, creds) {
     name: String(line.title || line.sku || ''),
     sku: String(line.sku || '').trim(),
     imageUrl: String(line.image?.src || line.image_url || '').trim(),
+    vendor: String(line.vendor || '').trim(),
+    channelVariantId: line.variant_id ? String(line.variant_id) : '',
+    channelProductId: line.product_id ? String(line.product_id) : '',
     qty: Math.max(1, Number(line.quantity) || 1),
     price: Number(line.price) || 0,
     locationId: String(line.origin_location?.id || order.location_id || ''),
   })).filter((line) => line.sku);
   return {
     externalOrderId,
+    channelOrderNo: String(order.name || order.order_number || '').trim(),
     status: cancelled ? 'Cancelled' : (order.fulfillment_status === 'fulfilled' ? 'Dispatched' : 'New'),
     paymentMode: shopifyPayment(order, creds),
     total: Number(order.total_price) || 0,
@@ -468,9 +555,7 @@ function mapShopifyOrder(order, creds) {
     customer: String(order.shipping_address?.name || ''),
     email: String(order.email || ''),
     phone: String(order.shipping_address?.phone || order.phone || ''),
-    address: String(order.shipping_address?.address1 || ''),
-    city: String(order.shipping_address?.city || ''),
-    shipState: String(order.shipping_address?.province || ''),
+    ...shippingDestination(order.shipping_address),
     items,
     sourceOrderData: {
       id: externalOrderId,
@@ -605,6 +690,7 @@ module.exports = {
   pullReturns,
   pushInventory,
   readLocationAvailable,
+  pullLocationOnHand,
   fulfillOrder,
   cancelFulfillment,
 };

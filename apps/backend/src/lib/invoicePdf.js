@@ -60,7 +60,7 @@ function buildInvoicePdf(order, { company = {}, warehouseState = '', kind = 'inv
     kind === 'credit' ? `Credit note ${number}` : `Tax invoice ${number}`,
     company.companyName || '',
     company.gstin ? `GSTIN ${company.gstin}` : '',
-    `Order ${order.orderNo || order.id || ''}`,
+    `Order ${String(order.channelOrderNo || '').replace(/^#/, '') || order.orderNo || order.id || ''}`,
     order.customer ? `Customer ${order.customer}` : '',
     `Ship-to state ${ship || '-'}`,
     `Warehouse state ${warehouseState || '-'}`,

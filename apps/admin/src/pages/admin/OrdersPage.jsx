@@ -292,7 +292,10 @@ export default function OrdersPage() {
                 {filteredOrders.map((order) => (
                   <TableRow key={order.id} className="cursor-pointer" onClick={() => openOrder(order)}>
                     <TableCell className="font-medium">
-                      <span className="text-primary hover:underline">{order.id}</span>
+                      <span className="text-primary hover:underline">{order.channelOrderNo || order.id}</span>
+                      {order.channelOrderNo && order.channelOrderNo !== order.id && (
+                        <div className="text-[11px] text-muted-foreground">{order.id}</div>
+                      )}
                       {(order.subOrders || []).length > 1 && (
                         <div className="text-[11px] text-muted-foreground">{order.subOrders.length} sub-orders</div>
                       )}
