@@ -79,6 +79,11 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
   if (!shipment?.awb) {
     const pickup = await pickupWarehouse(tenantId);
     const pincode = pinOf(order);
+    if (!/^\d{6}$/.test(pincode)) {
+      const err = new HttpError(400, 'This order has no 6-digit delivery pincode, so Delhivery was not called.');
+      err.terminal = true;
+      throw err;
+    }
     await delhivery.serviceable(creds, { pincode, paymentMode: pay, request });
     const booked = await delhivery.book(creds, {
       name: order.customer || 'Customer',

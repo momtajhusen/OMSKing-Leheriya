@@ -97,15 +97,15 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">Dashboard</h1>
           <p className="text-sm text-muted-foreground">
             {tenantName ? `${tenantName} · ` : ''}{orderCount} orders from connected channels
           </p>
         </div>
-        <div className="flex flex-wrap items-end justify-end gap-2">
-          <FieldLabel label="Filters">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-end">
+          <FieldLabel label="Filters" className="w-full sm:w-auto">
             <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row">
               <Select className="h-9 w-full sm:w-40" value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)} aria-label="Channel">
                 <option value="all">All channels</option>
@@ -119,7 +119,7 @@ export default function DashboardPage() {
               </Select>
             </div>
           </FieldLabel>
-          <Button variant="outline" className="h-9" onClick={() => navigate('/orders')}>View all orders</Button>
+          <Button variant="outline" className="h-9 w-full sm:w-auto" onClick={() => navigate('/orders')}>View all orders</Button>
         </div>
       </div>
 
@@ -127,14 +127,14 @@ export default function DashboardPage() {
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>
       )}
 
-      <div className="flex items-center gap-2 flex-wrap overflow-x-auto pb-2">
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 no-scrollbar">
         {STATUS_TABS.map((tab) => (
           <Button
             key={tab}
             variant={activeTab === tab ? 'default' : 'outline'}
             size="sm"
             onClick={() => setActiveTab(tab)}
-            className="text-xs whitespace-nowrap"
+            className="text-xs shrink-0"
           >
             {tab === 'all' ? `All ${pulseCount('all')}` : `${tab} ${pulseCount(tab)}`}
           </Button>

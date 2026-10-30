@@ -63,8 +63,14 @@ function parseJson(text) {
 async function serviceable(creds, opts = {}) {
   const { pincode, paymentMode } = opts;
   const token = requireToken(creds);
-  const request = gatedRequest(creds, opts.request, httpCall);
   const pin = String(pincode || '').trim();
+  if (!/^\d{6}$/.test(pin)) {
+    const err = new Error('Delhivery was not called. The delivery pincode must be 6 digits.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const request = gatedRequest(creds, opts.request, httpCall);
   const res = await request('GET', `${HOST}/c/api/pin-codes/json/?filter_codes=${encodeURIComponent(pin)}`, {
     headers: authHeaders(token),
   });

@@ -34,7 +34,7 @@ function KpiCard({ label, value, delta, icon: Icon, tone = 'blue', className, on
       onClick={onClick}
       onKeyDown={onClick ? (event) => event.key === 'Enter' && onClick() : undefined}
       className={cn(
-        'premium-card p-3 relative overflow-hidden group min-w-0 w-full',
+        'premium-card p-2 sm:p-3 relative overflow-hidden group min-w-0 w-full',
         onClick && 'cursor-pointer',
         className
       )}
@@ -43,21 +43,21 @@ function KpiCard({ label, value, delta, icon: Icon, tone = 'blue', className, on
       {/* Subtle gradient background effect */}
       <div className="absolute top-0 right-0 w-24 h-24 sm:w-32 sm:h-32 bg-gradient-to-br from-[hsl(var(--color-primary-blue))]/5 to-[hsl(var(--color-indigo-accent))]/5 rounded-full blur-2xl"></div>
       
-      <div className="relative flex items-center justify-between gap-2">
+      <div className="relative flex items-center justify-between gap-1.5 sm:gap-2">
         <div className="min-w-0 flex-1">
-          <p className="mb-0.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</p>
-          <p className="break-words text-lg font-bold leading-tight tracking-tight text-foreground sm:text-xl">{value}</p>
+          <p className="mb-0.5 text-[9px] sm:text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground line-clamp-1">{label}</p>
+          <p className="break-words text-base sm:text-lg font-bold leading-tight tracking-tight text-foreground">{value}</p>
           {delta !== undefined && (
-            <div className={cn('mt-2 flex items-center text-xs sm:text-sm font-medium', getDeltaColor(delta))}>
-              <DeltaIcon className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+            <div className={cn('mt-1.5 sm:mt-2 flex items-center text-[10px] sm:text-sm font-medium', getDeltaColor(delta))}>
+              <DeltaIcon className="mr-0.5 sm:mr-1 h-3 w-3 sm:h-4 sm:w-4" />
               <span>{Math.abs(delta)}%</span>
-              <span className="ml-1.5 text-muted-foreground text-[10px] sm:text-xs">vs last period</span>
+              <span className="ml-1 text-muted-foreground text-[8px] sm:text-[10px] hidden xs:inline">vs last period</span>
             </div>
           )}
         </div>
         {Icon && (
-          <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-sm', ICON_TONES[tone] || ICON_TONES.blue)}>
-            <Icon className="h-4 w-4" />
+          <div className={cn('flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-gradient-to-br text-white shadow-sm', ICON_TONES[tone] || ICON_TONES.blue)}>
+            <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
           </div>
         )}
       </div>

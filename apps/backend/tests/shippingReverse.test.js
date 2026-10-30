@@ -152,6 +152,32 @@ async function shopifyOrder(tenantId, orderNo) {
   });
 }
 
+test('a missing delivery pincode does not call Delhivery', async () => {
+  const tenant = await seller();
+  await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-NO-PIN',
+    channel: 'Shopify',
+    paymentMode: 'Prepaid',
+    address: '1743-C, VISHNU GARDEN, NEAR GURUDWARA',
+    city: 'YAMUNANAGAR',
+    externalOrderId: 'gid-no-pin',
+    items: [{ name: 'Suit', sku: 'LEHE2486', qty: 1 }],
+    source: 'manual',
+  });
+  const courier = delhiveryMock();
+  await assert.rejects(
+    () => bookShopify(tenant._id, 'SHP-NO-PIN', {
+      delhiveryCreds,
+      delhiveryRequest: courier.request,
+      shopifyCreds: shopCreds,
+      shopifyRequest: shopifyMock().request,
+    }),
+    /6-digit delivery pincode/,
+  );
+  assert.equal(courier.calls.length, 0);
+});
+
 test('a Shopify order books the seller Delhivery AWB', async () => {
   const tenant = await seller();
   await shopifyOrder(tenant._id, 'SHP-OWN');
