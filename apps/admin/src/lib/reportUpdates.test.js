@@ -81,7 +81,7 @@ test('every tracked message shows the developer status, and the client confirmat
   assert.match(chat, /markSteps\(action\)/);
 });
 
-test('developer mark options and developer status only appear when the app runs on localhost', () => {
+test('developer mark options and the open developer statuses only appear when the app runs on localhost', () => {
   assert.equal(isLocalApp({ hostname: 'localhost' }), true);
   assert.equal(isLocalApp({ hostname: '127.0.0.1' }), true);
   assert.equal(isLocalApp({ hostname: 'omsking.codersalpha.com' }), false);
@@ -90,8 +90,10 @@ test('developer mark options and developer status only appear when the app runs 
     assert.deepEqual(markOptions(status, 'platform', false), [], `no developer marks on the live site (${status})`);
   }
   assert.deepEqual(markOptions('pending', 'tenant', false).map((o) => o.id), ['pending', 'fixed'], 'the client keeps Pending / Fixed on live');
-  assert.deepEqual(statusChips('done', false), [], 'no developer status on the live site');
-  assert.deepEqual(statusChips('confirmed', false).map((c) => c.label), ['Client · Confirmed']);
+  assert.deepEqual(statusChips('pending', false), [], 'no open developer status on the live site');
+  assert.deepEqual(statusChips('in_progress', false), [], 'no open developer status on the live site');
+  assert.deepEqual(statusChips('done', false).map((c) => c.label), ['Developer · Complete'], 'everyone sees Complete on live');
+  assert.deepEqual(statusChips('confirmed', false).map((c) => c.label), ['Developer · Complete', 'Client · Confirmed']);
 });
 
 test('every login gets the Report button in its header: any admin, vendor or super admin, on localhost too', () => {
@@ -101,6 +103,17 @@ test('every login gets the Report button in its header: any admin, vendor or sup
   assert.doesNotMatch(header, /isLocalApp/);
   assert.match(vendor, /<ReportButton mode="merchant" \/>/, 'the vendor header has the Report button');
   assert.match(read('../components/layout/PlatformLayout.jsx'), /<ReportButton mode="platform" \/>/);
+});
+
+test('on localhost the client chat also gets the developer marks, sent through the developer route', () => {
+  assert.match(inbox, /developerUpdatesUrl=\{isLocalApp\(\) && !user\?\.impersonating \? '\/support\/as-developer\/updates' : undefined\}/);
+  assert.match(chat, /const markMessage = async \(m, action, asDeveloper = false\)/);
+  assert.match(chat, /const url = asDeveloper \? developerUpdatesUrl : updatesUrl;/);
+  assert.match(chat, /markedBy: asDeveloper \? 'platform' : mySide/);
+  assert.match(chat, /onDevMark=\{developerUpdatesUrl \? \(m, action\) => markMessage\(m, action, true\) : undefined\}/);
+  assert.match(bubble, /const devOptions = onDevMark \? markOptions\(message\.update\?\.status \|\| null, 'platform'\) : \[\];/);
+  assert.match(bubble, /\{ key: 'dev', title: 'Developer status', items: devOptions, apply: onDevMark \}/, 'a Developer status section that marks through onDevMark');
+  assert.match(bubble, /section\.apply\(message, o\.action\)/);
 });
 
 test('the chat filters keep messages by status or by who made the last mark', () => {
@@ -164,4 +177,26 @@ test('the client-facing Report chat is branded Developer Support, not OMSKing', 
   for (const source of [chat, button]) {
     assert.doesNotMatch(source, /['"`][^'"`\n]*OMSKing[^'"`\n]*['"`]/, 'no visible OMSKing label left');
   }
+});
+
+test('a completed message\'s detail tooltip says in short Hinglish what the issue was and what fix was applied', () => {
+  const summary = { issue: 'Vendor dropdown khaali tha', fix: 'Row me Assign button lagaya' };
+  for (const status of ['done', 'confirmed']) {
+    const [developer] = statusChips(status, true, summary);
+    assert.equal(developer.hint, `${statusChips(status, true)[0].hint}\nIssue kya tha: Vendor dropdown khaali tha\nFix kya kiya: Row me Assign button lagaya`);
+  }
+  assert.doesNotMatch(statusChips('done', true, { issue: 'Page slow tha', fix: '' })[0].hint, /Fix kya kiya/);
+  assert.doesNotMatch(statusChips('in_progress', true, summary)[0].hint, /Issue kya tha/, 'only completed tasks get the summary');
+  assert.match(statusChips('confirmed', false, summary)[0].hint, /\nIssue kya tha: Vendor dropdown khaali tha\nFix kya kiya: Row me Assign button lagaya$/, 'the live site shows it too');
+});
+
+test('each message gets the summary saved on its live update, or the local task list one on localhost', () => {
+  const pane = fs.readFileSync(new URL('../components/report/ChatPane.jsx', import.meta.url), 'utf8');
+  const bubble = fs.readFileSync(new URL('../components/report/MessageBubble.jsx', import.meta.url), 'utf8');
+  const hook = fs.readFileSync(new URL('./reportSummaries.js', import.meta.url), 'utf8');
+  assert.match(pane, /const summaries = useTaskSummaries\(\);/);
+  assert.match(pane, /summary=\{pickSummary\(m\.update, summaries\[m\.id\]\)\}/);
+  assert.match(bubble, /statusChips\(message\.update\.status, undefined, summary\)/);
+  assert.match(hook, /isLocalApp\(\)/);
+  assert.match(hook, /'\/dev\/report-autofix\/summaries'/);
 });

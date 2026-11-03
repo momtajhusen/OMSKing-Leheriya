@@ -1,8 +1,9 @@
 import { eventLabel } from './reportUpdates.js';
 
-export const MAX_FILE_MB = { image: 10, audio: 16, video: 50 };
+export const MAX_FILE_MB = { image: 10, audio: 16, video: 50, file: 50 };
 
-const KIND_LABEL = { image: 'Photo', video: 'Video', audio: 'Voice message' };
+const KIND_LABEL = { image: 'Photo', video: 'Video', audio: 'Voice message', file: 'Document' };
+const MEDIA = ['image', 'video', 'audio'];
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -60,9 +61,18 @@ export function formatDuration(sec) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
+/** Photos, videos and voice notes play in the chat; anything else is a document. */
 export function fileKind(file) {
   const family = String(file?.type || '').split('/')[0];
-  return MAX_FILE_MB[family] ? family : null;
+  return MEDIA.includes(family) ? family : 'file';
+}
+
+/** The short type shown on a document, like WhatsApp: PDF, XLSX, ZIP… */
+export function fileTypeLabel(name, mime) {
+  const ext = /\.([a-z0-9]{1,6})$/i.exec(String(name || ''));
+  if (ext) return ext[1].toUpperCase();
+  const sub = String(mime || '').split('/')[1] || '';
+  return /^[a-z0-9]{1,6}$/i.test(sub) ? sub.toUpperCase() : 'FILE';
 }
 
 /** Photos and videos on the clipboard: a Ctrl+V screenshot, or files copied in Finder / Explorer. */
@@ -71,15 +81,16 @@ export function clipboardFiles(clipboardData) {
   const fromItems = Array.from(clipboardData.items || [])
     .filter((item) => item.kind === 'file')
     .map((item) => item.getAsFile())
-    .filter((file) => file && fileKind(file));
+    .filter((file) => file && fileKind(file) !== 'file');
   if (fromItems.length) return fromItems;
-  return Array.from(clipboardData.files || []).filter((file) => fileKind(file));
+  return Array.from(clipboardData.files || []).filter((file) => fileKind(file) !== 'file');
 }
 
 export function messagePreview(message) {
   if (message?.deleted) return 'This message was deleted';
   if (message?.event) return eventLabel(message.event, message.senderName, message.mine);
   if (message?.text) return message.text;
+  if (message?.attachment?.kind === 'file' && message.attachment.name) return `📄 ${message.attachment.name}`;
   return KIND_LABEL[message?.attachment?.kind || message?.kind] || '';
 }
 

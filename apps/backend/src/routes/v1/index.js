@@ -31,9 +31,16 @@ const { authMiddleware } = require('../../middleware/auth');
 const { tenantMiddleware } = require('../../middleware/tenant');
 const { requirePermission } = require('../../middleware/requirePermission');
 const { createSupportLiveProxy } = require('../../services/supportLiveProxy');
+const { createReportAutofix } = require('../../services/reportAutofix');
 
 const router = express.Router();
-const supportLive = createSupportLiveProxy(config.supportLive, [authMiddleware, tenantMiddleware, requirePermission('tenants.manage')]);
+const supportLive = createSupportLiveProxy(config.supportLive, {
+  developer: [authMiddleware, tenantMiddleware, requirePermission('tenants.manage')],
+  client: [authMiddleware, tenantMiddleware],
+});
+const reportAutofix = createReportAutofix({
+  ...config.reportAutofix, liveSettings: config.supportLive, guards: [authMiddleware, tenantMiddleware],
+});
 
 router.get('/', healthCheck);
 router.get('/health', healthCheck);
@@ -62,6 +69,7 @@ router.use('/demo-requests', demoRequestsRoutes);
 router.use('/pricing', pricingRoutes);
 router.use('/setup', setupRoutes);
 router.use('/marketing-images', marketingImagesRoutes);
+router.use('/dev/report-autofix', reportAutofix);
 router.use('/support', (req, res, next) => (config.nodeEnv === 'development' ? supportLive : supportRoutes)(req, res, next));
 
 module.exports = router;

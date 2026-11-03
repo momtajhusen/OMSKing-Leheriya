@@ -9,7 +9,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { FormBanner } from '../../components/ui/FormBanner';
 import { useAuth } from '../../hooks/useAuth';
-import { homePathForRole } from '../../constants/roles';
+import { homePathFor } from '../../lib/routeAccess';
 import api, { apiFormError } from '../../lib/api';
 import { loginSchema, loginOtpSchema } from '../../lib/validation';
 import CompanyChoice, { companiesFromError } from '../../components/auth/CompanyChoice';
@@ -52,7 +52,7 @@ export default function LoginPage() {
       }
       login(data.data.accessToken, data.data.user);
       toast.success(`Signed in as ${data.data.user.name}`);
-      navigate(homePathForRole(data.data.user.role));
+      navigate(homePathFor(data.data.user.role, data.data.user.permissions));
     } catch (err) {
       const pending = err.response?.data?.data;
       if (err.response?.status === 403 && pending?.verificationRequired) {
@@ -113,7 +113,7 @@ export default function LoginPage() {
                   const { data } = await api.post('/auth/verify-login', { ...twoFactor, otp: parsed.data.otp });
                   login(data.data.accessToken, data.data.user);
                   toast.success(`Signed in as ${data.data.user.name}`);
-                  navigate(homePathForRole(data.data.user.role));
+                  navigate(homePathFor(data.data.user.role, data.data.user.permissions));
                 } catch (err) {
                   const parsedErr = apiFormError(err, 'Could not verify the OTP.');
                   setFormError(parsedErr.message);

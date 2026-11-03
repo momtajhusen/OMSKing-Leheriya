@@ -1,5 +1,5 @@
 const { hashPassword } = require('../lib/password');
-const { ROLE_DEFAULT_PERMISSIONS, TENANT_ROLE_SEED } = require('../constants/permissions');
+const { ROLE_DEFAULT_PERMISSIONS, PERMISSION_ROLLOUTS, TENANT_ROLE_SEED } = require('../constants/permissions');
 const Tenant = require('../models/Tenant');
 const Role = require('../models/Role');
 const User = require('../models/User');
@@ -22,6 +22,7 @@ async function cloneTenantRoles(tenantId) {
     name: item.name,
     description: item.description,
     permissions: [...(ROLE_DEFAULT_PERMISSIONS[item.code] || [])],
+    permissionRollouts: Object.keys(PERMISSION_ROLLOUTS),
     isSystem: true,
   }));
   await Role.insertMany(docs);

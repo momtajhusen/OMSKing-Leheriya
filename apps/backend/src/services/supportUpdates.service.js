@@ -7,6 +7,8 @@ const chat = require('./supportChat.service');
 const TITLE_MAX = 160;
 const NOTE_MAX = 500;
 const LIST_MAX = 300;
+const SUMMARY_MAX = { issue: 200, fix: 200, area: 120 };
+const FIXED = ['done', 'confirmed'];
 
 /** Which side may apply which mark, and from which statuses. Developers finish work; clients confirm it. */
 const ACTIONS = {
@@ -27,6 +29,14 @@ function readNote(raw) {
   const note = String(raw ?? '').trim();
   if (note.length > NOTE_MAX) throw new HttpError(400, `Note must be ${NOTE_MAX} characters or fewer`);
   return note;
+}
+
+function readSummary(body) {
+  return Object.fromEntries(Object.entries(SUMMARY_MAX).map(([key, max]) => {
+    const value = String(body[key] ?? '').replace(/\s+/g, ' ').trim();
+    if (value.length > max) throw new HttpError(400, `${key} must be ${max} characters or fewer`);
+    return [key, value];
+  }));
 }
 
 function defaultTitle(message) {
@@ -166,7 +176,7 @@ async function createUpdate({ tenantId, user, side, messageId, title }) {
   return toDto(row.toObject(), messages.get(String(row._id)) || []);
 }
 
-async function applyAction({ tenantId, user, side, updateId, action, note, title }) {
+async function applyAction({ tenantId, user, side, updateId, action, note, title, summary = {} }) {
   if (!chat.isObjectId(updateId)) throw new HttpError(404, 'Update not found');
   const row = await SupportUpdate.findOne({ tenantId, _id: updateId });
   if (!row) throw new HttpError(404, 'Update not found');
@@ -175,6 +185,12 @@ async function applyAction({ tenantId, user, side, updateId, action, note, title
   if (action === 'rename') {
     row.title = readTitle(title);
     row.history.push({ action: 'rename', status: row.status, by: user.id, byName, side, note: row.title });
+    await row.save();
+  } else if (action === 'summary') {
+    if (side !== 'platform') throw new HttpError(403, 'Only the OMSKing team can add the fix summary');
+    if (!FIXED.includes(row.status)) throw new HttpError(400, 'Only a completed update gets a fix summary');
+    Object.assign(row, readSummary(summary));
+    row.history.push({ action: 'summary', status: row.status, by: user.id, byName, side });
     await row.save();
   } else {
     const rule = ACTIONS[action];
@@ -205,8 +221,16 @@ async function applyAction({ tenantId, user, side, updateId, action, note, title
   return toDto(row.toObject(), messages.get(String(row._id)) || []);
 }
 
+/** Issue / fix of the company's completed updates, for the hover on each module in the side list. */
+async function listSummaries(tenantId) {
+  const rows = await SupportUpdate.find({ tenantId, status: { $in: FIXED }, $or: [{ issue: { $ne: '' } }, { fix: { $ne: '' } }] })
+    .sort({ doneAt: -1 }).limit(LIST_MAX).select('sourceMessageId area issue fix').lean();
+  return rows.map((r) => ({ messageId: String(r.sourceMessageId), area: r.area || '', issue: r.issue || '', fix: r.fix || '' }));
+}
+
 module.exports = {
   listUpdates,
+  listSummaries,
   listAllUpdates,
   createUpdate,
   applyAction,

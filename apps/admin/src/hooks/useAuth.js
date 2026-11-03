@@ -1,5 +1,7 @@
 import useAuthStore from '../stores/authStore';
-import { ROLES, homePathForRole } from '../constants/roles';
+import { ROLES } from '../constants/roles';
+import { attachPermissions } from '../constants/permissions';
+import { homePathFor } from '../lib/routeAccess';
 
 export const useAuth = () => {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -20,6 +22,6 @@ export const useAuth = () => {
     impersonateTenant,
     exitImpersonation,
     effectiveRole,
-    homePath: homePathForRole(effectiveRole),
+    homePath: homePathFor(effectiveRole, attachPermissions(user)?.permissions),
   };
 };

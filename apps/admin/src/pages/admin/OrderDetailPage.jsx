@@ -19,6 +19,7 @@ import { PERMISSIONS } from '../../constants/permissions';
 import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle } from 'lucide-react';
 import { isChannelManaged, packetIdOf, openMyntraDocument } from '../../lib/channelOrders';
 import { shortOrderId, shortSubOrderId } from '../../lib/orderIds';
+import { vendorPick } from '../../lib/vendorLines';
 
 export default function OrderDetailPage() {
   const { orderId } = useParams();
@@ -40,6 +41,7 @@ export default function OrderDetailPage() {
   const loadVendors = useVendorStore((s) => s.load);
   const vendors = useMemo(() => allVendors.filter((vendor) => !vendor.removed && vendor.status === 'Active'), [allVendors]);
   const [busy, setBusy] = useState('');
+  const [picks, setPicks] = useState({});
 
   const loaded = useOrderStore((s) => s.loaded);
 
@@ -109,6 +111,19 @@ export default function OrderDetailPage() {
     }
     setBusy('');
     toast.success(`${item.sku} (${subs.length} ${subs.length === 1 ? 'unit' : 'units'}) assigned to ${name || 'unassigned'}`);
+  };
+
+  const assignPicked = async (sub) => {
+    const { value: name } = vendorPick(picks, sub);
+    setBusy(`assign-${sub.id}`);
+    const next = await assignSubOrder(order.id, sub.id, { assignedVendor: name });
+    setBusy('');
+    if (next?.error) {
+      toast.error(next.error);
+      return;
+    }
+    setPicks(({ [sub.id]: _done, ...rest }) => rest);
+    toast.success(`${shortSubOrderId(order, sub)} assigned to ${name || 'unassigned'}`);
   };
 
   const runChannelDoc = async (type) => {
@@ -397,21 +412,26 @@ export default function OrderDetailPage() {
                   </TableCell>
                   <TableCell className="w-52">
                     {can(PERMISSIONS.ORDERS_EDIT) ? (
-                      <Select
-                        className="h-9"
-                        value={sub.assignedVendor}
-                        onChange={async (event) => {
-                          const name = event.target.value;
-                          const next = await assignSubOrder(order.id, sub.id, { assignedVendor: name });
-                          if (next?.error) toast.error(next.error);
-                          else toast.success(`${shortSubOrderId(order, sub)} assigned to ${name || 'unassigned'}`);
-                        }}
-                      >
-                        <option value="">Unassigned</option>
-                        {vendors.map((vendor) => (
-                          <option key={vendor.id} value={vendor.name}>{vendor.name}</option>
-                        ))}
-                      </Select>
+                      <>
+                        <Select
+                          className="h-9"
+                          value={vendorPick(picks, sub).value}
+                          onChange={(event) => setPicks((prev) => ({ ...prev, [sub.id]: event.target.value }))}
+                        >
+                          <option value="">Unassigned</option>
+                          {sub.assignedVendor && !isSavedVendor(sub.assignedVendor) && (
+                            <option value={sub.assignedVendor}>{sub.assignedVendor}</option>
+                          )}
+                          {vendors.map((vendor) => (
+                            <option key={vendor.id} value={vendor.name}>{vendor.name}</option>
+                          ))}
+                        </Select>
+                        {!vendors.length && (
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            No vendors yet. <Link className="text-primary hover:underline" to="/vendors">Add vendors</Link>
+                          </div>
+                        )}
+                      </>
                     ) : (
                       sub.assignedVendor || '—'
                     )}
@@ -432,10 +452,20 @@ export default function OrderDetailPage() {
                   <TableCell>
                     <Badge variant={statusBadgeVariant(sub.deliveryStatus || sub.status)}>{sub.deliveryStatus || sub.status}</Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap text-right">
                     {!channelManaged && (
                       <Button variant="ghost" size="sm" disabled={busy === sub.id} onClick={() => runLabel(sub.id)}>
                         Label
+                      </Button>
+                    )}
+                    {can(PERMISSIONS.ORDERS_EDIT) && (
+                      <Button
+                        size="sm"
+                        className="ml-1"
+                        disabled={!vendorPick(picks, sub).changed || busy === `assign-${sub.id}`}
+                        onClick={() => assignPicked(sub)}
+                      >
+                        Assign
                       </Button>
                     )}
                   </TableCell>

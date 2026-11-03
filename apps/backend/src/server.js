@@ -4,9 +4,11 @@ const connectDB = require('./db/connect');
 const { startJobWorker } = require('./services/jobQueue.service');
 const { startChannelScheduler } = require('./services/channelScheduler.service');
 const { fillMissingStorefrontImages } = require('./services/storefrontImages.service');
+const { applyPermissionRollouts } = require('./services/permissionRollout.service');
 
 const startServer = async () => {
   await connectDB();
+  await applyPermissionRollouts();
   const host = process.env.HOST || '0.0.0.0';
   const queue = await startJobWorker();
   console.log(`[SERVER] Job queue: ${queue}`);

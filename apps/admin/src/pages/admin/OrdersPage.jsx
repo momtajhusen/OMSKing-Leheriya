@@ -30,6 +30,10 @@ const STATUS_TABS = [
   { id: 'New', label: 'New' },
   { id: 'Packed', label: 'Packed' },
   { id: 'Ready to Ship', label: 'Ready To Ship' },
+  { id: 'Pickup & Manifest', label: 'Pickup & Manifest' },
+  { id: 'In Transit', label: 'In Transit' },
+  { id: 'Delivered', label: 'Delivered' },
+  { id: 'RTO', label: 'RTO' },
   { id: 'Cancelled', label: 'Cancelled' },
   { id: 'all', label: 'All Orders' },
 ];
@@ -186,7 +190,7 @@ export default function OrdersPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">Orders ({total})</h1>
-          <p className="text-xs text-muted-foreground">Packing desk tabs: Unfulfillable, New, Packed, Ready To Ship, Cancelled, All.</p>
+          <p className="text-xs text-muted-foreground">Packing desk tabs: Unfulfillable, New, Packed, Ready To Ship. Shipping tabs: Pickup & Manifest, In Transit, Delivered, RTO.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={syncOrders} disabled={syncing}>
@@ -257,6 +261,7 @@ export default function OrdersPage() {
                 className="h-7 whitespace-nowrap px-2.5 text-xs"
               >
                 {tab.label}
+                {typeof counts[tab.id] === 'number' && ` (${counts[tab.id]})`}
               </Button>
             ))}
           </div>

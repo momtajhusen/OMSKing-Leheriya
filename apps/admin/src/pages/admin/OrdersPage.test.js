@@ -8,3 +8,12 @@ test('the order list shows the original channel order id with the OMS id under i
   assert.match(page, /order\.channelOrderNo \|\| order\.id/);
   assert.match(page, /order\.channelOrderNo && order\.channelOrderNo !== order\.id/);
 });
+
+test('orders have Shipway-style Pickup & Manifest, In Transit, Delivered and RTO tabs with counts', () => {
+  const tabs = page.slice(page.indexOf('const STATUS_TABS'), page.indexOf('];', page.indexOf('const STATUS_TABS')));
+  const order = ['Ready to Ship', 'Pickup & Manifest', 'In Transit', 'Delivered', 'RTO', 'Cancelled', 'all']
+    .map((id) => tabs.indexOf(`id: '${id}'`));
+  order.forEach((index) => assert.ok(index >= 0));
+  assert.deepEqual([...order].sort((a, b) => a - b), order);
+  assert.match(page, /counts\[tab\.id\]/);
+});

@@ -98,11 +98,34 @@ const DEVELOPER_STATUS = {
   confirmed: { label: 'Complete', hint: 'Completed by the developer' },
 };
 
-/** The chips under a tracked message: the developer's status (localhost only), plus the client's confirmation once given. */
-export function statusChips(status, local = isLocalApp()) {
+/** The short Hinglish hover of a completed task: what the issue was and what fix was applied. */
+export function summaryHint(summary) {
+  const lines = [];
+  if (summary?.issue) lines.push(`Issue kya tha: ${summary.issue}`);
+  if (summary?.fix) lines.push(`Fix kya kiya: ${summary.fix}`);
+  return lines.join('\n');
+}
+
+/** The summary saved on the live update (any host), else the one from the local task list (localhost). */
+export function pickSummary(update, local) {
+  return update?.issue || update?.fix ? { issue: update.issue, fix: update.fix } : local;
+}
+
+function developerHint(status, summary) {
+  const extra = FIXED.includes(status) ? summaryHint(summary) : '';
+  return extra ? `${DEVELOPER_STATUS[status].hint}\n${extra}` : DEVELOPER_STATUS[status].hint;
+}
+
+/**
+ * The chips under a tracked message: the developer's status, plus the client's confirmation once given. Complete shows
+ * on every host with its summary; Pending / In progress are the developer's working marks, on localhost only.
+ */
+export function statusChips(status, local = isLocalApp(), summary = null) {
   const dev = DEVELOPER_STATUS[status];
   if (!dev) return [];
-  const chips = local ? [{ id: 'developer', status, label: `Developer · ${dev.label}`, hint: dev.hint }] : [];
+  const chips = local || FIXED.includes(status)
+    ? [{ id: 'developer', status, label: `Developer · ${dev.label}`, hint: developerHint(status, summary) }]
+    : [];
   if (status === 'confirmed') chips.push({ id: 'client', status, label: 'Client · Confirmed', hint: 'The client confirmed it is fixed' });
   return chips;
 }

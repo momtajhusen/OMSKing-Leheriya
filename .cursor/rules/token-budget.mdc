@@ -1,0 +1,23 @@
+---
+description: Strict token budget — never redo work already done in this conversation
+alwaysApply: true
+---
+# Token budget (strict, no exceptions)
+
+1) NEVER re-read or re-check any file, test result or search result already examined or completed earlier in this
+   conversation. Do not open it again "to confirm". Say "Already done: <result>" and stop.
+2) NEVER run the full test suite or a build unless you changed code in this conversation since the last run.
+   No code change since the last run = no run. Verification required by omsking-qa and report-fix-loop runs once
+   per change, never twice.
+3) NEVER launch a background or shell command for a lookup already answered earlier in this conversation. Reuse
+   the earlier answer. One command per real need; wait for it, never start a duplicate.
+4) The moment work finishes, send a one-line completion message. NO verification passes, re-runs or extra checks
+   after that line.
+5) EVERY read and search is scoped to the smallest target: an exact symbol, in a known file or folder, with
+   offset/limit around the match. No repo-wide or case-insensitive sweeps, no full-file reads of large files.
+6) Unsure whether something was already done? Ask the user in one short line. Do NOT redo it to find out.
+
+Examples:
+- ❌ Re-running `npm test` to answer a question about finished work. ✅ "Already done: 271/271 passing."
+- ❌ `rg -i module` over the whole repo. ✅ `rg -n "ModuleDetailIcon" apps/admin/src/components/layout/AdminSidebar.jsx`.
+- ❌ Reading a file again after editing it "to check". ✅ Trust the edit result; move on.

@@ -7,10 +7,12 @@ const express = require('express');
 const { createSupportLiveProxy, LOOP_HEADER } = require('../src/services/supportLiveProxy');
 
 const PASSWORD = 'live-secret-pw';
+const CLIENT_PASSWORD = 'live-client-pw';
+const LIVE_USERS = { 'dev@live.test': [PASSWORD, 'dev'], 'client@live.test': [CLIENT_PASSWORD, 'client'] };
 
-function fakeJwt(expSec) {
+function fakeJwt(expSec, extra = {}) {
   const part = (v) => Buffer.from(JSON.stringify(v)).toString('base64url');
-  return `${part({ alg: 'HS256' })}.${part({ sub: 'dev', exp: expSec })}.sig`;
+  return `${part({ alg: 'HS256' })}.${part({ sub: 'dev', exp: expSec, ...extra })}.sig`;
 }
 
 /** Stands in for the live API: records every request, answers like the real routes. */
@@ -26,16 +28,19 @@ function startFakeLive({ expiresInSec = 900, rejectFirstToken = false } = {}) {
       const json = (status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
       if (req.url === '/api/v1/auth/login') {
         const { email, password } = JSON.parse(body.toString() || '{}');
-        if (email !== 'dev@live.test' || password !== PASSWORD) return json(401, { success: false, message: 'Invalid credentials' });
+        const user = LIVE_USERS[email];
+        if (!user || user[0] !== password) return json(401, { success: false, message: 'Invalid credentials' });
         logins += 1;
-        return json(200, { success: true, data: { accessToken: `${fakeJwt(Math.floor(Date.now() / 1000) + expiresInSec)}${logins}` } });
+        const claims = user[1] === 'client' ? { tenantId: 'live-tenant-7' } : {};
+        return json(200, { success: true, data: { accessToken: `${fakeJwt(Math.floor(Date.now() / 1000) + expiresInSec, claims)}${user[1]}${logins}` } });
       }
       if (req.url.startsWith('/api/v1/support/media/')) {
         res.writeHead(206, { 'content-type': 'video/webm', 'content-range': 'bytes 0-3/10', 'x-internal': 'nope' });
         return res.end(Buffer.from([1, 2, 3, 4]));
       }
       if (rejectFirstToken && req.headers.authorization?.endsWith('1')) return json(401, { success: false, message: 'Session expired' });
-      return json(200, { success: true, data: { path: req.url, auth: Boolean(req.headers.authorization) } });
+      const who = /client\d+$/.test(req.headers.authorization || '') ? 'client' : 'dev';
+      return json(200, { success: true, data: { path: req.url, auth: Boolean(req.headers.authorization), who } });
     });
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
@@ -43,18 +48,18 @@ function startFakeLive({ expiresInSec = 900, rejectFirstToken = false } = {}) {
   })));
 }
 
-function startLocal(settings, guard = []) {
+function startLocal(settings, guards) {
   const app = express();
   app.use(express.json());
-  app.use('/api/v1/support', createSupportLiveProxy(settings, guard));
+  app.use('/api/v1/support', createSupportLiveProxy(settings, guards));
   return new Promise((resolve) => {
     const server = app.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${server.address().port}/api/v1/support` }));
   });
 }
 
-async function withServers(fakeOpts, settingsFor, run, guard) {
+async function withServers(fakeOpts, settingsFor, run, guards) {
   const live = await startFakeLive(fakeOpts);
-  const local = await startLocal(settingsFor(live), guard);
+  const local = await startLocal(settingsFor(live), guards);
   try {
     await run(live, local);
   } finally {
@@ -63,13 +68,15 @@ async function withServers(fakeOpts, settingsFor, run, guard) {
   }
 }
 
-const creds = (live) => ({ url: live.url, email: 'dev@live.test', password: PASSWORD });
+const creds = (live) => ({
+  url: live.url, email: 'dev@live.test', password: PASSWORD, clientEmail: 'client@live.test', clientPassword: CLIENT_PASSWORD,
+});
 
 test('developer support requests on localhost go to the live API with the live developer login', async () => {
   await withServers({}, creds, async (live, local) => {
     const res = await fetch(`${local.url}/threads?limit=5`, { headers: { authorization: 'Bearer local-token' } });
     assert.equal(res.status, 200);
-    assert.deepEqual((await res.json()).data, { path: '/api/v1/support/threads?limit=5', auth: true });
+    assert.deepEqual((await res.json()).data, { path: '/api/v1/support/threads?limit=5', auth: true, who: 'dev' });
     const forwarded = live.seen.find((r) => r.url.startsWith('/api/v1/support/threads'));
     assert.ok(forwarded.headers.authorization.startsWith('Bearer '), 'the live token is sent');
     assert.notEqual(forwarded.headers.authorization, 'Bearer local-token', 'the localhost token never reaches live');
@@ -133,15 +140,49 @@ test('a live login that is about to expire is renewed before the request', async
   });
 });
 
-test('client (merchant) routes are not sent to live from localhost', async () => {
+test('client (merchant) chat on localhost shows the live chat, signed in as the live client account', async () => {
   await withServers({}, creds, async (live, local) => {
-    for (const [method, path] of [['GET', '/messages'], ['POST', '/messages'], ['GET', '/unread'], ['POST', '/read'], ['PATCH', '/updates/u1']]) {
+    for (const [method, path] of [['GET', '/messages?limit=11'], ['POST', '/messages'], ['GET', '/unread'], ['POST', '/read'], ['PATCH', '/updates/u1']]) {
       const res = await fetch(`${local.url}${path}`, { method });
-      assert.equal(res.status, 403, `${method} ${path}`);
-      assert.match((await res.json()).message, /live site/);
+      assert.equal(res.status, 200, `${method} ${path}`);
+      const { data } = await res.json();
+      assert.equal(data.path, `/api/v1/support${path}`);
+      assert.equal(data.who, 'client', `${method} ${path} uses the client login`);
     }
-    assert.equal(live.seen.length, 0);
+    const threads = await (await fetch(`${local.url}/threads`)).json();
+    assert.equal(threads.data.who, 'dev', 'the developer inbox keeps the developer login');
+    assert.equal(live.logins(), 2, 'one live login per account, reused');
   });
+});
+
+test('on localhost the client chat can apply developer marks, sent to the live developer inbox of that company', async () => {
+  await withServers({}, creds, async (live, local) => {
+    const track = await fetch(`${local.url}/as-developer/updates`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messageId: 'm1' }),
+    });
+    assert.equal(track.status, 200);
+    const tracked = await track.json();
+    assert.equal(tracked.data.path, '/api/v1/support/threads/live-tenant-7/updates', 'the client account\'s live company');
+    assert.equal(tracked.data.who, 'dev', 'marked with the developer login');
+
+    const done = await fetch(`${local.url}/as-developer/updates/u1`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'complete' }),
+    });
+    const marked = await done.json();
+    assert.equal(marked.data.path, '/api/v1/support/threads/live-tenant-7/updates/u1');
+    assert.equal(marked.data.who, 'dev');
+    const sent = live.seen.find((r) => r.method === 'PATCH');
+    assert.deepEqual(JSON.parse(sent.body.toString()), { action: 'complete' });
+
+    for (const [method, path] of [['GET', '/as-developer/updates'], ['DELETE', '/as-developer/updates/u1'], ['POST', '/as-developer/messages']]) {
+      assert.equal((await fetch(`${local.url}${path}`, { method })).status, 404, `${method} ${path} is not a developer mark`);
+    }
+  });
+  const deny = (req, res) => res.status(401).json({ success: false, message: 'denied' });
+  await withServers({}, creds, async (live, local) => {
+    assert.equal((await fetch(`${local.url}/as-developer/updates`, { method: 'POST' })).status, 401, 'needs a local login');
+    assert.equal(live.seen.length, 0);
+  }, { client: [deny] });
 });
 
 test('missing or wrong live credentials give a clear error that never echoes the password', async () => {
@@ -149,6 +190,9 @@ test('missing or wrong live credentials give a clear error that never echoes the
     const res = await fetch(`${local.url}/threads`);
     assert.equal(res.status, 503);
     assert.match((await res.json()).message, /SUPPORT_LIVE_EMAIL/);
+    const client = await fetch(`${local.url}/messages`);
+    assert.equal(client.status, 503);
+    assert.match((await client.json()).message, /SUPPORT_LIVE_CLIENT_EMAIL/);
     assert.equal(live.seen.length, 0);
   });
   await withServers({}, (live) => ({ ...creds(live), password: 'wrong-pw' }), async (live, local) => {
@@ -178,15 +222,15 @@ test('the live API being unreachable gives a 502', async () => {
   }
 });
 
-test('the local guard (local platform login) runs before anything is forwarded', async () => {
-  const deny = (req, res) => res.status(401).json({ success: false, message: 'Authentication required' });
+test('the local guards (local platform login / local login) run before anything is forwarded', async () => {
+  const deny = (status) => (req, res) => res.status(status).json({ success: false, message: 'denied' });
   await withServers({}, creds, async (live, local) => {
-    const res = await fetch(`${local.url}/threads`);
-    assert.equal(res.status, 401);
+    assert.equal((await fetch(`${local.url}/threads`)).status, 403, 'developer routes use the developer guard');
+    assert.equal((await fetch(`${local.url}/messages`)).status, 401, 'client routes use the client guard');
     assert.equal(live.seen.length, 0);
     const media = await fetch(`${local.url}/media/abc?exp=1&sig=ff`);
     assert.equal(media.status, 206, 'signed media links need no login');
-  }, [deny]);
+  }, { developer: [deny(403)], client: [deny(401)] });
 });
 
 test('/support uses the live proxy only in development; the live server keeps its own routes', () => {

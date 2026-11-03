@@ -1,0 +1,64 @@
+---
+description: One-at-a-time fix, verify, mark loop for client Report tasks ("report check karke fix karo")
+alwaysApply: true
+---
+
+# Fixing client Report tasks
+
+Applies whenever the user asks to fix issues from the Report chat / client reports
+(e.g. "report check karke fix karo", "report ke issues fix karo").
+The task list is `client-reports/TASKS.md`; screenshots are in `client-reports/media/`.
+
+## Before the loop
+1. Run `npm run report-inbox` in `apps/backend` (read-only) to pull new client messages.
+2. Triage any entry still showing `Type: _to triage_`: open its screenshots, fill Type and Notes.
+
+## Status labels
+Every task heading starts with its status: `[Not started]`, `[In progress]`, `[Complete]`, `[Blocked]`,
+`[Fix failed]`, `[Waiting for client]`, `[Client replied]` or `[Awaiting apply]` (Auto-fix finished it in its copy;
+it becomes Complete only when Apply fix puts the change in the main files, or Fix failed when it is discarded). Always set it with the commands below (in `apps/backend`), never by hand:
+`npm run report-inbox -- --mark <in-progress|complete|blocked|failed> <messageId> [<messageId>...]`
+It updates the heading and the status overview. `in-progress` and `complete` also put the status on that
+message in the live Report chat ("Developer · In progress" / "Developer · Complete" on localhost).
+Pass the task's id together with its "Part of: …" entries. Only mark messages you actually work on.
+The user never sets labels.
+
+## Waiting for the client
+- A task needs something only the client can give (information, a file, a screenshot, a decision):
+  `npm run report-inbox -- --ask <messageId> --need "<what is needed>" --question "<one short polite question>"`.
+  It asks the client as a reply to their message, shows In progress on it in the live chat and sets `[Waiting for client]`.
+  Never ask the client for passwords, API keys or other secrets: mark those `blocked` instead.
+- A waiting task never blocks the rest: after asking, go on with the next pending task.
+- When the client replies to the question, the inbox check folds the reply into the task as a collapsed
+  "Client reply" block and sets `[Client replied]`: that task is ready to fix and comes first.
+- A requirement found anywhere in the history: `npm run report-inbox -- --attach <taskMessageId> <foundMessageId>`
+  adds it collapsed under the task with its details and marks the found message's own task "Part of" it.
+  `npm run report-inbox -- --history` prints every message of every chat for searching (reads only).
+
+## The loop — strictly one task at a time, never batch fixes
+1. Pick in this strict order:
+   a) a `[Client replied]` task (its requirement is fulfilled), fix it;
+   b) else each `[Waiting for client]` task, oldest first: if the client answered or the requirement is found anywhere
+      in the history, attach it (`--attach`) and fix that task;
+   c) else (nothing answered or found) leave them waiting, do not ask again, and fix the first `[Not started]` entry
+      after the last `[Complete]` one.
+   Mark the picked task `in-progress`.
+2. Fix only that task, following omsking-qa: failing test first, smallest fix, no unrelated changes.
+3. Verify: re-run the new test plus the affected suites (and the admin build for UI changes);
+   for UI work also check the screen locally in the browser. Live integrations: mocks only.
+4. Verification passed → mark it `complete` with `--issue "<issue kya tha>" --fix "<fix kya kiya>"`: one short
+   Hinglish line each (Hindi words in English letters, not Devanagari). They are also saved on the live update, so the
+   hover shows on the chat chip and the side list module on the live site too. Then add
+   `- Status: Fixed and verified <date> — <what was checked>; local only, not deployed`.
+5. Verification failed → retry once with a different approach. Still failing → undo your own changes for
+   this task, mark it `failed`, add `- Status: <date> — <reason>`, and move on. The live chat keeps showing
+   In progress (the chat has no way back to unmarked); tell the user that.
+6. Needs something from the client → `--ask` (see Waiting for the client) and move on to the next pending task.
+   Needs something else you can't get (secrets, a live action) → mark it `blocked` before starting (so the chat
+   stays unmarked), add `- Status: Blocked — <what is needed>`, move on.
+7. Give the user a one-line update after each task, then continue with the next one.
+
+## Never without the user asking
+Deploying, committing or pushing, replying to the client (other than the `--ask` question for a missing
+requirement), or any live chat change other than the In progress / Complete marks above.
+The watcher appends new tasks and only edits a task to fold in a client reply to its question.

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TENANT_STAFF_ROLES } from '../constants/roles.js';
-import { ROLE_PERMISSIONS } from '../constants/permissions.js';
-import { accessDecision } from './routeAccess.js';
+import { ROLE_PERMISSIONS, PERMISSION_CATALOG } from '../constants/permissions.js';
+import { accessDecision, homePathFor } from './routeAccess.js';
 import { sameCompanySnapshot } from './companyList.js';
 
 const vendor = ROLE_PERMISSIONS.vendor;
@@ -61,6 +61,37 @@ test('merchant super admin can open /dashboard and /users-roles', () => {
     });
     assert.equal(decision.redirectTo, null);
   }
+});
+
+test('Dashboard Access is its own option, and staff without it land on Orders', () => {
+  assert.equal(PERMISSION_CATALOG.some((item) => item.key === 'dashboard.view'), true);
+  for (const role of TENANT_STAFF_ROLES) {
+    assert.equal(ROLE_PERMISSIONS[role].includes('dashboard.view'), true, role);
+  }
+  assert.equal(ROLE_PERMISSIONS.vendor.includes('dashboard.view'), false);
+
+  const ops = ROLE_PERMISSIONS.operations.filter((key) => key !== 'dashboard.view');
+  assert.equal(homePathFor('operations', ROLE_PERMISSIONS.operations), '/dashboard');
+  assert.equal(homePathFor('operations', ops), '/orders');
+  const decision = accessDecision({
+    isAuthenticated: true,
+    role: 'operations',
+    pathname: '/dashboard',
+    permissions: ops,
+    requiredRoles: TENANT_STAFF_ROLES,
+  });
+  assert.equal(decision.redirectTo, '/orders');
+  const owner = ROLE_PERMISSIONS.super_admin.filter((key) => key !== 'dashboard.view');
+  assert.equal(accessDecision({
+    isAuthenticated: true,
+    role: 'super_admin',
+    pathname: '/settings',
+    permissions: owner,
+    requiredRoles: TENANT_STAFF_ROLES,
+  }).redirectTo, null);
+  assert.equal(homePathFor('super_admin', owner), '/orders');
+  assert.equal(homePathFor('warehouse', ['inventory.view']), '/inventory');
+  assert.equal(homePathFor('vendor', ROLE_PERMISSIONS.vendor), '/vendor/orders');
 });
 
 test('a list loaded for Leheriya is dropped after Back to platform', () => {

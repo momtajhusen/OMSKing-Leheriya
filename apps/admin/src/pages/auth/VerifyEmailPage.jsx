@@ -9,7 +9,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { FormBanner } from '../../components/ui/FormBanner';
 import { useAuth } from '../../hooks/useAuth';
-import { homePathForRole } from '../../constants/roles';
+import { homePathFor } from '../../lib/routeAccess';
 import api, { apiFormError } from '../../lib/api';
 import { verifyEmailSchema } from '../../lib/validation';
 import CompanyChoice, { companiesFromError } from '../../components/auth/CompanyChoice';
@@ -41,7 +41,7 @@ export default function VerifyEmailPage() {
       const { data } = await api.post('/auth/verify-email', values);
       login(data.data.accessToken, data.data.user);
       toast.success('Email verified. Your company is open.');
-      navigate(homePathForRole(data.data.user.role));
+      navigate(homePathFor(data.data.user.role, data.data.user.permissions));
     } catch (err) {
       const parsed = apiFormError(err, 'Could not verify the OTP.');
       const choices = companiesFromError(err);

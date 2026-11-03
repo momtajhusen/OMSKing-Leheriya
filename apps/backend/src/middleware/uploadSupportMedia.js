@@ -11,6 +11,7 @@ const MAX_BYTES = {
   image: 10 * 1024 * 1024,
   audio: 16 * 1024 * 1024,
   video: 50 * 1024 * 1024,
+  file: 50 * 1024 * 1024,
 };
 
 const storage = multer.diskStorage({
@@ -24,21 +25,16 @@ const storage = multer.diskStorage({
   },
 });
 
+const MEDIA = ['image', 'audio', 'video'];
+
 function declaredKind(mime) {
   const family = String(mime || '').split('/')[0];
-  return MAX_BYTES[family] ? family : null;
+  return MEDIA.includes(family) ? family : null;
 }
 
 const upload = multer({
   storage,
-  limits: { fileSize: MAX_BYTES.video, files: 1 },
-  fileFilter(req, file, cb) {
-    if (!declaredKind(file.mimetype)) {
-      cb(new HttpError(400, 'Send a photo, video or voice note'));
-      return;
-    }
-    cb(null, true);
-  },
+  limits: { fileSize: MAX_BYTES.file, files: 1 },
 });
 
 function uploadSupportMedia(req, res, next) {
@@ -92,6 +88,12 @@ function sniffMedia(filePath, declaredMime) {
   return null;
 }
 
+/** Anything that is not a verified photo, video or voice note is kept as a document and only ever downloaded. */
+function documentOf(declaredMime) {
+  const mime = String(declaredMime || '').toLowerCase();
+  return { kind: 'file', ext: '.file', mime: /^[a-z0-9][\w.+-]{0,60}\/[\w.+-]{1,80}$/.test(mime) ? mime : 'application/octet-stream' };
+}
+
 function discardUpload(file) {
   if (file?.path) fs.rmSync(file.path, { force: true });
 }
@@ -99,6 +101,7 @@ function discardUpload(file) {
 module.exports = {
   uploadSupportMedia,
   sniffMedia,
+  documentOf,
   discardUpload,
   supportMediaRoot,
   MAX_BYTES,

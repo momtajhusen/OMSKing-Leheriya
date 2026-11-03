@@ -7,6 +7,7 @@ const roleSchema = new mongoose.Schema({
   code: { type: String, required: true },
   description: String,
   permissions: { type: [String], default: [] },
+  permissionRollouts: { type: [String], default: [] },
   isSystem: { type: Boolean, default: true },
 }, { timestamps: true });
 

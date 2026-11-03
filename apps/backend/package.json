@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "seed": "node src/seeds/phase2.js",
+    "report-inbox": "node scripts/reportInbox.js",
     "build": "node -e \"console.log('Backend build placeholder — deploy src/ directly')\"",
     "start": "node src/server.js",
     "lint": "node -e \"console.log('Lint placeholder')\"",

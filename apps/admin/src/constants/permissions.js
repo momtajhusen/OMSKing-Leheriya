@@ -1,5 +1,6 @@
 /** Granular keys — screens and APIs check these, not role names. */
 export const PERMISSIONS = Object.freeze({
+  DASHBOARD_VIEW: 'dashboard.view',
   ORDERS_VIEW: 'orders.view',
   ORDERS_EDIT: 'orders.edit',
   ORDERS_CANCEL: 'orders.cancel',
@@ -20,6 +21,7 @@ export const PERMISSIONS = Object.freeze({
 });
 
 export const PERMISSION_CATALOG = [
+  { key: PERMISSIONS.DASHBOARD_VIEW, label: 'Dashboard access (sales figures)' },
   { key: PERMISSIONS.ORDERS_VIEW, label: 'View orders' },
   { key: PERMISSIONS.ORDERS_EDIT, label: 'Edit orders / fulfilment' },
   { key: PERMISSIONS.ORDERS_CANCEL, label: 'Cancel orders' },
@@ -43,6 +45,7 @@ const P = PERMISSIONS;
 const ALL_TENANT = PERMISSION_CATALOG.map((item) => item.key);
 
 const OPS_PERMS = [
+  P.DASHBOARD_VIEW,
   P.ORDERS_VIEW, P.ORDERS_EDIT, P.ORDERS_CANCEL,
   P.SHIPPING_GENERATE, P.SHIPPING_CANCEL,
   P.RETURNS_APPROVE, P.CUSTOMERS_VIEW, P.CATALOG_VIEW,
@@ -55,17 +58,21 @@ export const ROLE_PERMISSIONS = Object.freeze({
   operations: OPS_PERMS,
   admin: OPS_PERMS,
   warehouse: [
+    P.DASHBOARD_VIEW,
     P.ORDERS_VIEW, P.ORDERS_EDIT,
     P.INVENTORY_VIEW, P.INVENTORY_ADJUST,
     P.SHIPPING_GENERATE,
   ],
   accounts: [
+    P.DASHBOARD_VIEW,
     P.ORDERS_VIEW, P.FINANCE_VIEW, P.FINANCE_RECONCILE, P.CUSTOMERS_VIEW,
   ],
   catalog_manager: [
+    P.DASHBOARD_VIEW,
     P.CATALOG_VIEW, P.CATALOG_EDIT, P.INVENTORY_VIEW, P.ORDERS_VIEW,
   ],
   customer_support: [
+    P.DASHBOARD_VIEW,
     P.ORDERS_VIEW, P.CUSTOMERS_VIEW, P.RETURNS_APPROVE,
   ],
   vendor: [
@@ -74,7 +81,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
 });
 
 export const ROUTE_PERMISSION = Object.freeze({
-  '/dashboard': P.ORDERS_VIEW,
+  '/dashboard': P.DASHBOARD_VIEW,
   '/orders': P.ORDERS_VIEW,
   '/fulfilment': P.ORDERS_EDIT,
   '/shipping': P.SHIPPING_GENERATE,

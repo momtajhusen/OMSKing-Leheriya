@@ -8,13 +8,13 @@ const SupportUpdate = require('../models/SupportUpdate');
 const Tenant = require('../models/Tenant');
 const User = require('../models/User');
 const { HttpError } = require('../utils/httpError');
-const { sniffMedia, discardUpload, supportMediaRoot, MAX_BYTES } = require('../middleware/uploadSupportMedia');
+const { sniffMedia, documentOf, discardUpload, supportMediaRoot, MAX_BYTES } = require('../middleware/uploadSupportMedia');
 
 const TEXT_MAX = 4000;
 const PAGE_DEFAULT = 50;
 const PAGE_MAX = 100;
 const LINK_WINDOW_SEC = 6 * 60 * 60;
-const KIND_LABEL = { image: 'Photo', video: 'Video', audio: 'Voice message' };
+const KIND_LABEL = { image: 'Photo', video: 'Video', audio: 'Voice message', file: 'Document' };
 const DELETED_TEXT = 'This message was deleted';
 
 const signingKey = crypto.createHash('sha256').update(`support-media:${config.jwt.accessSecret}`).digest();
@@ -77,7 +77,14 @@ function toDto(row, viewerId, quotes = new Map(), updates = new Map()) {
       text: previewText(quoted),
       kind: quoted.deletedAt ? null : quoted.attachment?.kind || null,
     } : null,
-    update: update ? { id: String(update._id), title: update.title, status: update.status, markedBy: markedBy(update) } : null,
+    update: update ? {
+      id: String(update._id),
+      title: update.title,
+      status: update.status,
+      markedBy: markedBy(update),
+      issue: update.issue || '',
+      fix: update.fix || '',
+    } : null,
     event: row.event?.action ? {
       action: row.event.action,
       status: row.event.status,
@@ -92,14 +99,14 @@ function toDto(row, viewerId, quotes = new Map(), updates = new Map()) {
 
 /** The side that last set the status; renames do not count as a mark. */
 function markedBy(update) {
-  const marks = (update.history || []).filter((h) => h.action !== 'rename');
+  const marks = (update.history || []).filter((h) => h.action !== 'rename' && h.action !== 'summary');
   return marks.length ? marks[marks.length - 1].side : null;
 }
 
 async function updatesFor(tenantId, rows) {
   const ids = [...new Set(rows.filter((r) => r.updateId).map((r) => String(r.updateId)))];
   if (!ids.length) return new Map();
-  const found = await SupportUpdate.find({ tenantId, _id: { $in: ids } }).select('title status history.action history.side').lean();
+  const found = await SupportUpdate.find({ tenantId, _id: { $in: ids } }).select('title status issue fix history.action history.side').lean();
   return new Map(found.map((u) => [String(u._id), u]));
 }
 
@@ -144,8 +151,7 @@ function readDuration(raw, kind) {
 }
 
 async function storeAttachment(file, tenantId, durationRaw) {
-  const sniffed = sniffMedia(file.path, file.mimetype);
-  if (!sniffed) throw new HttpError(400, 'This file is not a real photo, video or voice note');
+  const sniffed = sniffMedia(file.path, file.mimetype) || documentOf(file.mimetype);
   if (file.size > MAX_BYTES[sniffed.kind]) {
     throw new HttpError(400, `${KIND_LABEL[sniffed.kind]} must be ${MAX_BYTES[sniffed.kind] / 1024 / 1024}MB or smaller`);
   }
@@ -306,7 +312,7 @@ async function mediaFile(id) {
   if (!row?.attachment?.file) return null;
   const full = path.join(supportMediaRoot, String(row.tenantId), path.basename(row.attachment.file));
   if (!fs.existsSync(full)) return null;
-  return { path: full, mime: row.attachment.mime };
+  return { path: full, mime: row.attachment.mime, kind: row.attachment.kind, name: row.attachment.name || '' };
 }
 
 module.exports = {

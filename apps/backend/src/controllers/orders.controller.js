@@ -129,10 +129,43 @@ async function decorateOne(tenantId, doc) {
   return painted;
 }
 
+const SHIPPING_TABS = ['Pickup & Manifest', 'In Transit', 'Delivered', 'RTO'];
+const ON_THE_WAY = ['Dispatched', 'In transit'];
+
+function isRto(row) {
+  const codes = `${row.channelStatus || ''} ${(row.channelLines || []).map((line) => line.status || '').join(' ')}`;
+  return codes.toUpperCase().includes('RTO');
+}
+
+/** Booked OMSKing shipments with no courier scan yet are still waiting for pickup. */
+async function awaitingPickup(tenantId, rows) {
+  const orderNos = rows.filter((row) => ON_THE_WAY.includes(row.status)).map((row) => row.id);
+  if (!orderNos.length) return new Set();
+  const Shipment = require('../models/Shipment');
+  const waiting = await Shipment.find({
+    tenantId,
+    orderNo: { $in: orderNos },
+    status: 'booked',
+    deliveryStatus: '',
+  }).select('orderNo').lean().setOptions({ skipTenantFilter: true });
+  return new Set(waiting.map((row) => row.orderNo));
+}
+
+function shippingTab(row, waiting) {
+  if (isRto(row)) return 'RTO';
+  if (row.status === 'Delivered') return 'Delivered';
+  if (ON_THE_WAY.includes(row.status)) return waiting.has(row.id) ? 'Pickup & Manifest' : 'In Transit';
+  return '';
+}
+
 async function listOrders(req, res) {
   const tenantId = merchantTenant(req);
   const names = await vendorNamesFor(req, tenantId);
-  if (names && !names.length) return paginatedResponse(res, [], 1, 25, 0, 'Orders', { counts: { total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0 } });
+  if (names && !names.length) {
+    return paginatedResponse(res, [], 1, 25, 0, 'Orders', {
+      counts: { total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0, ...Object.fromEntries(SHIPPING_TABS.map((tab) => [tab, 0])) },
+    });
+  }
   const rows = await loadOrders(tenantId, names);
   const data = (await deskOrders(tenantId, rows)).map((row) => scopeToVendor(row, names));
   let scoped = data;
@@ -147,13 +180,19 @@ async function listOrders(req, res) {
     'Ready to Ship': scoped.filter((row) => row.status === 'Ready to Ship').length,
     Unfulfillable: scoped.filter((row) => row.status === 'Unfulfillable').length,
   };
+  const waiting = await awaitingPickup(tenantId, scoped);
+  const tabOf = new Map(scoped.map((row) => [row.id, shippingTab(row, waiting)]));
+  SHIPPING_TABS.forEach((tab) => {
+    counts[tab] = scoped.filter((row) => tabOf.get(row.id) === tab).length;
+  });
   let filtered = scoped;
   const status = String(req.query.status || '');
   const channel = String(req.query.channel || '');
   const payment = String(req.query.payment || '');
   const source = String(req.query.source || '');
   const q = String(req.query.q || '').trim().toLowerCase();
-  if (status && status !== 'all') filtered = filtered.filter((row) => row.status === status);
+  if (SHIPPING_TABS.includes(status)) filtered = filtered.filter((row) => tabOf.get(row.id) === status);
+  else if (status && status !== 'all') filtered = filtered.filter((row) => row.status === status);
   if (channel && channel !== 'all') filtered = filtered.filter((row) => row.channel === channel);
   if (payment && payment !== 'all') {
     filtered = filtered.filter((row) => (payment === 'Partially Paid'

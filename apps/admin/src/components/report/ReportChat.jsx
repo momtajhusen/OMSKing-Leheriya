@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Camera, Check, CheckCheck, ClipboardList, Headset, Image as ImageIcon, Loader2, MessagesSquare, Mic, Search, Video, X,
+  Camera, Check, CheckCheck, ClipboardList, FileText, Headset, Image as ImageIcon, Loader2, MessagesSquare, Mic, Search, Video, X,
 } from 'lucide-react';
 import api, { apiError } from '../../lib/api';
 import { cn } from '../../lib/utils';
-import { dayLabel, messagePreview, timeLabel } from '../../lib/reportChat';
+import { dayLabel, messagePreview, timeLabel, isLocalApp } from '../../lib/reportChat';
 import { useAuth } from '../../hooks/useAuth';
 import ChatPane from './ChatPane';
 
 const THREAD_POLL_MS = 5000;
-const KIND_ICON = { image: Camera, video: Video, audio: Mic };
+const KIND_ICON = { image: Camera, video: Video, audio: Mic, file: FileText };
 const AVATAR_TONES = ['bg-emerald-600', 'bg-sky-600', 'bg-violet-600', 'bg-amber-600', 'bg-rose-600', 'bg-teal-600', 'bg-indigo-600'];
 
 function initials(name) {
@@ -275,9 +275,10 @@ export default function ReportChat({ open, onClose, mode, onChanged, initialThre
             listUrl="/support/messages"
             readUrl="/support/read"
             updatesUrl="/support/updates"
+            developerUpdatesUrl={isLocalApp() && !user?.impersonating ? '/support/as-developer/updates' : undefined}
             mySide={user?.impersonating ? 'platform' : 'tenant'}
             title="Developer Support"
-            subtitle="Report a problem · photos, videos, voice notes"
+            subtitle="Report a problem · photos, videos, files, voice notes"
             avatar={<SupportAvatar />}
             onClose={onClose}
             onChanged={onChanged}

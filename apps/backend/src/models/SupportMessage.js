@@ -10,7 +10,7 @@ const supportMessageSchema = new mongoose.Schema({
   senderRole: { type: String, default: '' },
   text: { type: String, default: '', maxlength: 4000 },
   attachment: {
-    kind: { type: String, enum: ['image', 'video', 'audio'] },
+    kind: { type: String, enum: ['image', 'video', 'audio', 'file'] },
     file: { type: String },
     mime: { type: String },
     bytes: { type: Number },

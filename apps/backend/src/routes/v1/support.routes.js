@@ -18,6 +18,7 @@ router.delete('/messages/:id', ...merchant, asyncHandler(support.deleteMessage))
 router.post('/read', ...merchant, asyncHandler(support.readOwn));
 router.get('/unread', ...merchant, asyncHandler(support.unreadOwn));
 router.get('/updates', ...merchant, asyncHandler(support.listOwnUpdates));
+router.get('/summaries', ...merchant, asyncHandler(support.listOwnSummaries));
 router.post('/updates', ...merchant, asyncHandler(support.createOwnUpdate));
 router.patch('/updates/:id', ...merchant, asyncHandler(support.markOwnUpdate));
 

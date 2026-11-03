@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
-  ArrowLeft, Camera, ChevronDown, ClipboardList, Crop, Image as ImageIcon, Loader2, Mic, MonitorPlay, Paperclip, Pencil, Play, Reply, SendHorizontal,
+  ArrowLeft, Camera, ChevronDown, ClipboardList, Crop, FileText, Image as ImageIcon, Loader2, Mic, MonitorPlay, Paperclip, Pencil, Play, Reply, SendHorizontal,
   Trash2, X,
 } from 'lucide-react';
 import screenRecorder, { canCaptureScreen, canRecordScreen, captureScreenshot, claimClip } from '../../lib/screenRecorder';
@@ -10,9 +10,10 @@ import api, { apiError } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import { copyText } from '../../lib/copyText';
 import {
-  clipboardFiles, dayLabel, fileKind, fileSizeLabel, formatDuration, hasGap, mergeMessages, messagePreview, pageSizeFor, recorderMime, MAX_FILE_MB,
+  clipboardFiles, dayLabel, fileKind, fileSizeLabel, fileTypeLabel, formatDuration, hasGap, mergeMessages, messagePreview, pageSizeFor, recorderMime, MAX_FILE_MB,
 } from '../../lib/reportChat';
-import { ACTION_TOAST, CHAT_FILTERS, markSteps, matchesFilter } from '../../lib/reportUpdates';
+import { ACTION_TOAST, CHAT_FILTERS, markSteps, matchesFilter, pickSummary } from '../../lib/reportUpdates';
+import { useTaskSummaries } from '../../lib/reportSummaries';
 import MessageBubble, { DeletedLabel, EventLabel, srcOf } from './MessageBubble';
 
 const POLL_MS = 4000;
@@ -69,15 +70,28 @@ function StagedTray({ items, onRemove, onEdit }) {
   return (
     <div className="flex gap-2 overflow-x-auto px-3 pb-2 pt-3">
       {items.map((item) => (
-        <div key={item.id} className="group/staged relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-black/10 bg-black/5 shadow-sm dark:border-white/10">
+        <div key={item.id} className={cn('group/staged relative h-20 shrink-0 overflow-hidden rounded-lg border border-black/10 bg-black/5 shadow-sm dark:border-white/10', item.kind === 'file' ? 'w-44 bg-white dark:bg-[#233138]' : 'w-20')}>
           {item.kind === 'image' && <img src={item.url} alt="" className="h-full w-full object-cover" />}
+          {item.kind === 'file' && (
+            <div className="flex h-full items-center gap-2 py-2 pl-2 pr-6" title={item.file.name}>
+              <span className="flex h-11 w-9 shrink-0 flex-col items-center justify-center rounded-md bg-indigo-500 text-white">
+                <FileText className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="line-clamp-2 break-all text-[11.5px] font-medium leading-tight text-foreground">{item.file.name || 'Document'}</span>
+                <span className="mt-0.5 block text-[10px] text-foreground/55">{fileTypeLabel(item.file.name, item.file.type)}</span>
+              </span>
+            </div>
+          )}
           {item.kind === 'video' && (
             <>
               <video src={item.url} muted preload="metadata" className="h-full w-full object-cover" />
               <span className="absolute inset-0 flex items-center justify-center"><span className="rounded-full bg-black/55 p-1.5"><Play className="h-3.5 w-3.5 fill-white text-white" /></span></span>
             </>
           )}
-          <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-0.5 pt-3 text-[9.5px] text-white">{fileSizeLabel(item.file.size)}</span>
+          {item.kind === 'file'
+            ? <span className="absolute bottom-1 right-1.5 text-[9.5px] text-foreground/55">{fileSizeLabel(item.file.size)}</span>
+            : <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-0.5 pt-3 text-[9.5px] text-white">{fileSizeLabel(item.file.size)}</span>}
           <button
             type="button"
             onClick={() => onRemove(item.id)}
@@ -137,11 +151,13 @@ function RecordingBar({ elapsed, levels, onCancel, onSend }) {
  * One report conversation. `listUrl` lists (GET) and sends (POST multipart); `readUrl` marks the other side's messages read.
  * `updatesUrl` marks a message pending (POST); `${updatesUrl}/:id` changes its mark (PATCH).
  * `mySide` decides which messages count as unread for this viewer and which marks they may apply.
+ * `developerUpdatesUrl` (localhost only) also gives the client chat the developer marks.
  */
 export default function ChatPane({
-  listUrl, readUrl, updatesUrl, mySide, title, subtitle, avatar, onBack, onClose, onChanged, emptyState, notice, threadKey,
+  listUrl, readUrl, updatesUrl, developerUpdatesUrl, mySide, title, subtitle, avatar, onBack, onClose, onChanged, emptyState, notice, threadKey,
 }) {
   const [messages, setMessages] = useState([]);
+  const summaries = useTaskSummaries();
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -165,6 +181,7 @@ export default function ChatPane({
   const scroller = useRef(null);
   const input = useRef(null);
   const photoInput = useRef(null);
+  const documentInput = useRef(null);
   const stick = useRef(true);
   const prepend = useRef(null);
   const dragDepth = useRef(0);
@@ -260,22 +277,23 @@ export default function ChatPane({
   }, [refresh]);
 
   /** A mark from a message's dropdown; every bubble of the same update picks up the new mark. */
-  const markMessage = async (m, action) => {
+  const markMessage = async (m, action, asDeveloper = false) => {
+    const url = asDeveloper ? developerUpdatesUrl : updatesUrl;
     try {
       let u = null;
       for (const step of markSteps(action)) {
         const { data } = step === 'track'
-          ? await api.post(updatesUrl, { messageId: m.id })
-          : await api.patch(`${updatesUrl}/${(u || m.update).id}`, { action: step });
+          ? await api.post(url, { messageId: m.id })
+          : await api.patch(`${url}/${(u || m.update).id}`, { action: step });
         u = data.data;
       }
-      const mark = { id: u.id, title: u.title, status: u.status, markedBy: mySide };
+      const mark = { id: u.id, title: u.title, status: u.status, markedBy: asDeveloper ? 'platform' : mySide };
       setMessages((prev) => prev.map((row) => (row.id === m.id || row.update?.id === u.id ? { ...row, update: mark } : row)));
-      const tenantReopen = action === 'reopen' && mySide === 'tenant';
+      const tenantReopen = !asDeveloper && action === 'reopen' && mySide === 'tenant';
       toast.success(tenantReopen ? 'Marked pending — add a voice note or photo below' : ACTION_TOAST[action] || 'Saved', { id: `mark-${u.id}` });
       refresh(false);
       changed.current?.();
-      if (action === 'reopen' && mySide === 'tenant') startReply(m);
+      if (!asDeveloper && action === 'reopen' && mySide === 'tenant') startReply(m);
     } catch (err) {
       toast.error(apiError(err, 'Could not save'));
       refresh(false);
@@ -398,13 +416,9 @@ export default function ChatPane({
     if (!list.length) return;
     const accepted = [];
     list.forEach((file) => {
-      const kind = fileKind(file);
-      if (!kind || kind === 'audio') {
-        toast.error(`${file.name || 'This file'}: only photos and videos can be attached`);
-        return;
-      }
+      const kind = fileKind(file) === 'audio' ? 'file' : fileKind(file);
       if (file.size > MAX_FILE_MB[kind] * 1024 * 1024) {
-        toast.error(`${kind === 'image' ? 'Photo' : 'Video'} must be ${MAX_FILE_MB[kind]}MB or smaller`);
+        toast.error(`${{ image: 'Photo', video: 'Video' }[kind] || file.name || 'File'} must be ${MAX_FILE_MB[kind]}MB or smaller`);
         return;
       }
       accepted.push({ id: `st-${(tmpSeq += 1)}`, file, kind, url: trackUrl(URL.createObjectURL(file)) });
@@ -496,7 +510,7 @@ export default function ChatPane({
       mine: true,
       side: mySide,
       text: body || '',
-      attachment: file ? { kind, url: localUrl, durationSec } : null,
+      attachment: file ? { kind, url: localUrl, durationSec, name: file.name, bytes: file.size, mime: file.type } : null,
       replyTo: reply,
       createdAt: new Date().toISOString(),
       progress: 0,
@@ -840,6 +854,7 @@ export default function ChatPane({
               )}
               <MessageBubble
                 message={m}
+                summary={pickSummary(m.update, summaries[m.id])}
                 grouped={Boolean(sameSender)}
                 showName={!m.mine && !sameSender}
                 highlighted={highlightId === m.id}
@@ -851,6 +866,7 @@ export default function ChatPane({
                 onMediaLoad={onMediaLoad}
                 mySide={mySide}
                 onMark={updatesUrl ? markMessage : undefined}
+                onDevMark={developerUpdatesUrl ? (m, action) => markMessage(m, action, true) : undefined}
                 onDelete={deleteMessage}
               />
             </Fragment>
@@ -940,6 +956,10 @@ export default function ChatPane({
                       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-500 text-white"><ImageIcon className="h-4 w-4" /></span>
                       Photos
                     </button>
+                    <button type="button" onClick={() => { setAttachOpen(false); documentInput.current?.click(); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm hover:bg-black/5 dark:hover:bg-white/5">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500 text-white"><FileText className="h-4 w-4" /></span>
+                      Document
+                    </button>
                     {canCaptureScreen() && (
                       <button type="button" onClick={takeScreenshot} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm hover:bg-black/5 dark:hover:bg-white/5">
                         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-white"><Crop className="h-4 w-4" /></span>
@@ -963,7 +983,8 @@ export default function ChatPane({
                   </div>
                 </>
               )}
-              <input ref={photoInput} type="file" accept="image/*" multiple hidden onChange={(e) => { stageFiles(e.target.files); e.target.value = ''; }} />            </div>
+              <input ref={photoInput} type="file" accept="image/*" multiple hidden onChange={(e) => { stageFiles(e.target.files); e.target.value = ''; }} />
+              <input ref={documentInput} type="file" accept="*/*" multiple hidden onChange={(e) => { stageFiles(e.target.files); e.target.value = ''; }} />            </div>
 
             {updatesUrl && (
               <button

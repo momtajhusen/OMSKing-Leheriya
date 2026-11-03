@@ -322,3 +322,39 @@ test('vendors cannot see or mark updates', async () => {
   const mark = await api('PATCH', `/api/v1/support/updates/${labelUpdate.id}`, { token: vendorToken, json: { action: 'confirm' } });
   assert.equal(mark.status, 403);
 });
+
+test('a completed update carries a short issue / fix summary that the client chat and module list both get', async () => {
+  const sent = await api('POST', '/api/v1/support/messages', {
+    token: ownerToken, form: textForm({ text: 'Inventory page is not opening', trackAsUpdate: 'true' }),
+  });
+  const updateId = sent.body.data.update.id;
+  const mark = (json, token = platformToken) => api('PATCH', `/api/v1/support/threads/${leheriya._id}/updates/${updateId}`, { token, json });
+  const summary = { action: 'summary', issue: 'Inventory page atak jaata tha', fix: 'Inventory API halki ki', area: 'Stock → Inventory' };
+
+  assert.equal((await mark(summary)).status, 400, 'only a completed update gets a summary');
+  await mark({ action: 'complete' });
+  const merchantTry = await api('PATCH', `/api/v1/support/updates/${updateId}`, { token: ownerToken, json: summary });
+  assert.equal(merchantTry.status, 403, 'only the OMSKing team writes the summary');
+  assert.equal((await mark({ ...summary, issue: 'x'.repeat(201) })).status, 400);
+
+  const saved = await mark(summary);
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.data.status, 'done', 'a summary does not change the status');
+
+  const chat = await api('GET', '/api/v1/support/messages', { token: ownerToken });
+  const source = chat.body.data.find((m) => m.id === sent.body.data.id);
+  assert.equal(source.update.issue, 'Inventory page atak jaata tha');
+  assert.equal(source.update.fix, 'Inventory API halki ki');
+  assert.equal(source.update.markedBy, 'platform', 'the summary is not a status mark');
+  assert.equal(chat.body.data.filter((m) => m.event?.action === 'summary').length, 0, 'no status label is posted for it');
+
+  const list = await api('GET', '/api/v1/support/summaries', { token: opsToken });
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.body.data.find((s) => s.messageId === sent.body.data.id), {
+    messageId: sent.body.data.id, area: 'Stock → Inventory', issue: 'Inventory page atak jaata tha', fix: 'Inventory API halki ki',
+  });
+  const surat = await api('GET', '/api/v1/support/summaries', { token: suratToken });
+  assert.equal(surat.body.data.length, 0, 'another company never sees these summaries');
+  const vendor = await api('GET', '/api/v1/support/summaries', { token: vendorToken });
+  assert.notEqual(vendor.status, 200, 'vendors cannot read support summaries');
+});

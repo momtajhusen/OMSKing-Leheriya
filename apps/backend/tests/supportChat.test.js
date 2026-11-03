@@ -13,6 +13,7 @@ const { uploadsRoot } = require('../src/middleware/uploadImage');
 const Tenant = require('../src/models/Tenant');
 const Role = require('../src/models/Role');
 const User = require('../src/models/User');
+const SupportMessage = require('../src/models/SupportMessage');
 const app = require('../src/app');
 
 const PNG = Buffer.concat([
@@ -204,21 +205,48 @@ test('a screenshot is stored privately and served only through a signed link', a
   assert.equal(files.some((f) => f.includes('support')), false, 'chat media must not sit under the public /uploads folder');
 });
 
-test('a fake image and an unknown file type are rejected and not kept on disk', async () => {
-  const fake = await api('POST', '/api/v1/support/messages', {
-    token: leheriyaToken,
-    form: messageForm({ file: Buffer.from('<script>alert(1)</script>'), type: 'image/png', filename: 'x.png' }),
-  });
-  assert.equal(fake.status, 400);
-
+test('any file type can be sent as a document, and is only ever served as a download', async () => {
+  const PDF = Buffer.from('%PDF-1.4 report');
   const pdf = await api('POST', '/api/v1/support/messages', {
     token: leheriyaToken,
-    form: messageForm({ file: Buffer.from('%PDF-1.4'), type: 'application/pdf', filename: 'x.pdf' }),
+    form: messageForm({ file: PDF, type: 'application/pdf', filename: 'GST report.pdf' }),
   });
-  assert.equal(pdf.status, 400);
+  assert.equal(pdf.status, 201, JSON.stringify(pdf.body));
+  assert.equal(pdf.body.data.attachment.kind, 'file');
+  assert.equal(pdf.body.data.attachment.name, 'GST report.pdf');
+  assert.equal(pdf.body.data.attachment.mime, 'application/pdf');
+  assert.equal(pdf.body.data.attachment.bytes, PDF.length);
+
+  const download = await api('GET', pdf.body.data.attachment.url);
+  assert.equal(download.status, 200);
+  assert.deepEqual(download.buf, PDF);
+  assert.equal(download.headers.get('content-type'), 'application/octet-stream', 'never rendered by the browser');
+  assert.match(download.headers.get('content-disposition'), /^attachment; filename="GST report\.pdf"; filename\*=UTF-8''GST%20report\.pdf$/);
+  assert.equal(download.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(download.headers.get('content-security-policy'), /sandbox/);
+
+  const fake = await api('POST', '/api/v1/support/messages', {
+    token: leheriyaToken,
+    form: messageForm({ file: Buffer.from('<script>alert(1)</script>'), type: 'image/png', filename: 'x".png' }),
+  });
+  assert.equal(fake.status, 201);
+  assert.equal(fake.body.data.attachment.kind, 'file', 'a fake image is not shown as an image');
+  const fakeFile = await api('GET', fake.body.data.attachment.url);
+  assert.equal(fakeFile.headers.get('content-type'), 'application/octet-stream');
+  assert.match(fakeFile.headers.get('content-disposition'), /^attachment; filename="[^"\r\n]*"; filename\*=UTF-8''[^"\s]+$/, 'the name cannot break the header');
+
+  const odd = await api('POST', '/api/v1/support/messages', {
+    token: leheriyaToken,
+    form: messageForm({ file: Buffer.from('a,b'), type: 'text/csv\r\nX-Evil: 1', filename: 'orders.csv' }),
+  });
+  assert.equal(odd.status, 201);
+  assert.equal(odd.body.data.attachment.mime, 'application/octet-stream', 'a strange declared type is not stored');
 
   const dir = path.join(__dirname, '../private-uploads/support', String(leheriya._id));
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.upload')), []);
+
+  // Later tests count this thread's messages.
+  await SupportMessage.deleteMany({ _id: { $in: [pdf, fake, odd].map((r) => r.body.data.id) } });
 });
 
 test('voice notes and videos are accepted with their duration', async () => {

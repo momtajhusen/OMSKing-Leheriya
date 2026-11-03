@@ -4,6 +4,7 @@ const { successResponse } = require('../utils/response');
 const { sessionTenantId, assertSameTenant } = require('../lib/tenantAccess');
 const { PERMISSIONS } = require('../constants/permissions');
 const { recordFromReq } = require('../services/auditLog.service');
+const { ROLLOUT_KEYS } = require('../services/permissionRollout.service');
 
 const ALLOWED = new Set(Object.values(PERMISSIONS));
 
@@ -39,6 +40,7 @@ async function updateRolePermissions(req, res) {
   }
   const before = { permissions: [...(role.permissions || [])].sort() };
   role.permissions = next;
+  role.permissionRollouts = ROLLOUT_KEYS;
   await role.save();
   const after = { permissions: [...role.permissions].sort() };
   await recordFromReq(req, {

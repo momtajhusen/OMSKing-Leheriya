@@ -1,4 +1,5 @@
 const PERMISSIONS = Object.freeze({
+  DASHBOARD_VIEW: 'dashboard.view',
   ORDERS_VIEW: 'orders.view',
   ORDERS_EDIT: 'orders.edit',
   ORDERS_CANCEL: 'orders.cancel',
@@ -26,6 +27,7 @@ function hasPermission(granted, key) {
 const P = PERMISSIONS;
 
 const ALL_TENANT = [
+  P.DASHBOARD_VIEW,
   P.ORDERS_VIEW, P.ORDERS_EDIT, P.ORDERS_CANCEL,
   P.INVENTORY_VIEW, P.INVENTORY_ADJUST,
   P.SHIPPING_GENERATE, P.SHIPPING_CANCEL,
@@ -37,6 +39,7 @@ const ALL_TENANT = [
 ];
 
 const OPS = [
+  P.DASHBOARD_VIEW,
   P.ORDERS_VIEW, P.ORDERS_EDIT, P.ORDERS_CANCEL,
   P.SHIPPING_GENERATE, P.SHIPPING_CANCEL,
   P.RETURNS_APPROVE, P.CUSTOMERS_VIEW, P.CATALOG_VIEW, P.INVENTORY_VIEW,
@@ -48,11 +51,16 @@ const ROLE_DEFAULT_PERMISSIONS = Object.freeze({
   super_admin: ALL_TENANT,
   operations: OPS,
   admin: OPS,
-  warehouse: [P.ORDERS_VIEW, P.ORDERS_EDIT, P.INVENTORY_VIEW, P.INVENTORY_ADJUST, P.SHIPPING_GENERATE],
-  accounts: [P.ORDERS_VIEW, P.FINANCE_VIEW, P.FINANCE_RECONCILE, P.CUSTOMERS_VIEW],
-  catalog_manager: [P.CATALOG_VIEW, P.CATALOG_EDIT, P.INVENTORY_VIEW, P.ORDERS_VIEW],
-  customer_support: [P.ORDERS_VIEW, P.CUSTOMERS_VIEW, P.RETURNS_APPROVE],
+  warehouse: [P.DASHBOARD_VIEW, P.ORDERS_VIEW, P.ORDERS_EDIT, P.INVENTORY_VIEW, P.INVENTORY_ADJUST, P.SHIPPING_GENERATE],
+  accounts: [P.DASHBOARD_VIEW, P.ORDERS_VIEW, P.FINANCE_VIEW, P.FINANCE_RECONCILE, P.CUSTOMERS_VIEW],
+  catalog_manager: [P.DASHBOARD_VIEW, P.CATALOG_VIEW, P.CATALOG_EDIT, P.INVENTORY_VIEW, P.ORDERS_VIEW],
+  customer_support: [P.DASHBOARD_VIEW, P.ORDERS_VIEW, P.CUSTOMERS_VIEW, P.RETURNS_APPROVE],
   vendor: [P.ORDERS_VIEW, P.ORDERS_EDIT, P.SHIPPING_GENERATE],
+});
+
+/** Keys added after companies already had roles: added once to these role codes, then left to the owner. */
+const PERMISSION_ROLLOUTS = Object.freeze({
+  [P.DASHBOARD_VIEW]: ['super_admin', 'operations', 'admin', 'warehouse', 'accounts', 'catalog_manager', 'customer_support'],
 });
 
 const TENANT_ROLE_SEED = [
@@ -69,5 +77,6 @@ module.exports = {
   PERMISSIONS,
   hasPermission,
   ROLE_DEFAULT_PERMISSIONS,
+  PERMISSION_ROLLOUTS,
   TENANT_ROLE_SEED,
 };

@@ -8,6 +8,7 @@ import {
   dayLabel,
   formatDuration,
   fileKind,
+  fileTypeLabel,
   clipboardFiles,
   messagePreview,
   recorderMime,
@@ -45,11 +46,32 @@ test('voice note durations print as m:ss', () => {
   assert.equal(formatDuration(undefined), '0:00');
 });
 
-test('only photos, videos and voice notes can be attached', () => {
+test('documents: any file type, shown with its name and type, like WhatsApp', () => {
+  assert.equal(MAX_FILE_MB.file, 50);
+  assert.equal(fileTypeLabel('GST report.pdf', 'application/pdf'), 'PDF');
+  assert.equal(fileTypeLabel('orders.final.XLSX', ''), 'XLSX');
+  assert.equal(fileTypeLabel('README', 'application/zip'), 'ZIP');
+  assert.equal(fileTypeLabel('', ''), 'FILE');
+  assert.equal(fileTypeLabel('weird.thisistoolongext', ''), 'FILE');
+  assert.equal(messagePreview({ attachment: { kind: 'file', name: 'GST report.pdf' } }), '📄 GST report.pdf');
+  assert.equal(messagePreview({ kind: 'file' }), 'Document');
+
+  const menu = chat.slice(chat.indexOf('aria-label="Attach photo"'), chat.indexOf('Tip: paste a screenshot'));
+  assert.deepEqual(['Photos', 'Document', 'Take screenshot', 'Record screen'].map((label) => menu.includes(label)), [true, true, true, true]);
+  assert.match(chat, /<input ref=\{documentInput\} type="file" accept="\*\/\*" multiple hidden onChange=\{\(e\) => \{ stageFiles\(e\.target\.files\)/);
+  assert.match(chat, /item\.kind === 'file'[\s\S]{0,600}item\.file\.name[\s\S]{0,300}fileTypeLabel\(item\.file\.name, item\.file\.type\)/, 'staged documents show name and type');
+  assert.match(chat, /attachment: file \? \{ kind, url: localUrl, durationSec, name: file\.name, bytes: file\.size, mime: file\.type \}/);
+  const bubble = fs.readFileSync(new URL('../components/report/MessageBubble.jsx', import.meta.url), 'utf8');
+  assert.match(bubble, /attachment\?\.kind === 'file' && \(/);
+  assert.match(bubble, /function DocumentCard[\s\S]{0,1500}href=\{src\}[\s\S]{0,400}download/, 'documents open as a download');
+});
+
+test('photos, videos and voice notes are media; anything else is a document', () => {
   assert.equal(fileKind({ type: 'image/png' }), 'image');
   assert.equal(fileKind({ type: 'video/quicktime' }), 'video');
   assert.equal(fileKind({ type: 'audio/webm' }), 'audio');
-  assert.equal(fileKind({ type: 'application/pdf' }), null);
+  assert.equal(fileKind({ type: 'application/pdf' }), 'file', 'anything else is a document');
+  assert.equal(fileKind({ type: '' }), 'file');
   assert.equal(MAX_FILE_MB.video, 50);
 });
 

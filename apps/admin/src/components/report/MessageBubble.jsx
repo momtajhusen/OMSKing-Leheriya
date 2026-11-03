@@ -1,20 +1,49 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, BadgeCheck, Ban, Camera, Check, CheckCheck, ChevronDown, CircleCheck, CirclePlay, Clock, Copy, Mic, Pause, Play, Reply,
+  AlertCircle, BadgeCheck, Ban, Camera, Check, CheckCheck, ChevronDown, CircleCheck, CirclePlay, Clock, Copy, Download, FileText, Mic, Pause, Play, Reply,
   RotateCcw, RotateCw, Trash2, Video,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import api from '../../lib/api';
-import { formatDuration, mediaSrc, messagePreview, timeLabel } from '../../lib/reportChat';
+import { fileSizeLabel, fileTypeLabel, formatDuration, mediaSrc, messagePreview, timeLabel } from '../../lib/reportChat';
 import { eventLabel, markOptions, statusChips } from '../../lib/reportUpdates';
 
 const URL_PATTERN = /(https?:\/\/[^\s<]+)/g;
-const KIND_ICON = { image: Camera, video: Video, audio: Mic };
+const KIND_ICON = { image: Camera, video: Video, audio: Mic, file: FileText };
 
 let playingAudio = null;
 
 export function srcOf(attachment) {
   return mediaSrc(attachment?.url, api.defaults.baseURL);
+}
+
+/** A document in a bubble, WhatsApp style: type tile, name, "PDF · 1.2 MB", and a download. */
+function DocumentCard({ attachment, src, mine, pending, progress }) {
+  const meta = [fileTypeLabel(attachment.name, attachment.mime), attachment.bytes ? fileSizeLabel(attachment.bytes) : ''].filter(Boolean).join(' · ');
+  const body = (
+    <>
+      <span className="flex h-10 w-8 shrink-0 items-center justify-center rounded-md bg-indigo-500 text-white"><FileText className="h-4 w-4" /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-medium">{attachment.name || 'Document'}</span>
+        <span className="block text-[11px] text-[#667781] dark:text-[#8696a0]">{meta}</span>
+      </span>
+      {!pending && <Download className="h-4 w-4 shrink-0 text-[#667781] dark:text-[#8696a0]" />}
+    </>
+  );
+  const cls = cn('relative flex w-[240px] max-w-full items-center gap-2.5 overflow-hidden rounded-md px-2 py-2', mine ? 'bg-black/5 dark:bg-black/15' : 'bg-black/[0.04] dark:bg-white/5');
+  if (pending) {
+    return (
+      <div className={cls}>
+        {body}
+        <span className="absolute inset-x-0 bottom-0 h-0.5 bg-foreground/10"><span className="block h-full bg-emerald-600 transition-all" style={{ width: `${Math.round((progress || 0) * 100)}%` }} /></span>
+      </div>
+    );
+  }
+  return (
+    <a href={src} target="_blank" rel="noopener noreferrer" download={attachment.name || true} title={`Download ${attachment.name || 'document'}`} className={cn(cls, 'hover:bg-black/10 dark:hover:bg-white/10')}>
+      {body}
+    </a>
+  );
 }
 
 function Linkified({ text }) {
@@ -164,12 +193,17 @@ const STATUS_CHIP = {
 const OPTION_DOT = { pending: 'bg-amber-500', progress: 'bg-sky-500', complete: 'bg-emerald-500', fixed: 'bg-emerald-500' };
 
 /** The chevron in a message's top-right corner: set its status (developer or client marks), or delete your own message. */
-function MessageMenu({ message, side, onMark, onDelete }) {
+function MessageMenu({ message, side, onMark, onDevMark, onDelete }) {
   const [open, setOpen] = useState(null);
   const button = useRef(null);
   const options = onMark ? markOptions(message.update?.status || null, side) : [];
+  const devOptions = onDevMark ? markOptions(message.update?.status || null, 'platform') : [];
   const canDelete = Boolean(message.mine && onDelete);
-  if (!options.length && !canDelete) return null;
+  if (!options.length && !devOptions.length && !canDelete) return null;
+  const sections = [
+    { key: 'own', title: side === 'platform' ? 'Developer status' : 'Status', items: options, apply: onMark },
+    { key: 'dev', title: 'Developer status', items: devOptions, apply: onDevMark },
+  ].filter((section) => section.items.length);
 
   const toggle = (e) => {
     e.stopPropagation();
@@ -206,32 +240,32 @@ function MessageMenu({ message, side, onMark, onDelete }) {
         <>
           <button type="button" aria-label="Close menu" className="fixed inset-0 z-20 cursor-default" onClick={(e) => { e.stopPropagation(); setOpen(null); }} />
           <div role="menu" className={cn('absolute right-0 z-30 w-48 overflow-hidden rounded-xl bg-white py-1 shadow-xl ring-1 ring-black/5 dark:bg-[#233138]', open === 'up' ? 'bottom-7' : 'top-7')}>
-            {options.length > 0 && (
-              <p className="px-3 pb-0.5 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-foreground/45">
-                {side === 'platform' ? 'Developer status' : 'Status'}
-              </p>
-            )}
-            {options.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                role="menuitemradio"
-                aria-checked={o.active}
-                disabled={!o.action && !o.active}
-                onClick={(e) => { e.stopPropagation(); setOpen(null); if (o.action) onMark(message, o.action); }}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13.5px] text-foreground hover:bg-black/5 disabled:opacity-40 dark:hover:bg-white/5"
-              >
-                <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', OPTION_DOT[o.id])} />
-                <span className="flex-1">{o.label}</span>
-                {o.active && <Check className="h-4 w-4 text-[#00a884]" />}
-              </button>
+            {sections.map((section, i) => (
+              <div key={section.key} role="group" aria-label={section.title} className={cn(i > 0 && 'border-t border-black/5 dark:border-white/5')}>
+                <p className="px-3 pb-0.5 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-foreground/45">{section.title}</p>
+                {section.items.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={o.active}
+                    disabled={!o.action && !o.active}
+                    onClick={(e) => { e.stopPropagation(); setOpen(null); if (o.action) section.apply(message, o.action); }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13.5px] text-foreground hover:bg-black/5 disabled:opacity-40 dark:hover:bg-white/5"
+                  >
+                    <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', OPTION_DOT[o.id])} />
+                    <span className="flex-1">{o.label}</span>
+                    {o.active && <Check className="h-4 w-4 text-[#00a884]" />}
+                  </button>
+                ))}
+              </div>
             ))}
             {canDelete && (
               <button
                 type="button"
                 role="menuitem"
                 onClick={remove}
-                className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13.5px] text-rose-600 hover:bg-rose-500/10 dark:text-rose-400', options.length && 'border-t border-black/5 dark:border-white/5')}
+                className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13.5px] text-rose-600 hover:bg-rose-500/10 dark:text-rose-400', sections.length > 0 && 'border-t border-black/5 dark:border-white/5')}
               >
                 <Trash2 className="h-3.5 w-3.5 shrink-0" />
                 Delete for everyone
@@ -283,7 +317,8 @@ export function DeletedLabel({ message }) {
 }
 
 export default function MessageBubble({
-  message, showName, grouped, highlighted, onReply, onCopy, onJump, onOpenImage, onRetry, onMediaLoad, mySide, onMark, onDelete,
+  message, summary, showName, grouped, highlighted, onReply, onCopy, onJump, onOpenImage, onRetry, onMediaLoad, mySide, onMark, onDevMark,
+  onDelete,
 }) {
   const { mine, attachment } = message;
   const [dx, setDx] = useState(0);
@@ -327,7 +362,7 @@ export default function MessageBubble({
             message.failed && 'opacity-80',
           )}
         >
-          {!message.pending && !message.failed && <MessageMenu message={message} side={mySide} onMark={onMark} onDelete={onDelete} />}
+          {!message.pending && !message.failed && <MessageMenu message={message} side={mySide} onMark={onMark} onDevMark={onDevMark} onDelete={onDelete} />}
 
           {showName && (
             <div className={cn('mb-px flex items-center gap-1.5 px-1 text-[12px] font-semibold', (onMark || (mine && onDelete)) && 'pr-6', message.side === 'platform' ? 'text-sky-600 dark:text-sky-400' : 'text-emerald-700 dark:text-emerald-400')}>
@@ -352,6 +387,9 @@ export default function MessageBubble({
               {message.pending && <UploadVeil progress={message.progress} />}
             </div>
           )}
+          {attachment?.kind === 'file' && (
+            <DocumentCard attachment={attachment} src={src} mine={mine} pending={message.pending} progress={message.progress} />
+          )}
           {attachment?.kind === 'audio' && (
             <div className="relative px-1">
               <VoiceNote id={message.id} src={src} duration={attachment.durationSec} mine={mine} />
@@ -373,7 +411,7 @@ export default function MessageBubble({
 
           {message.update && (
             <div className="mx-1 mb-0.5 mt-0.5 flex flex-wrap gap-1">
-              {statusChips(message.update.status).map((c) => {
+              {statusChips(message.update.status, undefined, summary).map((c) => {
                 const chip = STATUS_CHIP[c.id === 'client' ? 'client' : c.status] || STATUS_CHIP.pending;
                 const ChipIcon = chip.icon;
                 return (

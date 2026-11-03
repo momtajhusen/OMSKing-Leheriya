@@ -24,6 +24,7 @@ pnpm-debug.log*
 uploads/
 private-uploads/
 recordings/
+client-reports/
 
 *.local
 

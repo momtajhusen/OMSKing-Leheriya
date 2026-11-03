@@ -104,6 +104,10 @@ async function listThreadUpdates(req, res) {
   return sendUpdates(res, await updates.listUpdates(req.supportTenantId, req.user.id, req.query));
 }
 
+async function listOwnSummaries(req, res) {
+  return successResponse(res, await updates.listSummaries(req.supportTenantId), 'Fix summaries');
+}
+
 async function listAllUpdates(req, res) {
   return sendUpdates(res, await updates.listAllUpdates(req.user.id, req.query));
 }
@@ -128,6 +132,7 @@ async function markUpdate(req, res, side) {
     action: req.body?.action,
     note: req.body?.note,
     title: req.body?.title,
+    summary: req.body || {},
   });
   return successResponse(res, row, 'Update saved');
 }
@@ -142,6 +147,13 @@ async function readThread(req, res) {
   return successResponse(res, { updated }, 'Marked as read');
 }
 
+/** Documents never render in the browser; the ASCII name cannot carry quotes or line breaks into the header. */
+function downloadDisposition(name) {
+  const clean = String(name || 'file').replace(/[\r\n]/g, '') || 'file';
+  const ascii = clean.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(clean)}`;
+}
+
 async function media(req, res) {
   if (!chat.verifyMediaLink(req.params.id, req.query.exp, req.query.sig)) {
     throw new HttpError(403, 'This link has expired. Reopen the chat.');
@@ -149,12 +161,14 @@ async function media(req, res) {
   const file = await chat.mediaFile(req.params.id);
   if (!file) throw new HttpError(404, 'File not found');
   const maxAge = Math.max(0, Number(req.query.exp) - Math.floor(Date.now() / 1000));
+  const document = file.kind === 'file';
   res.set({
-    'Content-Type': file.mime,
+    'Content-Type': document ? 'application/octet-stream' : file.mime,
     'X-Content-Type-Options': 'nosniff',
-    'Content-Disposition': 'inline',
+    'Content-Disposition': document ? downloadDisposition(file.name) : 'inline',
     'Cache-Control': `private, max-age=${maxAge}`,
     'Cross-Origin-Resource-Policy': 'cross-origin',
+    ...(document ? { 'Content-Security-Policy': "default-src 'none'; sandbox" } : {}),
   });
   return res.sendFile(file.path);
 }
@@ -172,6 +186,7 @@ module.exports = {
   sendThread,
   readThread,
   listOwnUpdates,
+  listOwnSummaries,
   createOwnUpdate,
   markOwnUpdate,
   listThreadUpdates,

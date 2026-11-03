@@ -84,3 +84,10 @@ export function vendorCatalog(orders, vendorNames) {
   });
   return [...bySku.values()].sort((a, b) => a.sku.localeCompare(b.sku));
 }
+
+/** The vendor shown in a sub-order's dropdown (the pick, else the saved vendor) and whether Assign would change it. */
+export function vendorPick(picks, sub) {
+  const saved = sub.assignedVendor || '';
+  const value = Object.hasOwn(picks, sub.id) ? picks[sub.id] : saved;
+  return { value, changed: value !== saved };
+}
