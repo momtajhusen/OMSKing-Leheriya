@@ -25,8 +25,15 @@ const demoRequestsRoutes = require('./demoRequests.routes');
 const pricingRoutes = require('./pricing.routes');
 const setupRoutes = require('./setup.routes');
 const marketingImagesRoutes = require('./marketingImages.routes');
+const supportRoutes = require('./support.routes');
+const config = require('../../config');
+const { authMiddleware } = require('../../middleware/auth');
+const { tenantMiddleware } = require('../../middleware/tenant');
+const { requirePermission } = require('../../middleware/requirePermission');
+const { createSupportLiveProxy } = require('../../services/supportLiveProxy');
 
 const router = express.Router();
+const supportLive = createSupportLiveProxy(config.supportLive, [authMiddleware, tenantMiddleware, requirePermission('tenants.manage')]);
 
 router.get('/', healthCheck);
 router.get('/health', healthCheck);
@@ -55,5 +62,6 @@ router.use('/demo-requests', demoRequestsRoutes);
 router.use('/pricing', pricingRoutes);
 router.use('/setup', setupRoutes);
 router.use('/marketing-images', marketingImagesRoutes);
+router.use('/support', (req, res, next) => (config.nodeEnv === 'development' ? supportLive : supportRoutes)(req, res, next));
 
 module.exports = router;

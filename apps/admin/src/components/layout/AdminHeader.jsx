@@ -31,6 +31,7 @@ import { ROLE_LABELS } from '../../constants/roles';
 import { usePermissions } from '../../hooks/usePermissions';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfileAvatar, useProfilePhoto } from '../account/ProfilePhoto';
+import ReportButton from '../report/ReportButton';
 import { Camera } from 'lucide-react';
 
 const NOTIFICATION_ICONS = {
@@ -173,6 +174,8 @@ function AdminHeader() {
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2">
+        {user && <ReportButton mode="merchant" />}
+
         <DropdownMenu
           align="end"
           className="w-[min(22.5rem,calc(100vw-1.5rem))] p-0"

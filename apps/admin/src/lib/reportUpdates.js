@@ -1,0 +1,128 @@
+import { isLocalApp } from './reportChat.js';
+
+/** Display data for each update status; `hint` is the tooltip on the message chip. */
+export const STATUS_META = {
+  pending: { label: 'Pending', hint: 'Pending' },
+  in_progress: { label: 'Pending', hint: 'Pending · the developer is working on it' },
+  done: { label: 'Fixed', hint: 'Fixed by the developer · waiting for the client to confirm' },
+  confirmed: { label: 'Fixed', hint: 'Fixed and confirmed by the client' },
+};
+
+/** Mirrors ACTIONS in apps/backend/src/services/supportUpdates.service.js. */
+const RULES = {
+  start: { sides: ['platform'], from: ['pending'] },
+  complete: { sides: ['platform'], from: ['pending', 'in_progress'] },
+  confirm: { sides: ['tenant'], from: ['pending', 'in_progress', 'done'] },
+  reopen: { sides: ['platform', 'tenant'], from: ['done', 'confirmed'] },
+};
+
+export const ACTION_TOAST = {
+  track: 'Marked pending',
+  track_start: 'Marked in progress',
+  track_complete: 'Marked complete — waiting for the client to confirm',
+  start: 'Marked in progress',
+  complete: 'Marked fixed — waiting for the client to confirm',
+  confirm: 'Confirmed as fixed',
+  reopen: 'Marked pending again',
+};
+
+export function actionsFor(status, side) {
+  return Object.entries(RULES)
+    .filter(([, rule]) => rule.sides.includes(side) && rule.from.includes(status))
+    .map(([action]) => action);
+}
+
+export function eventLabel(event, senderName, mine) {
+  const who = mine ? 'You' : (senderName || 'Someone');
+  const title = `"${event?.title || 'update'}"`;
+  switch (event?.action) {
+    case 'start': return `${who} started working on ${title}`;
+    case 'complete': return `${who} marked ${title} as fixed`;
+    case 'confirm': return `${who} confirmed ${title} is fixed`;
+    case 'reopen': return `${who} marked ${title} as pending again`;
+    default: return `${who} updated ${title}`;
+  }
+}
+
+const OPEN = ['pending', 'in_progress'];
+const FIXED = ['done', 'confirmed'];
+
+/** The developer's own view of an update: they move it Pending → In progress → Complete. */
+function developerOptions(status) {
+  if (!status) {
+    return [
+      { id: 'pending', label: 'Pending', action: 'track', active: false },
+      { id: 'progress', label: 'In progress', action: 'track_start', active: false },
+      { id: 'complete', label: 'Complete', action: 'track_complete', active: false },
+    ];
+  }
+  const can = actionsFor(status, 'platform');
+  return [
+    { id: 'pending', label: 'Pending', action: can.includes('reopen') ? 'reopen' : null, active: status === 'pending' },
+    { id: 'progress', label: 'In progress', action: can.includes('start') ? 'start' : null, active: status === 'in_progress' },
+    { id: 'complete', label: 'Complete', action: can.includes('complete') ? 'complete' : null, active: FIXED.includes(status) },
+  ];
+}
+
+/**
+ * The choices in a message's dropdown: Pending / Fixed for the client, Pending / In progress / Complete for the developer.
+ * `status` is null for an untracked message. `action` is what picking the option sends (null when it is already the
+ * current mark, or not allowed from here); `active` ticks the current mark. Developer marks exist on localhost only.
+ */
+export function markOptions(status, side, local = isLocalApp()) {
+  if (side === 'platform') return local ? developerOptions(status) : [];
+  if (!status) return [{ id: 'pending', label: 'Pending', action: 'track', active: false }];
+  const can = actionsFor(status, side);
+  const fixedAction = side === 'platform' ? 'complete' : 'confirm';
+  return [
+    { id: 'pending', label: 'Pending', action: can.includes('reopen') ? 'reopen' : null, active: OPEN.includes(status) },
+    {
+      id: 'fixed',
+      label: 'Fixed',
+      action: can.includes(fixedAction) ? fixedAction : null,
+      active: status === 'confirmed' || (side === 'platform' && status === 'done'),
+    },
+  ];
+}
+
+/** 'track_complete' = start tracking the message, then complete it; plain actions are a single call. */
+export function markSteps(action) {
+  const [first, then] = String(action).split('_');
+  return first === 'track' && then ? ['track', then] : [action];
+}
+
+const DEVELOPER_STATUS = {
+  pending: { label: 'Pending', hint: 'The developer has not started yet' },
+  in_progress: { label: 'In progress', hint: 'The developer is working on it' },
+  done: { label: 'Complete', hint: 'Completed by the developer · waiting for the client to confirm' },
+  confirmed: { label: 'Complete', hint: 'Completed by the developer' },
+};
+
+/** The chips under a tracked message: the developer's status (localhost only), plus the client's confirmation once given. */
+export function statusChips(status, local = isLocalApp()) {
+  const dev = DEVELOPER_STATUS[status];
+  if (!dev) return [];
+  const chips = local ? [{ id: 'developer', status, label: `Developer · ${dev.label}`, hint: dev.hint }] : [];
+  if (status === 'confirmed') chips.push({ id: 'client', status, label: 'Client · Confirmed', hint: 'The client confirmed it is fixed' });
+  return chips;
+}
+
+export const CHAT_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'pending', label: 'Pending' },
+  { id: 'fixed', label: 'Fixed' },
+  { id: 'developer', label: 'Developer' },
+  { id: 'client', label: 'Client' },
+];
+
+/** Developer / Client mean who made the last Pending or Fixed mark. Status labels in the chat only show under All. */
+export function matchesFilter(message, filter) {
+  if (!filter || filter === 'all') return true;
+  const update = message.update;
+  if (!update || message.event) return false;
+  if (filter === 'pending') return OPEN.includes(update.status);
+  if (filter === 'fixed') return FIXED.includes(update.status);
+  if (filter === 'developer') return update.markedBy === 'platform';
+  if (filter === 'client') return update.markedBy === 'tenant';
+  return true;
+}

@@ -11,6 +11,7 @@ import PageFade from '../motion/PageFade';
 import useScrollTopOnNavigate from '../../hooks/useScrollTopOnNavigate';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
+import ReportButton from '../report/ReportButton';
 
 const GROUPS = [
   {
@@ -164,6 +165,7 @@ export default function PlatformLayout() {
               </div>
             </div>
             <div className="flex items-center gap-1">
+              <ReportButton mode="platform" />
               <button type="button" onClick={toggleTheme} className="rounded-lg p-2 hover:bg-muted" aria-label="Toggle theme">
                 {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
               </button>

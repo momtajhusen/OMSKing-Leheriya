@@ -6,7 +6,7 @@
 
 .PHONY: help install install-ci mongo-start mongo-stop mongo-status ensure-mongo \
 	redis-status ensure-redis \
-	run dev all backend admin build stop clean status test seed
+	run dev all backend admin build stop clean status test seed record
 
 SHELL := /bin/bash
 
@@ -30,6 +30,9 @@ help: ## Show this help screen
 	@echo ""
 	@echo "━━━━━━━━━━━━ Build / Clean ━━━━━━━━━━━━"
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z_-]+:.*## / {printf "  make %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | grep -E 'build|stop|clean|status|test'
+	@echo ""
+	@echo "━━━━━━━━━━━━ Project updates ━━━━━━━━━━━━"
+	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z_-]+:.*## / {printf "  make %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | grep -E '^  make record'
 	@echo ""
 
 # ============================================================
@@ -162,3 +165,9 @@ test: build ## Placeholder test: just ensures build passes
 
 seed: ensure-mongo ## Seed Phase 2 auth users/tenants/roles
 	@pnpm --filter @omsking/backend run seed
+
+# ============================================================
+# Project updates
+# ============================================================
+record: ## Record screen + voice, then post it to a subscriber's Report chat (T=secs TO="name" MSG="caption" FILE=clip.mov NOSEND=1)
+	@scripts/record-update.sh $(if $(T),-t "$(T)") $(if $(TO),-s "$(TO)") $(if $(MSG),-m "$(MSG)") $(if $(FILE),-f "$(FILE)") $(if $(NOSEND),-n)

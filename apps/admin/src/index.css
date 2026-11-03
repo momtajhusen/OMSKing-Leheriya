@@ -1685,3 +1685,25 @@ html.marketing {
     transform: none;
   }
 }
+
+/* Report chat background, WhatsApp-style dotted wallpaper */
+.report-wallpaper {
+  background-color: #efeae2;
+  background-image: radial-gradient(rgb(17 27 33 / 0.07) 1px, transparent 1.2px);
+  background-size: 16px 16px;
+}
+.dark .report-wallpaper {
+  background-color: #0b141a;
+  background-image: radial-gradient(rgb(233 237 239 / 0.05) 1px, transparent 1.2px);
+}
+
+/* Report chat background, WhatsApp-style dotted wallpaper */
+.report-wallpaper {
+  background-color: #efeae2;
+  background-image: radial-gradient(rgb(17 27 33 / 0.07) 1px, transparent 1.2px);
+  background-size: 16px 16px;
+}
+.dark .report-wallpaper {
+  background-color: #0b141a;
+  background-image: radial-gradient(rgb(233 237 239 / 0.05) 1px, transparent 1.2px);
+}

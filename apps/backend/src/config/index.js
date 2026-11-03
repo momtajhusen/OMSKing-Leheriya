@@ -20,6 +20,12 @@ const config = {
     .filter(Boolean),
   channelEncryptionKey: process.env.CHANNEL_ENCRYPTION_KEY || '',
   demoLogin: process.env.DEMO_LOGIN === 'true' || (process.env.NODE_ENV || 'development') !== 'production',
+  // A development backend sends Developer Support (/support) to the live API as this developer account.
+  supportLive: {
+    url: process.env.SUPPORT_LIVE_API_URL || 'https://omskingapi.codersalpha.com/api/v1',
+    email: process.env.SUPPORT_LIVE_EMAIL || '',
+    password: process.env.SUPPORT_LIVE_PASSWORD || '',
+  },
   mail: {
     user: process.env.GMAIL_USER || '',
     pass: process.env.GMAIL_APP_PASSWORD || '',

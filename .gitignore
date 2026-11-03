@@ -22,6 +22,8 @@ pnpm-debug.log*
 !.vscode/extensions.json
 
 uploads/
+private-uploads/
+recordings/
 
 *.local
 
