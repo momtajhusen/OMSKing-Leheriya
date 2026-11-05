@@ -34,10 +34,9 @@ test('filter chips and In progress messages get an Auto-fix icon that opens the 
   assert.match(bubble, /in_progress/);
   assert.match(bubble, /Auto-fix this message/);
   const modal = read('../components/report/AutofixScopeModal.jsx');
-  assert.match(modal, />Clear</);
+  assert.match(modal, /<InputGuide guide=\{guide\}/);
   assert.match(modal, /<textarea/);
   assert.match(modal, /missingInput\(/);
-  assert.match(modal, /Do not paste passwords or API keys/);
 });
 
 test('after a chip or message Auto-fix starts, the chat scrolls to the message it is fixing', () => {

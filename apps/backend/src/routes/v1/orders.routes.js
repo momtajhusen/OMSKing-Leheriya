@@ -14,6 +14,7 @@ const finance = [authMiddleware, tenantMiddleware, vendorScope('orders'), requir
 const reconcile = [authMiddleware, tenantMiddleware, vendorScope('orders'), requirePermission('finance.reconcile')];
 
 router.post('/labels/bulk', ...ship, asyncHandler(orders.bookBulkLabels));
+router.post('/labels/amazon', ...ship, asyncHandler(orders.bookAmazonLabels));
 router.post('/manifest', ...ship, asyncHandler(orders.closeManifest));
 router.get('/manifests', ...ship, asyncHandler(orders.courierManifests));
 router.get('/shipping-readiness', ...view, asyncHandler(orders.shippingReadiness));
@@ -22,8 +23,10 @@ router.get('/', ...view, asyncHandler(orders.listOrders));
 router.get('/:orderId', ...view, asyncHandler(orders.getOrder));
 router.get('/:orderId/customer-history', ...view, asyncHandler(orders.getCustomerHistory));
 router.patch('/:orderId', ...edit, asyncHandler(orders.editOrderDetails));
+router.get('/:orderId/courier-rates', ...ship, asyncHandler(orders.courierRates));
 router.post('/:orderId/label', ...ship, asyncHandler(orders.generateLabel));
 router.post('/:orderId/ship', ...ship, asyncHandler(orders.shipOrder));
+router.get('/:orderId/amazon-label', ...ship, asyncHandler(orders.amazonLabel));
 router.post('/:orderId/label/cancel', ...cancelShip, asyncHandler(orders.cancelLabel));
 router.post('/:orderId/invoice', ...finance, asyncHandler(orders.generateInvoice));
 router.post('/:orderId/payment', ...reconcile, asyncHandler(orders.markPaid));

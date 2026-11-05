@@ -121,6 +121,17 @@ const useOrderStore = create((set, get) => ({
     }
   },
 
+  amazonLabels: async (ids) => {
+    const orderIds = ids.map((id) => get().orderId(id)).filter(Boolean);
+    try {
+      const { data } = await api.post('/orders/labels/amazon', { orderIds });
+      await get().hydrateFromApi();
+      return { ...data.data, message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not make the Amazon labels') };
+    }
+  },
+
   queueLabelJob: async (orderIds) => {
     try {
       const { data } = await api.post('/orders/labels/bulk', { orderIds });

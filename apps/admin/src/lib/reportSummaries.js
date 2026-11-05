@@ -22,3 +22,21 @@ export function useTaskSummaries() {
   return summaries;
 }
 
+
+/** Stage and English reason of every open report task, from the local task list (localhost only); {} elsewhere. */
+export function useTaskReasons() {
+  const [reasons, setReasons] = useState({});
+
+  useEffect(() => {
+    if (!isLocalApp()) return undefined;
+    let alive = true;
+    const load = () => api.get('/dev/report-autofix/reasons')
+      .then((res) => { if (alive) setReasons(res.data?.data || {}); })
+      .catch(() => {});
+    load();
+    const timer = setInterval(load, REFRESH_MS);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
+
+  return reasons;
+}

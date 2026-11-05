@@ -21,7 +21,7 @@
  *       an Auto-fix change was applied to the main files (its tasks become Complete) or will not be (Fix failed)
  *   node scripts/reportInbox.js --flag-unapplied  one-time scan: Complete tasks whose Auto-fix patch is not applied
  *       go back to Awaiting apply
- *   node scripts/reportInbox.js --unclear <id> --need "<what is unclear>" --options "a | b" --from <developer|client>
+ *   node scripts/reportInbox.js --unclear <id> --need "<what is unclear>" [--need-hi "<same need in Hinglish>"] --options "a | b" --from <developer|client> [--during testing]
  *       still unclear after the task and its nearby messages: Needs input, answered in the Auto-fix form
  *   Inside an Auto-fix run (REPORT_AUTOFIX_RUN set) --mark complete only sets Awaiting apply.
  *
@@ -142,8 +142,13 @@ function taskBlocks(text) {
       check: (/^- Check: (.*)$/m.exec(block) || [])[1] || '',
       pendingRun: (/^- Pending patch: Auto-fix run (\S+)/m.exec(block) || [])[1] || null,
       unclear: (/^- Unclear: (.*)$/m.exec(block) || [])[1] || '',
+      unclearHi: (/^- Unclear in Hinglish: (.*)$/m.exec(block) || [])[1] || '',
+      needHi: (/^- Waiting for in Hinglish: (.*)$/m.exec(block) || [])[1] || '',
+      askedDuring: (/^- Asked during: (\w+)/m.exec(block) || [])[1] || '',
       options: ((/^- Options: (.*)$/m.exec(block) || [])[1] || '').split(' | ').filter(Boolean),
       inputFrom: (/^- Input from: (\w+)/m.exec(block) || [])[1] || '',
+      reason: (/^- Reason: (.*)$/m.exec(block) || [])[1] || '',
+      statuses: [...block.matchAll(/^- Status: (.*)$/gm)].map((m) => m[1]),
     };
   });
 }
@@ -218,11 +223,14 @@ function taskArea(text, messageId) {
 function inputRequests(text) {
   return taskBlocks(text).filter((r) => (r.status === NEEDS_INPUT || r.status === WAITING) && r.messageId).map((r) => {
     const waiting = r.status === WAITING;
+    const needHi = waiting ? r.needHi : r.unclearHi;
     return {
       messageId: r.messageId,
       message: r.message,
       kind: waiting ? 'waiting' : 'unclear',
       unclear: waiting ? r.need : r.unclear,
+      ...(needHi ? { needHi } : {}),
+      ...(!waiting && r.askedDuring === 'testing' ? { during: 'testing' } : {}),
       options: waiting ? [] : r.options,
       from: waiting ? 'client' : r.inputFrom || 'developer',
       nearby: nearbyTasks(text, r.messageId),
@@ -242,6 +250,68 @@ function taskSummaries(text) {
   const rows = taskBlocks(text).filter((r) => r.messageId && r.status === 'Complete');
   const own = new Map(rows.map((r) => [r.messageId, { issue: brief(r.issue || r.message), fix: brief(r.fix), area: r.area, ...(r.check ? { check: r.check } : {}) }]));
   return Object.fromEntries(rows.map((r) => [r.messageId, (r.partOf && own.get(r.partOf)) || own.get(r.messageId)]));
+}
+
+const REASON_MAX = 400;
+const NOT_STARTED_REASON = 'Not started yet. It is in the queue and will be worked on in order.';
+
+function reasonText(text) {
+  const clean = oneLine(String(text || '').replace(/;\s*(made by Auto-fix|local only).*$/i, ''));
+  return clean.length > REASON_MAX ? `${clean.slice(0, REASON_MAX - 1)}…` : clean;
+}
+
+function lastMatch(list, re) {
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const m = re.exec(list[i]);
+    if (m) return m[1];
+  }
+  return '';
+}
+
+/** Why a task that is not Complete is still open, in English, with the chat stage it maps to. */
+function ownReason(r) {
+  switch (r.status) {
+    case 'Not started': return { stage: 'not_started', reason: NOT_STARTED_REASON };
+    case WAITING: return { stage: 'waiting_client', reason: `Waiting for the client: ${r.need || 'the information asked for in the reply'}` };
+    case NEEDS_INPUT: return { stage: 'needs_input', reason: `Needs a decision from the ${r.inputFrom || 'developer'}: ${r.unclear || 'how this should work'}` };
+    case 'Blocked': return { stage: 'blocked', reason: `Blocked: ${lastMatch(r.statuses, /^Blocked — (?:[^:]*\d{4}: )?(.*)$/) || 'it needs something that cannot be done from here'}` };
+    case 'Fix failed': {
+      const why = lastMatch(r.statuses, /(?:discarded, not applied|failed): (.*)$/);
+      return { stage: 'fix_failed', reason: `The last fix attempt failed${why ? ` (${why})` : ''}; it will be tried again.` };
+    }
+    case REPLIED: return { stage: 'working', reason: 'The client replied; it will be fixed next.' };
+    case INPUT_GIVEN: return { stage: 'working', reason: 'The decision was given; it will be fixed next.' };
+    case AWAITING: return { stage: 'working', reason: 'The fix is ready and waiting to be applied.' };
+    default: {
+      const why = lastMatch(r.statuses, /Not verified yet: (.*?)(?:\. The change is saved.*)?$/);
+      return { stage: 'working', reason: why ? `The fix is made but not verified yet: ${why}` : 'The developer is working on it.' };
+    }
+  }
+}
+
+/** Stage and English reason of every open task by message id; a "- Reason:" line wins, a part follows its parent. */
+function taskReasons(text) {
+  const rows = taskBlocks(text).filter((r) => r.messageId && r.status !== 'Complete');
+  const byId = new Map(taskBlocks(text).filter((r) => r.messageId).map((r) => [r.messageId, r]));
+  const own = (r) => {
+    const found = ownReason(r);
+    return r.reason ? { stage: found.stage, reason: r.reason } : found;
+  };
+  const hindi = (r) => {
+    const hi = r.status === WAITING ? r.needHi : r.status === NEEDS_INPUT ? r.unclearHi : '';
+    return hi ? { reasonHi: reasonText(hi) } : {};
+  };
+  return Object.fromEntries(rows.map((r) => {
+    const parent = r.partOf && byId.get(r.partOf);
+    if (r.reason || !parent || parent.status === 'Complete') return [r.messageId, { ...own(r), reason: reasonText(own(r).reason), ...hindi(r) }];
+    const lead = own(parent);
+    const leadHi = hindi(parent).reasonHi;
+    return [r.messageId, {
+      stage: lead.stage,
+      reason: reasonText(`Handled together with "${brief(parent.message)}". ${lead.reason}`),
+      ...(leadHi ? { reasonHi: reasonText(`"${brief(parent.message)}" ke saath hi hoga. ${leadHi}`) } : {}),
+    }];
+  }));
 }
 
 /** The task list with the "- <key>:" line of the task for `messageId` set (replaced, or added above its id line). */
@@ -629,16 +699,20 @@ function discardRun({ outDir = DEFAULT_OUT_DIR, runId, reason }) {
 }
 
 /** The task stays unclear after its nearby messages: Needs input, with what is unclear and the options (task list only). */
-function needInput({ outDir = DEFAULT_OUT_DIR, messageId, unclear, options = [], from = 'developer' }) {
+function needInput({ outDir = DEFAULT_OUT_DIR, messageId, unclear, unclearHi = '', options = [], from = 'developer', during = '' }) {
   const what = oneLine(unclear);
+  const hindi = oneLine(unclearHi);
   if (!what) throw new Error('Say what is unclear with --need "<what is unclear>"');
   if (!['developer', 'client'].includes(from)) throw new Error('--from must be developer or client');
+  if (!['', 'testing'].includes(during)) throw new Error('--during can only be testing');
   const choices = options.map(oneLine).filter(Boolean);
   const text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
   if (!taskBlocks(text).some((r) => r.messageId === messageId)) throw new Error(`Task ${messageId} is not in the task list`);
   updateTasks(outDir, (t) => {
     let next = setTaskLine(setTaskLabel(t, messageId, NEEDS_INPUT), messageId, 'Unclear', what);
+    next = hindi ? setTaskLine(next, messageId, 'Unclear in Hinglish', hindi) : removeTaskLine(next, messageId, 'Unclear in Hinglish');
     next = choices.length ? setTaskLine(next, messageId, 'Options', choices.join(' | ')) : removeTaskLine(next, messageId, 'Options');
+    next = during ? setTaskLine(next, messageId, 'Asked during', during) : removeTaskLine(next, messageId, 'Asked during');
     return setTaskLine(next, messageId, 'Input from', from);
   });
 }
@@ -725,6 +799,48 @@ async function syncSummaries({ settings, outDir = DEFAULT_OUT_DIR, logger = cons
   return result;
 }
 
+/** Saves the stage and English reason on the open live update, so the client sees why it is not done. False when not saved. */
+async function saveLiveReason(api, found, why, logger) {
+  const update = found?.message.update;
+  if (!update || ['done', 'confirmed'].includes(update.status)) return false;
+  const url = `/support/threads/${encodeURIComponent(found.tenantId)}/updates/${encodeURIComponent(update.id)}`;
+  try {
+    await api.request('PATCH', url, { action: 'reason', stage: why.stage, reason: why.reason });
+    return true;
+  } catch (err) {
+    logger.log(`report-inbox: reason not saved on live for ${found.message.id}: ${err.message}`);
+    return false;
+  }
+}
+
+/** Writes an English "- Reason:" line on the open task and saves it on its live update (messages nobody tracks stay untouched). */
+async function saveReason({ settings, outDir = DEFAULT_OUT_DIR, messageId, reason = '', logger = console }) {
+  const text = oneLine(reason);
+  if (!text) throw new Error('Write the reason in English with --text "<why it is not done yet>"');
+  if (text.length > REASON_MAX) throw new Error(`Keep the reason under ${REASON_MAX} characters`);
+  const row = taskBlocks(fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8')).find((r) => r.messageId === messageId);
+  if (!row) throw new Error(`Task ${messageId} is not in the task list`);
+  if (row.status === 'Complete') throw new Error(`Task ${messageId} is Complete; it has no pending reason`);
+  updateTasks(outDir, (current) => setTaskLine(current, messageId, 'Reason', text));
+  const why = taskReasons(fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8'))[messageId];
+  const api = liveApi(settings);
+  const saved = await saveLiveReason(api, await findLiveMessage(api, messageId), why, logger);
+  logger.log(`report-inbox: reason for ${messageId} saved in the task list${saved ? ' and on live' : ' (not on live: untracked there or not supported yet)'}`);
+}
+
+/** Saves the stage and reason of every open task on its tracked live update. */
+async function syncReasons({ settings, outDir = DEFAULT_OUT_DIR, logger = console }) {
+  const reasons = taskReasons(fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8'));
+  const api = liveApi(settings);
+  const result = { saved: [], skipped: [] };
+  for (const [messageId, why] of Object.entries(reasons)) {
+    const ok = await saveLiveReason(api, await findLiveMessage(api, messageId), why, logger);
+    result[ok ? 'saved' : 'skipped'].push(messageId);
+  }
+  logger.log(`report-inbox: reasons saved on live for ${result.saved.length}, skipped ${result.skipped.length}`);
+  return result;
+}
+
 function updateTasks(outDir, change) {
   const tasksFile = path.join(outDir, 'TASKS.md');
   const current = fs.readFileSync(tasksFile, 'utf8');
@@ -736,8 +852,9 @@ function updateTasks(outDir, change) {
  * The task needs something only the client can give: posts `question` to the client as a reply to their message,
  * shows In progress on that message in the live chat, and sets the task to Waiting for client with what is needed.
  */
-async function askClient({ settings, outDir = DEFAULT_OUT_DIR, messageId, need = '', question = '', logger = console }) {
+async function askClient({ settings, outDir = DEFAULT_OUT_DIR, messageId, need = '', needHi = '', question = '', logger = console }) {
   const what = oneLine(need);
+  const hindi = oneLine(needHi);
   const ask = String(question || '').trim();
   if (!what) throw new Error('Say what the client must provide with --need "<requirement>"');
   if (!ask) throw new Error('Write the question for the client with --question "<text>"');
@@ -750,7 +867,7 @@ async function askClient({ settings, outDir = DEFAULT_OUT_DIR, messageId, need =
   if (!found) throw new Error(`Message ${messageId} is not in the live Report chat`);
   await moveLive(api, found, 'in-progress');
   const sent = (await api.request('POST', `/support/threads/${encodeURIComponent(found.tenantId)}/messages`, { text: ask, replyTo: messageId })).data;
-  const lines = `- Waiting for: ${what}\n- Asked client: ${oneLine(ask)} (question id ${sent.id}, ${when(sent.createdAt || new Date())})\n`;
+  const lines = `- Waiting for: ${what}\n${hindi ? `- Waiting for in Hinglish: ${hindi}\n` : ''}- Asked client: ${oneLine(ask)} (question id ${sent.id}, ${when(sent.createdAt || new Date())})\n`;
   updateTasks(outDir, (text) => addToTask(setTaskLabel(text, messageId, WAITING), messageId, lines));
   logger.log(`report-inbox: asked the client about ${messageId}; the task is now ${WAITING}`);
 }
@@ -805,16 +922,28 @@ async function main(argv) {
   };
   if (argv.includes('--history')) return once(() => printHistory({ settings }));
   if (argv.includes('--sync-summaries')) return once(() => syncSummaries({ settings, outDir }));
+  if (argv.includes('--sync-reasons')) return once(() => syncReasons({ settings, outDir }));
+  if (argv.includes('--reason') && !argv.includes('--discard')) {
+    return once(() => saveReason({ settings, outDir, messageId: flag('--reason'), reason: flag('--text') }));
+  }
   if (argv.includes('--applied')) return once(() => completeApplied({ settings, outDir, runId: flag('--applied') }));
   if (argv.includes('--discard')) return once(async () => discardRun({ outDir, runId: flag('--discard'), reason: flag('--reason') }));
   if (argv.includes('--unclear')) {
     return once(async () => needInput({
-      outDir, messageId: flag('--unclear'), unclear: flag('--need'), options: flag('--options').split('|').map((o) => o.trim()), from: flag('--from') || 'developer',
+      outDir,
+      messageId: flag('--unclear'),
+      unclear: flag('--need'),
+      unclearHi: flag('--need-hi'),
+      options: flag('--options').split('|').map((o) => o.trim()),
+      from: flag('--from') || 'developer',
+      during: flag('--during'),
     }));
   }
   if (argv.includes('--flag-unapplied')) return once(async () => flagUnapplied({ repoDir: path.resolve(__dirname, '../../..'), outDir }));
   if (argv.includes('--ask')) {
-    return once(() => askClient({ settings, outDir, messageId: flag('--ask'), need: flag('--need'), question: flag('--question') }));
+    return once(() => askClient({
+      settings, outDir, messageId: flag('--ask'), need: flag('--need'), needHi: flag('--need-hi'), question: flag('--question'),
+    }));
   }
   if (argv.includes('--attach')) {
     const at = argv.indexOf('--attach');
@@ -857,6 +986,6 @@ async function main(argv) {
 if (require.main === module) main(process.argv.slice(2));
 
 module.exports = {
-  runOnce, markTasks, syncSummaries, completeApplied, discardRun, flagUnapplied, reconcileApplied, needInput, provideInput, inputRequests, nearbyTasks, taskArea, SCOPE_STATUSES, statusCounts, runTasks, holdRun, askClient, attachFound, printHistory, nextTask, pendingQueue, planAutofix, taskStatus, taskSummaries, clientMessagesAfter, mediaFileName,
+  runOnce, markTasks, syncSummaries, completeApplied, discardRun, flagUnapplied, reconcileApplied, needInput, provideInput, inputRequests, nearbyTasks, taskArea, SCOPE_STATUSES, statusCounts, runTasks, holdRun, askClient, attachFound, printHistory, nextTask, pendingQueue, planAutofix, taskStatus, taskSummaries, taskReasons, saveReason, syncReasons, clientMessagesAfter, mediaFileName,
   taskEntry,
 };

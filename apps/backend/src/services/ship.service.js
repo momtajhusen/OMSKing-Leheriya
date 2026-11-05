@@ -10,8 +10,8 @@ const { bookPaymentMode } = require('./orderDesk.service');
 const { orderPackage } = require('./packageDefaults.service');
 const delhivery = require('../adapters/couriers/delhivery');
 const shopify = require('../adapters/shopify');
-const amazon = require('../adapters/amazon');
 const myntra = require('../adapters/myntra');
+const { amazonEasyShipLabel } = require('./amazonLabel.service');
 
 function skip(query) {
   return query.setOptions({ skipTenantFilter: true });
@@ -181,10 +181,34 @@ async function bookingCouriers(tenantId) {
   const rows = await skip(CourierAccount.find({ tenantId, status: 'active' }).sort({ priority: 1, name: 1 }));
   const seen = new Set(['delhivery']);
   const others = rows.filter((row) => !/^delhivery/.test(row.code) && !seen.has(row.code) && seen.add(row.code));
+  const delhiveryRow = rows.find((row) => row.code === 'delhivery') || rows.find((row) => /^delhivery/.test(row.code));
   return [
-    { code: 'delhivery', name: 'Delhivery', api: true },
-    ...others.map((row) => ({ code: row.code, name: row.name, api: false })),
+    { code: 'delhivery', name: 'Delhivery', api: true, rateHalfKg: Number(delhiveryRow?.rateHalfKg) || 0 },
+    ...others.map((row) => ({ code: row.code, name: row.name, api: false, rateHalfKg: Number(row.rateHalfKg) || 0 })),
   ];
+}
+
+/** Rate-card estimate: rate per 0.5 kg × 0.5 kg slabs of the heavier of actual and volumetric (L×B×H / 5000) weight. */
+function rateEstimate(rateHalfKg, pack = {}) {
+  const rate = Number(rateHalfKg) || 0;
+  const actual = (Number(pack.weightGrams) || 0) / 1000;
+  if (!rate || !actual) return null;
+  const volumetric = ((Number(pack.lengthCm) || 0) * (Number(pack.breadthCm) || 0) * (Number(pack.heightCm) || 0)) / 5000;
+  const chargeableKg = Math.round(Math.max(actual, volumetric) * 1000) / 1000;
+  const slabs = Math.max(1, Math.ceil(chargeableKg / 0.5));
+  return { chargeableKg, slabs, amount: slabs * rate };
+}
+
+/** Enabled couriers for this order with their rate-card estimate; no courier API is called. */
+async function courierRates(tenantId, orderNo) {
+  const order = await skip(Order.findOne({ tenantId, orderNo }));
+  if (!order) throw new HttpError(404, 'Order not found');
+  const pack = await orderPackage(tenantId, order.items || []);
+  const couriers = await bookingCouriers(tenantId);
+  return {
+    package: pack.weightGrams ? pack : null,
+    couriers: couriers.map((courier) => ({ ...courier, estimate: rateEstimate(courier.rateHalfKg, pack) })),
+  };
 }
 
 async function cancelShopifyLabel(tenantId, orderNo, { releaseReserve = false, deps = {} } = {}) {
@@ -232,16 +256,11 @@ async function bookMarketplace(tenantId, orderNo, deps = {}) {
     err.terminal = true;
     throw err;
   }
+  if (channel === 'amazon') return amazonEasyShipLabel(tenantId, orderNo, deps);
   const existing = await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked' }));
   if (existing) return existing;
   let shipped;
-  if (channel === 'amazon') {
-    const creds = deps.amazonCreds || credsOf(await getConnection(tenantId, 'amazon'));
-    shipped = await amazon.confirmShipment(creds, {
-      amazonOrderId: order.externalOrderId || order.orderNo,
-      request: deps.amazonRequest,
-    });
-  } else if (channel === 'myntra') {
+  if (channel === 'myntra') {
     const creds = deps.myntraCreds || credsOf(await getConnection(tenantId, 'myntra'));
     const line = (order.channelLines || [])[0] || {};
     shipped = await myntra.shipOrder(creds, {
@@ -426,4 +445,6 @@ module.exports = {
   runDueManifests,
   runShipmentJob,
   shippingReadiness,
+  courierRates,
+  rateEstimate,
 };

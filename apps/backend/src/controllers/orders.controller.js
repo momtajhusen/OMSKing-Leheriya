@@ -360,10 +360,25 @@ async function cancelLabel(req, res) {
   const tenantId = merchantTenant(req);
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
-  if (order.channel === 'Amazon' || order.channel === 'Myntra') {
+  if (order.channel === 'Myntra') {
     throw new HttpError(400, `${order.channel} labels are cancelled in the seller panel.`);
   }
   const before = { status: order.status, awb: order.awb || '' };
+  if (order.channel === 'Amazon') {
+    const { cancelAmazonLabel } = require('../services/amazonLabel.service');
+    await cancelAmazonLabel(tenantId, order.orderNo);
+    const cleared = await findMaster(tenantId, order.orderNo);
+    await recordFromReq(req, {
+      tenantId,
+      action: 'order.label_cancelled',
+      resourceType: 'orders',
+      resourceId: order._id,
+      resourceDisplay: order.orderNo,
+      before,
+      after: { status: cleared.status, awb: '' },
+    });
+    return successResponse(res, await decorateOne(tenantId, cleared), 'Amazon label cancelled in OMSKing. Easy Ship has no cancel call, so the next label moves the same Amazon package to a new pickup slot.');
+  }
   const { cancelShopifyLabel } = require('../services/ship.service');
   await cancelShopifyLabel(tenantId, order.orderNo, { releaseReserve: false });
   const cancelled = await findMaster(tenantId, order.orderNo);
@@ -828,6 +843,14 @@ async function shippingReadiness(req, res) {
   return successResponse(res, await readiness(merchantTenant(req)), 'Shipping readiness');
 }
 
+async function courierRates(req, res) {
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  const { courierRates: rates } = require('../services/ship.service');
+  return successResponse(res, await rates(tenantId, order.orderNo), 'Courier rates');
+}
+
 async function shipOrder(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
@@ -837,9 +860,14 @@ async function shipOrder(req, res) {
     throw new HttpError(400, 'Shopify ships on Delhivery. Use the label action.');
   }
   const { bookMarketplace } = require('../services/ship.service');
-  await bookMarketplace(tenantId, order.orderNo);
+  const shipment = await bookMarketplace(tenantId, order.orderNo);
   const fresh = await findMaster(tenantId, order.orderNo);
-  return successResponse(res, await decorateOne(tenantId, fresh), `${order.channel} tracking saved. Delhivery was not called.`);
+  const dto = await decorateOne(tenantId, fresh);
+  if (order.channel === 'Amazon') {
+    const label = shipment.labelPdf ? 'Label PDF is ready to print.' : 'Amazon sent no label PDF; print it from Seller Central.';
+    return successResponse(res, { ...dto, labelReady: Boolean(shipment.labelPdf) }, `Amazon Easy Ship label generated. AWB ${shipment.awb}. ${label}`);
+  }
+  return successResponse(res, dto, `${order.channel} tracking saved. Delhivery was not called.`);
 }
 
 async function closeManifest(req, res) {
@@ -916,6 +944,27 @@ async function bookBulkLabels(req, res) {
   return successResponse(res, { jobId: String(job._id), jobType: job.jobType }, 'One label job queued for these orders');
 }
 
+async function bookAmazonLabels(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const { amazonBulkLabels } = require('../services/amazonLabel.service');
+  const result = await amazonBulkLabels(tenantId, req.body?.orderIds || req.body?.orderNos);
+  const failed = result.failed.length ? ` · ${result.failed.length} not made` : '';
+  return successResponse(res, result, `${result.done.length} Amazon Easy Ship label${result.done.length === 1 ? '' : 's'} made${failed}`);
+}
+
+async function amazonLabel(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  const { amazonLabelPdf } = require('../services/amazonLabel.service');
+  const pdf = await amazonLabelPdf(tenantId, order.orderNo);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="amazon-label-${String(order.orderNo).replace(/[^\w.-]/g, '_')}.pdf"`);
+  return res.send(pdf);
+}
+
 module.exports = {
-  listOrders, orderSummary, getOrder, getCustomerHistory, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, lineCost, saveLineCost, vendorUpdate, patchStatus, editOrderDetails, updateNotes, updateItemPackage, mapItemSku, bookReverse, bookBulkLabels, shipOrder, closeManifest, courierManifests, shippingReadiness,
+  listOrders, orderSummary, getOrder, getCustomerHistory, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, lineCost, saveLineCost, vendorUpdate, patchStatus, editOrderDetails, updateNotes, updateItemPackage, mapItemSku, bookReverse, bookBulkLabels, bookAmazonLabels, amazonLabel, shipOrder, closeManifest, courierManifests, shippingReadiness, courierRates,
 };

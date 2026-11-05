@@ -75,6 +75,11 @@ export function shouldAutoApply(run, failedRunId = null) {
   return run.id !== failedRunId;
 }
 
+/** The run the server sent back with a refused (409) Auto-fix action, so a stale button can catch up; else null. */
+export function rejectedRun(err) {
+  return err?.response?.status === 409 ? err.response.data?.data || null : null;
+}
+
 /** The header loop tells the chat what it is doing; the chat shows it in the play modal. */
 export function publishAutoplayStatus(status, target = globalThis) {
   target.dispatchEvent(new CustomEvent(STATUS_EVENT, { detail: status }));

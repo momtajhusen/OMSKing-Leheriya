@@ -6,6 +6,7 @@ const DEFAULT_BASE = 'https://api-integration.myntra.com';
 // Myntra access tokens live 30 days; refresh a few days early.
 const TOKEN_TTL_MS = 25 * 24 * 60 * 60 * 1000;
 const ORDER_WINDOW_DAYS = 6;
+const IST_OFFSET_MS = 330 * 60 * 1000;
 const INVENTORY_PUSH_BATCH = 10;
 const INVENTORY_SEARCH_BATCH = 10;
 
@@ -77,17 +78,23 @@ function ymd(date) {
   return new Date(date).toISOString().slice(0, 10);
 }
 
+/** Myntra order dates are IST calendar days. */
+function istDay(date) {
+  return ymd(new Date(date).getTime() + IST_OFFSET_MS);
+}
+
 /**
  * Splits [from, to] into Myntra-sized windows (the order list rejects ranges over 7 days).
+ * getOrderList leaves out orders placed on endDate itself, so each window ends the day after its last day.
  */
 function orderWindows(from, to) {
-  const end = new Date(to);
-  let start = new Date(from);
+  const last = new Date(`${istDay(to)}T00:00:00Z`);
+  let start = new Date(`${istDay(from)}T00:00:00Z`);
   const windows = [];
-  while (start <= end) {
-    const stop = new Date(Math.min(end.getTime(), start.getTime() + ORDER_WINDOW_DAYS * 864e5));
+  while (start <= last) {
+    const stop = new Date(Math.min(last.getTime() + 864e5, start.getTime() + ORDER_WINDOW_DAYS * 864e5));
     windows.push({ startDate: ymd(start), endDate: ymd(stop) });
-    start = new Date(stop.getTime() + 864e5);
+    start = stop;
   }
   return windows;
 }
@@ -208,7 +215,8 @@ function createMyntraClient(creds, { saveTokens, request, retryDelayMs = 1000 } 
 
   async function listOrderRefs({ from, to, errors = [] }) {
     const refs = [];
-    for (const window of orderWindows(from, to)) {
+    for (const range of orderWindows(from, to)) {
+      const window = { ...range };
       let page = 0;
       let pages = 1;
       while (page < pages) {
@@ -217,6 +225,11 @@ function createMyntraClient(creds, { saveTokens, request, retryDelayMs = 1000 } 
         try {
           json = await call('GET', `/partner/v4/order/getOrderList?${qs}`);
         } catch (err) {
+          const today = istDay(Date.now());
+          if (window.endDate > today && window.startDate < today) {
+            window.endDate = today;
+            continue;
+          }
           errors.push(`${window.startDate}..${window.endDate} page ${page}: ${err.message}`);
           break;
         }

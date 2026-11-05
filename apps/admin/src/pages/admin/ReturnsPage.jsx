@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import useReturnsStore from '../../stores/returnsStore';
+import { CLAIM_STATUSES, REFUND_STATUSES, claimName, claimText, kindOf, refundText, splitByKind } from '../../lib/returnClaims';
 import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate, statusBadgeVariant } from '../../utils/format';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
@@ -8,6 +10,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '.
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
+import Input from '../../components/ui/Input';
 import { RotateCcw, Package, CheckCircle, XCircle, RefreshCw, AlertTriangle } from 'lucide-react';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
 import { orderChannelLabel } from '../../constants/channelCatalog';
@@ -26,6 +29,12 @@ export default function ReturnsPage() {
   const [receiveFor, setReceiveFor] = useState(null);
   const [receiveWarehouse, setReceiveWarehouse] = useState('WH-001');
   const [receiveAction, setReceiveAction] = useState('restock');
+  const [qcNote, setQcNote] = useState('');
+  const [kindTab, setKindTab] = useState('customer');
+  const [claimFor, setClaimFor] = useState(null);
+  const [claimForm, setClaimForm] = useState({ status: 'none', claimId: '', amount: '', note: '', refundStatus: 'pending', refundAmount: '' });
+  const saveClaim = useReturnsStore((s) => s.saveClaim);
+  const saveRefund = useReturnsStore((s) => s.saveRefund);
   const returns = useReturnsStore((s) => s.returns);
   const approveReturn = useReturnsStore((s) => s.approveReturn);
   const rejectReturn = useReturnsStore((s) => s.rejectReturn);
@@ -65,7 +74,7 @@ export default function ReturnsPage() {
   const confirmReceived = async () => {
     if (!receiveFor) return;
     const destination = receiveAction === 'restock' ? (selectedReturns[receiveFor.id] || receiveFor.restockDestination || 'All') : 'None';
-    const next = await markReceived(receiveFor.id, { warehouse: receiveWarehouse, action: receiveAction, destination });
+    const next = await markReceived(receiveFor.id, { warehouse: receiveWarehouse, action: receiveAction, destination, qcNote });
     if (next?.error) {
       toast.error(next.error);
       return;
@@ -73,9 +82,35 @@ export default function ReturnsPage() {
     toast.success(
       receiveAction === 'restock' && destination !== 'None'
         ? `${receiveFor.id} received. WH-001 stock and ${destination} ATS updated.`
-        : `${receiveFor.id} received. Stock was not added.`
+        : receiveAction === 'damaged' && claimName(next?.claim?.type)
+          ? `${receiveFor.id} received as QC fail. ${claimName(next.claim.type)} is ready to file.`
+          : `${receiveFor.id} received. Stock was not added.`
     );
     setReceiveFor(null);
+  };
+
+  const openClaim = (ret) => {
+    setClaimFor(ret);
+    setClaimForm({
+      status: ret.claim?.status || 'none',
+      claimId: ret.claim?.claimId || '',
+      amount: ret.claim?.amount || '',
+      note: ret.claim?.note || '',
+      refundStatus: ret.refundStatus || 'pending',
+      refundAmount: ret.refundAmount || '',
+    });
+  };
+
+  const saveClaimForm = async () => {
+    if (!claimFor) return;
+    if (claimName(claimFor.claim?.type)) {
+      const claim = await saveClaim(claimFor.id, { status: claimForm.status, claimId: claimForm.claimId, amount: claimForm.amount, note: claimForm.note });
+      if (claim?.error) { toast.error(claim.error); return; }
+    }
+    const refund = await saveRefund(claimFor.id, { status: claimForm.refundStatus, amount: claimForm.refundAmount });
+    if (refund?.error) { toast.error(refund.error); return; }
+    toast.success(`${claimFor.id} saved`);
+    setClaimFor(null);
   };
 
   const handleRejectReturn = (returnId) => {
@@ -85,9 +120,10 @@ export default function ReturnsPage() {
 
   const statusTabs = ['all', 'pending', 'approved', 'rejected', 'completed'];
 
-  const filteredReturns = useMemo(() => returns.filter((ret) => (
+  const byKind = useMemo(() => splitByKind(returns), [returns]);
+  const filteredReturns = useMemo(() => byKind[kindTab].filter((ret) => (
     activeTab === 'all' || ret.status.toLowerCase() === activeTab
-  )), [returns, activeTab]);
+  )), [byKind, kindTab, activeTab]);
   const paged = useClientPage(filteredReturns);
 
   const kpiData = {
@@ -159,6 +195,17 @@ export default function ReturnsPage() {
         </Card>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        {[['customer', 'Customer returns'], ['rto', 'RTO']].map(([kind, label]) => (
+          <Button key={kind} variant={kindTab === kind ? 'default' : 'outline'} onClick={() => setKindTab(kind)}>
+            {label} ({byKind[kind].length})
+          </Button>
+        ))}
+        <span className="text-sm text-muted-foreground">
+          RTO = the courier could not deliver and the parcel comes back. Courier RTO orders are also on the <Link to="/rto" className="underline">RTO page</Link>.
+        </span>
+      </div>
+
       {/* Status Tabs */}
       <div className="flex flex-wrap gap-2">
         {statusTabs.map(tab => (
@@ -207,13 +254,14 @@ export default function ReturnsPage() {
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Restock Destination</TableHead>
+                <TableHead>QC · Refund · Claim</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredReturns.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={10} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
                     No returns yet. A return shows here when a reverse pickup is booked on an order or a channel sends a return.
                   </TableCell>
                 </TableRow>
@@ -224,6 +272,7 @@ export default function ReturnsPage() {
                     <TableCell className="font-medium">
                       <div>{ret.id}</div>
                       {ret.type === 'reverse_pickup' && <Badge variant="outline">Reverse pickup</Badge>}
+                      {kindOf(ret) === 'rto' && <Badge variant="outline">RTO</Badge>}
                     </TableCell>
                     <TableCell>{ret.orderId}</TableCell>
                     <TableCell><ItemThumbs items={ret.items} /></TableCell>
@@ -257,6 +306,20 @@ export default function ReturnsPage() {
                         <span className="text-sm text-muted-foreground">
                           {ret.restockDestination || 'Not specified'}
                         </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {ret.source === 'api' ? (
+                        <div className="space-y-1">
+                          <div>QC: {ret.qcStatus === 'pending' ? 'not checked' : ret.qcStatus}{ret.qcNote ? ` · ${ret.qcNote}` : ''}</div>
+                          <div className="text-muted-foreground">{refundText(ret)}</div>
+                          {claimText(ret.claim) && <Badge variant="outline">{claimText(ret.claim)}</Badge>}
+                          <Button size="sm" variant="ghost" onClick={() => openClaim(ret)}>
+                            {claimName(ret.claim?.type) ? 'Claim & refund' : 'Refund'}
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -301,6 +364,7 @@ export default function ReturnsPage() {
                               setReceiveFor(ret);
                               setReceiveWarehouse('WH-001');
                               setReceiveAction('restock');
+                              setQcNote('');
                             }}
                           >
                             <Package className="w-4 h-4 mr-1" />
@@ -383,8 +447,70 @@ export default function ReturnsPage() {
               >
                 <option value="restock">QC pass — restock sellable</option>
                 <option value="hold">QC hold — do not sell yet</option>
+                <option value="damaged">QC fail — damaged or wrong item (no restock, open claim)</option>
                 <option value="none">Do not restock</option>
               </select>
+            </label>
+            {receiveAction !== 'restock' && (
+              <label className="block">
+                <span className="text-muted-foreground">QC note (what is wrong)</span>
+                <Input className="mt-1" value={qcNote} onChange={(e) => setQcNote(e.target.value)} placeholder="e.g. Torn fabric, used, wrong item" />
+              </label>
+            )}
+            {receiveAction === 'damaged' && claimName(receiveFor.claim?.type) && (
+              <p className="text-muted-foreground">A {claimName(receiveFor.claim.type)} is marked To file. File it on the {receiveFor.claim.type === 'safet' ? 'Amazon Seller Central SAFE-T' : 'Myntra partner portal'} page, then save the claim ID here.</p>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={Boolean(claimFor)}
+        onOpenChange={(open) => { if (!open) setClaimFor(null); }}
+        title={claimFor ? `${claimName(claimFor.claim?.type) ? 'Claim & refund' : 'Refund'} · ${claimFor.id}` : ''}
+        description={claimName(claimFor?.claim?.type)
+          ? `${claimName(claimFor.claim.type)}s are filed on the ${claimFor.claim.type === 'safet' ? 'Amazon Seller Central SAFE-T' : 'Myntra partner portal'} page. Save the claim ID and result here to track it.`
+          : 'Track the refund for this return.'}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setClaimFor(null)}>Cancel</Button>
+            <Button onClick={saveClaimForm}>Save</Button>
+          </>
+        }
+      >
+        {claimFor && (
+          <div className="space-y-3 text-sm">
+            {claimName(claimFor.claim?.type) && (
+              <>
+                <label className="block">
+                  <span className="text-muted-foreground">{claimName(claimFor.claim.type)} status</span>
+                  <select className="mt-1 w-full rounded-md border bg-background px-3 py-2" value={claimForm.status} onChange={(e) => setClaimForm({ ...claimForm, status: e.target.value })}>
+                    {CLAIM_STATUSES.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-muted-foreground">Claim ID</span>
+                  <Input className="mt-1" value={claimForm.claimId} onChange={(e) => setClaimForm({ ...claimForm, claimId: e.target.value })} placeholder="ID from the portal" />
+                </label>
+                <label className="block">
+                  <span className="text-muted-foreground">Claim amount (₹)</span>
+                  <Input className="mt-1" type="number" min="0" value={claimForm.amount} onChange={(e) => setClaimForm({ ...claimForm, amount: e.target.value })} />
+                </label>
+                <label className="block">
+                  <span className="text-muted-foreground">Note</span>
+                  <Input className="mt-1" value={claimForm.note} onChange={(e) => setClaimForm({ ...claimForm, note: e.target.value })} />
+                </label>
+              </>
+            )}
+            <label className="block">
+              <span className="text-muted-foreground">Refund status</span>
+              <select className="mt-1 w-full rounded-md border bg-background px-3 py-2" value={claimForm.refundStatus} onChange={(e) => setClaimForm({ ...claimForm, refundStatus: e.target.value })}>
+                {REFUND_STATUSES.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-muted-foreground">Refund amount (₹)</span>
+              <Input className="mt-1" type="number" min="0" value={claimForm.refundAmount} onChange={(e) => setClaimForm({ ...claimForm, refundAmount: e.target.value })} />
             </label>
           </div>
         )}

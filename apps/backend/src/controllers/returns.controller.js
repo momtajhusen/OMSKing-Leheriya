@@ -36,6 +36,7 @@ async function receiveReturn(req, res) {
   const data = await returnsFlow.receiveReturn(merchantTenant(req), req.user.id, req.params.returnNo, {
     destination: req.body.destination || 'All',
     action: req.body.action || 'restock',
+    qcNote: req.body.qcNote,
   });
   return successResponse(res, {
     id: data.row.returnNo,
@@ -45,4 +46,31 @@ async function receiveReturn(req, res) {
   }, 'Return received');
 }
 
-module.exports = { approveRestock, listReturns, approveReturn, receiveReturn };
+function returnView(row) {
+  return {
+    id: row.returnNo,
+    status: row.status,
+    qcStatus: row.qcStatus,
+    refundStatus: row.refundStatus,
+    refundAmount: row.refundAmount,
+    claim: {
+      type: row.claim?.type || '',
+      status: row.claim?.status || 'none',
+      claimId: row.claim?.claimId || '',
+      amount: row.claim?.amount || 0,
+      note: row.claim?.note || '',
+    },
+  };
+}
+
+async function updateClaim(req, res) {
+  const row = await returnsFlow.updateClaim(merchantTenant(req), req.params.returnNo, req.body || {});
+  return successResponse(res, returnView(row), 'Claim saved');
+}
+
+async function updateRefund(req, res) {
+  const row = await returnsFlow.updateRefund(merchantTenant(req), req.params.returnNo, req.body || {});
+  return successResponse(res, returnView(row), 'Refund status saved');
+}
+
+module.exports = { approveRestock, listReturns, approveReturn, receiveReturn, updateClaim, updateRefund };

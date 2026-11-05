@@ -236,3 +236,25 @@ test('the vendor tracking table has a Date of delivery column that opens the tra
   assert.match(page, /sub\.deliveredDate \? formatDate\(sub\.deliveredDate\) : '—'/);
   assert.match(page, /aria-label=\{`Edit date of delivery for \$\{shortSubOrderId\(order, sub\)\}`\}/);
 });
+
+test('an Amazon order shows an Easy Ship label button with a short note instead of the Delhivery Generate Label', () => {
+  assert.match(page, /const amazonStep = amazonLabelStep\(order\)/);
+  assert.match(page, /!channelManaged && !amazonOrder && \(/, 'Generate Label (Delhivery) stays for non-Amazon orders only');
+  assert.match(page, /!channelManaged && !amazonOrder && \(\s*<Button variant="ghost" size="sm" disabled=\{busy === sub\.id\} onClick=\{\(\) => runLabel\(sub\.id\)\}/, 'no Delhivery Label per Amazon sub-order');
+  assert.match(page, /amazonLabels\(\[order\.id\]\)/);
+  assert.match(page, /Make Easy Ship label/);
+  assert.match(page, /openAmazonLabel\(/);
+  assert.match(page, /Amazon orders use Amazon Easy Ship labels, not Delhivery/);
+  assert.match(page, /to="\/shipping"/);
+});
+
+test('Generate Label asks which courier first: Delhivery by default, any enabled courier with its AWB', () => {
+  assert.match(page, /api\.get\(`\/orders\/\$\{encodeURIComponent\(order\.id\)\}\/courier-rates`\)/);
+  assert.match(page, /courierOptionText\(courier\)/);
+  assert.match(page, /rateNote\(picked, labelPackage\)/);
+  assert.match(page, /courierChoice\(labelCouriers, courierCode\)/);
+  assert.match(page, /setCourierCode\('delhivery'\)/);
+  assert.match(page, /labelRequest\(picked, labelAwb\)/);
+  assert.match(page, /generateLabel\(order\.id, undefined, request\.body\)/);
+  assert.match(page, /onClick=\{openLabel\}/);
+});

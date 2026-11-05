@@ -5,10 +5,12 @@ import { GitMerge, HelpCircle, Loader2, ShieldCheck, Trash2, Wand2 } from 'lucid
 import api, { apiError } from '../../lib/api';
 import { isLocalHost } from '../../lib/devHost';
 import { inputDraft, nearbyText } from '../../lib/autofixInputs';
+import { inputGuide } from '../../lib/inputGuide';
 import { serverRestarting } from '../../lib/authErrors';
-import { focusReportMessage, onAutofixChanged } from '../../lib/reportFocus';
+import { focusReportMessage, notifyAutofixChanged, onAutofixChanged } from '../../lib/reportFocus';
+import InputGuide from './InputGuide';
 import {
-  autoplayOn, autoplayPhase, autoplaySince, autoplayStep, autoplayTarget, targetReached, loadAutoplayLog, logRun, onAutoplayChanged, publishAutoplayStatus, saveAutoplayLog, setAutoplay, shouldAutoApply, shouldAutoVerify,
+  autoplayOn, autoplayPhase, autoplaySince, autoplayStep, autoplayTarget, targetReached, loadAutoplayLog, logRun, onAutoplayChanged, publishAutoplayStatus, rejectedRun, saveAutoplayLog, setAutoplay, shouldAutoApply, shouldAutoVerify,
 } from '../../lib/autofixAutoplay';
 import { taskPage } from '../../lib/taskPage';
 import { ROUTE_DEFS } from '../../router';
@@ -142,8 +144,14 @@ function AutoFixControl() {
       toast.success(`Fix applied to your files: ${data.data.changedFiles.join(', ')}${done}`, { duration: 8000 });
       return true;
     } catch (err) {
+      const latest = rejectedRun(err);
+      if (latest) setRun(latest);
+      if (latest?.applied) {
+        toast.success('This fix is already applied to your files', { id: 'autofix-apply', duration: 6000 });
+        return true;
+      }
       if (!serverRestarting(err)) {
-        toast.error(apiError(err, 'Could not apply the fix'), { duration: 10000 });
+        toast.error(apiError(err, 'Could not apply the fix'), { id: 'autofix-apply', duration: 10000 });
         if (autoplayOn()) setAutoplay(false);
         return false;
       }
@@ -334,21 +342,33 @@ function AutoFixControl() {
 
 function InputForm({ request, open, onSent }) {
   const [to, setTo] = useState(request.from === 'client' ? 'client' : 'developer');
-  const [text, setText] = useState(() => inputDraft(request, to));
+  const [text, setText] = useState(() => (to === 'client' ? inputDraft(request, 'client') : ''));
   const [sending, setSending] = useState(false);
+  const guide = inputGuide(request);
   const around = nearbyText(request.nearby);
 
   const pickTo = (value) => {
     setTo(value);
-    setText(inputDraft(request, value));
+    setText(value === 'client' ? inputDraft(request, 'client') : '');
   };
 
   const send = async (e) => {
     e.preventDefault();
     setSending(true);
     try {
-      await api.post(`/dev/report-autofix/inputs/${request.messageId}`, { text, to });
-      toast.success(to === 'client' ? 'Question sent to the client; the task waits for the reply' : 'Saved: the next Auto-fix fixes this task first');
+      const body = to === 'client' ? text : inputDraft(request, 'developer', text.trim());
+      await api.post(`/dev/report-autofix/inputs/${request.messageId}`, { text: body, to });
+      if (to === 'client') {
+        toast.success(guide.asked);
+      } else {
+        try {
+          await api.post('/dev/report-autofix', { messageId: request.messageId });
+          toast.success(guide.started, { duration: 8000 });
+        } catch {
+          toast(guide.queued, { duration: 9000 });
+        }
+        notifyAutofixChanged();
+      }
       onSent();
     } catch (err) {
       toast.error(apiError(err, 'Could not save the input'));
@@ -361,25 +381,28 @@ function InputForm({ request, open, onSent }) {
     <details open={open} className="rounded-lg border border-[hsl(var(--color-border))] p-2 text-sm">
       <summary className="cursor-pointer font-medium">{request.message}</summary>
       <form onSubmit={send} className="mt-2 space-y-2">
-        <p><span className="font-medium">Unclear:</span> {request.unclear}</p>
+        <InputGuide guide={guide} />
         {around && <p className="whitespace-pre-line text-xs text-foreground/60">{around}</p>}
         {to === 'developer' && request.options.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {request.options.map((option) => (
-              <button key={option} type="button" onClick={() => setText(inputDraft(request, 'developer', option))} className="rounded-full border border-[hsl(var(--color-border))] px-2 py-0.5 text-xs hover:bg-[hsl(var(--color-muted))]">
-                {option}
-              </button>
-            ))}
+          <div>
+            <p className="mb-1 text-xs text-foreground/60">{guide.optionsLabel}</p>
+            <div className="flex flex-wrap gap-1">
+              {request.options.map((option) => (
+                <button key={option} type="button" onClick={() => setText(option)} className="rounded-full border border-[hsl(var(--color-border))] px-2 py-0.5 text-xs hover:bg-[hsl(var(--color-muted))]">
+                  {option}
+                </button>
+              ))}
+            </div>
           </div>
         )}
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className="w-full rounded-md border border-[hsl(var(--color-border))] bg-transparent p-2 text-sm" />
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder={guide.placeholder} aria-label={guide.needLabel} className="w-full rounded-md border border-[hsl(var(--color-border))] bg-transparent p-2 text-sm" />
         <div className="flex items-center justify-between gap-2">
           <select value={to} onChange={(e) => pickTo(e.target.value)} className="rounded-md border border-[hsl(var(--color-border))] bg-transparent px-2 py-1 text-xs">
-            <option value="developer">Developer answer (task list only)</option>
-            <option value="client">Ask the client in the Report chat</option>
+            <option value="developer">{guide.toDeveloper}</option>
+            <option value="client">{guide.toClient}</option>
           </select>
-          <button type="submit" disabled={sending || !text.trim()} className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">
-            {sending ? 'Saving…' : 'Send'}
+          <button type="submit" disabled={sending || !text.trim()} className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">
+            {sending && <Loader2 className="h-3 w-3 animate-spin" />} {guide.submit}
           </button>
         </div>
       </form>

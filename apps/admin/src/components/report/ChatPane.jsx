@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -13,8 +13,10 @@ import { copyText } from '../../lib/copyText';
 import {
   clipboardFiles, dayLabel, fileKind, fileSizeLabel, fileTypeLabel, formatDuration, hasGap, mergeMessages, messagePreview, pageSizeFor, recorderMime, MAX_FILE_MB,
 } from '../../lib/reportChat';
-import { ACTION_TOAST, CHAT_FILTERS, filterCount, isHistoryEvent, markSteps, matchesFilter, matchesSearch, pickSummary } from '../../lib/reportUpdates';
-import { useTaskSummaries } from '../../lib/reportSummaries';
+import {
+  ACTION_TOAST, CHAT_FILTERS, chipCount, filterCount, isHistoryEvent, markSteps, matchesFilter, matchesSearch, openStatus, pickSummary, stageCounts,
+} from '../../lib/reportUpdates';
+import { useTaskReasons, useTaskSummaries } from '../../lib/reportSummaries';
 import { autofixTarget, notifyAutofixChanged } from '../../lib/reportFocus';
 import { blockedFor, canScopeFix, SCOPE_LABEL, startedMessage } from '../../lib/autofixScope';
 import { autoplayOn, onAutoplayChanged, onAutoplayStatus, setAutoplay } from '../../lib/autofixAutoplay';
@@ -24,6 +26,8 @@ import AutofixScopeModal from './AutofixScopeModal';
 import { taskPage } from '../../lib/taskPage';
 import { ROUTE_DEFS } from '../../router';
 import MessageBubble, { DeletedLabel, EventLabel, srcOf } from './MessageBubble';
+import ReportUpdatesView from './ReportUpdatesView';
+import { REPORT_TABS } from '../../lib/reportTabs';
 
 const POLL_MS = 4000;
 const MAX_GAP_PAGES = 5;
@@ -172,6 +176,8 @@ export default function ChatPane({
   useEffect(() => { if (focusId) setFocus({ id: focusId }); }, [focusId]);
   const [messages, setMessages] = useState([]);
   const summaries = useTaskSummaries();
+  const reasons = useTaskReasons();
+  const localTally = useMemo(() => stageCounts(reasons), [reasons]);
   const [hasMore, setHasMore] = useState(false);
   const [counts, setCounts] = useState(null);
   const [pasteModal, setPasteModal] = useState(null);
@@ -194,6 +200,7 @@ export default function ChatPane({
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [tab, setTab] = useState('chat');
   const [autoplay, setAutoplayState] = useState(autoplayOn);
   const [autoplayStatus, setAutoplayStatus] = useState(null);
   const [playAsk, setPlayAsk] = useState(false);
@@ -438,6 +445,12 @@ export default function ChatPane({
     if (loading || loadError) return;
     if (search.trim() && hasMore && !loadingOlder) loadOlder();
   }, [search, messages, loading, loadError, hasMore, loadingOlder, loadOlder]);
+
+  /** The Updates and History tabs list every update, so they page back to the start of the chat. */
+  useEffect(() => {
+    if (loading || loadError) return;
+    if (tab !== 'chat' && hasMore && !loadingOlder) loadOlder();
+  }, [tab, messages, loading, loadError, hasMore, loadingOlder, loadOlder]);
 
   const onScroll = () => {
     const el = scroller.current;
@@ -878,7 +891,7 @@ export default function ChatPane({
 
   const canSend = Boolean(text.trim() || staged.length);
   const replyQuote = quoteOf(replyTo);
-  const visible = messages.filter((m) => !isHistoryEvent(m) && (filter === 'all' || matchesFilter(m, filter)) && matchesSearch(m, search));
+  const visible = messages.filter((m) => !isHistoryEvent(m) && (filter === 'all' || matchesFilter(m, filter, reasons[m.id])) && matchesSearch(m, search));
   let prev = null;
   let lastDay = null;
 
@@ -908,7 +921,7 @@ export default function ChatPane({
         </div>
         <button
           type="button"
-          onClick={() => { if (searchOpen) setSearch(''); setSearchOpen(!searchOpen); }}
+          onClick={() => { if (searchOpen) setSearch(''); setSearchOpen(!searchOpen); setTab('chat'); }}
           title="Search messages"
           aria-pressed={searchOpen}
           className={cn('rounded-full p-2 text-foreground/60 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10', searchOpen && 'text-[#00a884]')}
@@ -927,6 +940,39 @@ export default function ChatPane({
         )}
       </div>
 
+      {updatesUrl && (
+        <div role="tablist" aria-label="Report sections" className="flex shrink-0 border-b border-black/5 bg-[#f0f2f5] px-2 dark:border-white/5 dark:bg-[#202c33]">
+          {REPORT_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                'flex-1 border-b-2 px-3 py-2 text-[13px] font-semibold transition-colors',
+                tab === t.id ? 'border-[#00a884] text-[#008069] dark:text-[#00a884]' : 'border-transparent text-foreground/55 hover:text-foreground',
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab !== 'chat' && (
+        <ReportUpdatesView
+          tab={tab}
+          messages={messages}
+          reasons={reasons}
+          summaries={summaries}
+          loadingMore={hasMore || loadingOlder}
+          onOpen={(id) => { setTab('chat'); setFilter('all'); setSearch(''); setFocus({ id }); }}
+          onAnswer={(m, body) => sendOne({ body, reply: quoteOf(m) })}
+        />
+      )}
+
+      <div className={cn('flex min-h-0 flex-1 flex-col', tab !== 'chat' && 'hidden')}>
       {searchOpen && (
         <div className="flex shrink-0 items-center gap-2 border-b border-black/5 bg-[#f0f2f5] px-3 py-2 dark:border-white/5 dark:bg-[#202c33]">
           <div className="flex flex-1 items-center gap-2 rounded-lg bg-white px-3 py-1.5 dark:bg-[#2a3942]">
@@ -970,7 +1016,7 @@ export default function ChatPane({
               )}
             >
               {f.label}
-              {filterCount(counts, f.id) !== null && <span className="ml-1 tabular-nums opacity-70">{filterCount(counts, f.id)}</span>}
+              {chipCount(counts, f.id, localTally) !== null && <span className="ml-1 tabular-nums opacity-70">{chipCount(counts, f.id, localTally)}</span>}
             </button>
             {developerUpdatesUrl && canScopeFix(f.id) && (
               <button
@@ -1065,6 +1111,8 @@ export default function ChatPane({
               <MessageBubble
                 message={m}
                 summary={pickSummary(m.update, summaries[m.id])}
+                open={openStatus(m, reasons[m.id])}
+                onQuickReply={(m, body) => sendOne({ body, reply: quoteOf(m) })}
                 grouped={Boolean(sameSender)}
                 showName={!m.mine && !sameSender}
                 highlighted={highlightId === m.id}
@@ -1250,6 +1298,7 @@ export default function ChatPane({
             )}
           </div>
         )}
+      </div>
       </div>
 
       {dragging && (

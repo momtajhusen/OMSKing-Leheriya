@@ -115,6 +115,7 @@ function returnRows(list) {
       externalOrderId,
       channel: 'Myntra',
       reason: String(row.reason || row.returnReason || 'Customer return'),
+      type: String(row.returnType || row.type || ''),
       items: lines.map((line) => ({
         sku: String(line.sku || line.sellerSku || ''),
         qty: Number(line.quantity || line.qty) || 1,

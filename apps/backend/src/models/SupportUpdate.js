@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 const { tenantPlugin } = require('../plugins/tenantPlugin');
 
 const STATUSES = ['pending', 'in_progress', 'done', 'confirmed'];
+/** Why an open update is not done yet; '' = no reason written. */
+const STAGES = ['', 'not_started', 'working', 'waiting_client', 'needs_input', 'blocked', 'fix_failed'];
 
 const historySchema = new mongoose.Schema({
   action: { type: String, required: true },
@@ -30,6 +32,8 @@ const supportUpdateSchema = new mongoose.Schema({
   fix: { type: String, default: '', maxlength: 200 },
   area: { type: String, default: '', maxlength: 120 },
   check: { type: String, default: '', maxlength: 300 },
+  stage: { type: String, enum: STAGES, default: '' },
+  reason: { type: String, default: '', maxlength: 400 },
   history: { type: [historySchema], default: [] },
 }, { timestamps: true });
 
@@ -39,3 +43,4 @@ supportUpdateSchema.plugin(tenantPlugin);
 
 module.exports = mongoose.model('SupportUpdate', supportUpdateSchema);
 module.exports.STATUSES = STATUSES;
+module.exports.STAGES = STAGES;

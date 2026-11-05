@@ -17,7 +17,8 @@ import EmptyState from '../../components/ui/EmptyState';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle, Pencil } from 'lucide-react';
-import { isChannelManaged, packetIdOf, openMyntraDocument } from '../../lib/channelOrders';
+import { isChannelManaged, packetIdOf, openMyntraDocument, openAmazonLabel } from '../../lib/channelOrders';
+import { amazonLabelStep, courierChoice, courierOptionText, labelRequest, pickupSlotText, rateNote } from '../../lib/shippingStatus';
 import { shortOrderId, shortSubOrderId } from '../../lib/orderIds';
 import { vendorPick, mappedVendor, pendingAssigns, vendorSaveAction } from '../../lib/vendorLines';
 import { barcodeBars, printBarcodeLabel } from '../../lib/barcodeLabel';
@@ -53,6 +54,7 @@ export default function OrderDetailPage() {
   const getById = useOrderStore((s) => s.getById);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const generateLabel = useOrderStore((s) => s.generateLabel);
+  const amazonLabels = useOrderStore((s) => s.amazonLabels);
   const generateInvoice = useOrderStore((s) => s.generateInvoice);
   const assignSubOrder = useOrderStore((s) => s.assignSubOrder);
   const vendorUpdate = useOrderStore((s) => s.vendorUpdate);
@@ -68,6 +70,11 @@ export default function OrderDetailPage() {
   const [editForm, setEditForm] = useState(orderEditForm());
   const [askPush, setAskPush] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [labelOpen, setLabelOpen] = useState(false);
+  const [labelCouriers, setLabelCouriers] = useState([]);
+  const [courierCode, setCourierCode] = useState('delhivery');
+  const [labelAwb, setLabelAwb] = useState('');
+  const [labelPackage, setLabelPackage] = useState(null);
   const [customerGstin, setCustomerGstin] = useState('');
   const [reverseOpen, setReverseOpen] = useState(false);
   const [reverseReason, setReverseReason] = useState('Customer reverse pickup');
@@ -162,6 +169,48 @@ export default function OrderDetailPage() {
     else toast.success(`Label opened. ${next.id} is ${next.status}.`);
   };
 
+  const openLabel = () => {
+    setCourierCode('delhivery');
+    setLabelAwb('');
+    setLabelOpen(true);
+    setLabelPackage(null);
+    api.get(`/orders/${encodeURIComponent(order.id)}/courier-rates`)
+      .then(({ data }) => { setLabelCouriers(data.data?.couriers || []); setLabelPackage(data.data?.package || null); })
+      .catch(() => setLabelCouriers([]));
+  };
+
+  const { list: courierList, picked } = courierChoice(labelCouriers, courierCode);
+
+  const saveLabel = async () => {
+    const request = labelRequest(picked, labelAwb);
+    if (request.error) { toast.error(request.error); return; }
+    setBusy('label');
+    const next = await generateLabel(order.id, undefined, request.body);
+    setBusy('');
+    if (next?.error) { toast.error(next.error); return; }
+    setLabelOpen(false);
+    toast.success(`${picked.name} label done. ${next.id} is ${next.status}.`);
+  };
+
+  const printAmazonLabel = async () => {
+    try {
+      await openAmazonLabel(order);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const runAmazonLabel = async () => {
+    setBusy('amazon-label');
+    const result = await amazonLabels([order.id]);
+    setBusy('');
+    if (result?.error) { toast.error(result.error); return; }
+    const made = result?.done?.[0];
+    if (!made) { toast.error(result?.failed?.[0]?.reason || 'Easy Ship label was not made'); return; }
+    toast.success(`Easy Ship label made. AWB ${made.awb}.`);
+    await printAmazonLabel();
+  };
+
   const openInvoice = () => {
     setCustomerGstin(order.customerGstin || '');
     setInvoiceOpen(true);
@@ -247,6 +296,9 @@ export default function OrderDetailPage() {
   };
 
   const channelManaged = isChannelManaged(order);
+  const amazonOrder = order.channel === 'Amazon';
+  const amazonStep = amazonLabelStep(order);
+  const amazonSlot = pickupSlotText(order);
   const packetId = packetIdOf(order);
   const displayId = shortOrderId(order);
 
@@ -395,8 +447,20 @@ export default function OrderDetailPage() {
               {busy === 'invoice' ? 'Opening…' : 'Generate Invoice'}
             </Button>
           )}
-          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && (
-            <Button disabled={busy === 'label'} onClick={() => runLabel()}>
+          {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'make' && (
+            <Button disabled={busy === 'amazon-label'} onClick={runAmazonLabel}>
+              <Printer className="w-4 h-4 mr-2" />
+              {busy === 'amazon-label' ? 'Making label…' : 'Make Easy Ship label'}
+            </Button>
+          )}
+          {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'print' && (
+            <Button onClick={printAmazonLabel}>
+              <Printer className="w-4 h-4 mr-2" />
+              Amazon label
+            </Button>
+          )}
+          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
+            <Button disabled={busy === 'label'} onClick={openLabel}>
               <Printer className="w-4 h-4 mr-2" />
               {busy === 'label' ? 'Opening…' : 'Generate Label'}
             </Button>
@@ -432,6 +496,18 @@ export default function OrderDetailPage() {
           )}
         </div>
       </div>
+
+      {amazonOrder && (
+        <div role="note" className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+          <span className="font-medium">Amazon orders use Amazon Easy Ship labels, not Delhivery.</span>{' '}
+          {amazonStep === 'make' && 'Make Easy Ship label books the Amazon pickup, saves the AWB and opens the label PDF. '}
+          {amazonStep === 'print' && `Label made${order.awb ? ` · AWB ${order.awb}` : ''}${amazonSlot ? ` · ${amazonSlot}` : ''}. Print it with Amazon label. `}
+          <span className="text-muted-foreground">
+            Bulk labels, Mark dispatched and Cancel label are on the{' '}
+            <Link to="/shipping" className="underline">Shipping page</Link>.
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2">
@@ -770,7 +846,7 @@ export default function OrderDetailPage() {
                     <Badge variant={statusBadgeVariant(sub.deliveryStatus || sub.status)}>{sub.deliveryStatus || sub.status}</Badge>
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-right">
-                    {!channelManaged && (
+                    {!channelManaged && !amazonOrder && (
                       <Button variant="ghost" size="sm" disabled={busy === sub.id} onClick={() => runLabel(sub.id)}>
                         Label
                       </Button>
@@ -884,6 +960,44 @@ export default function OrderDetailPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={labelOpen}
+        onOpenChange={setLabelOpen}
+        title="Generate label"
+        description="Choose the courier for this order. Only couriers enabled for this company are shown."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setLabelOpen(false)}>Cancel</Button>
+            <Button disabled={busy === 'label'} onClick={saveLabel}>
+              {busy === 'label' ? 'Booking…' : `Book ${picked.name}`}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <label className="block text-sm font-medium">
+            Courier
+            <Select className="mt-1" value={picked.code} onChange={(event) => { setCourierCode(event.target.value); setLabelAwb(''); }}>
+              {courierList.map((courier) => (
+                <option key={courier.code} value={courier.code}>{courierOptionText(courier)}</option>
+              ))}
+            </Select>
+          </label>
+          <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">{rateNote(picked, labelPackage)}</p>
+          {!picked.api && (
+            <label className="block text-sm font-medium">
+              {picked.name} AWB
+              <Input className="mt-1" value={labelAwb} onChange={(event) => setLabelAwb(event.target.value)} placeholder={`AWB from the ${picked.name} portal`} />
+            </label>
+          )}
+          <p className="text-sm text-muted-foreground">
+            {picked.api
+              ? 'Delhivery is booked by API from WH-001 and the label opens. The tracking number is sent to Shopify.'
+              : `Book the shipment on the ${picked.name} portal, then enter its AWB here. The tracking number is sent to Shopify. Couriers are enabled in Settings › Couriers.`}
+          </p>
+        </div>
       </Modal>
 
       <Modal

@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
 import { formatDate, statusBadgeVariant } from '../../utils/format';
-import { isChannelManaged, packetIdOf, openMyntraDocument } from '../../lib/channelOrders';
+import { isChannelManaged, packetIdOf, openMyntraDocument, openAmazonLabel } from '../../lib/channelOrders';
+import { pickupSlotText, shipmentStatus, splitLabelOrders, trackingOf } from '../../lib/shippingStatus';
 import { downloadCsv } from '../../lib/orderMetrics';
 import { paymentModeOf, prepaidLabelledCod } from '../../lib/labelPayment';
 import api, { apiError } from '../../lib/api';
@@ -26,6 +27,7 @@ import Pagination, { useClientPage } from '../../components/ui/Pagination';
 const TABS = [
   { id: 'all', label: 'All' },
   { id: 'Label Pending', label: 'Label Pending' },
+  { id: 'Label generated', label: 'Label generated' },
   { id: 'Ready', label: 'Ready to hand over' },
   { id: 'In Transit', label: 'In Transit' },
   { id: 'Delivered', label: 'Delivered' },
@@ -34,24 +36,6 @@ const TABS = [
 ];
 
 const OPEN = ['New', 'Pending', 'Processing', 'Packed', 'Ready to Ship'];
-
-function trackingOf(order) {
-  return order.awb || (order.channelLines || []).find((line) => line.trackingNumber)?.trackingNumber || '';
-}
-
-function isCourierRto(order) {
-  const codes = `${order.channelStatus || ''} ${(order.channelLines || []).map((line) => line.status).join(' ')}`.toUpperCase();
-  return codes.includes('RTO');
-}
-
-function shipmentStatus(order) {
-  if (isCourierRto(order)) return 'RTO';
-  if (order.reversePickup?.returnId) return 'Exception';
-  if (order.status === 'Delivered') return 'Delivered';
-  if (order.status === 'Dispatched') return 'In Transit';
-  if (trackingOf(order)) return 'Ready';
-  return 'Label Pending';
-}
 
 export default function ShippingPage() {
   const navigate = useNavigate();
@@ -63,6 +47,7 @@ export default function ShippingPage() {
   const cancelLabel = useOrderStore((s) => s.cancelLabel);
   const shipOnMarketplace = useOrderStore((s) => s.shipOnMarketplace);
   const queueLabelJob = useOrderStore((s) => s.queueLabelJob);
+  const amazonLabels = useOrderStore((s) => s.amazonLabels);
   const closeManifest = useOrderStore((s) => s.closeManifest);
   const setOrderStatus = useOrderStore((s) => s.setStatus);
   const bookReversePickup = useOrderStore((s) => s.bookReversePickup);
@@ -151,6 +136,7 @@ export default function ShippingPage() {
     const next = await cancelLabel(order.id);
     setBusy('');
     if (next?.error) toast.error(next.error);
+    else if (order.channel === 'Amazon') toast.success(`${order.id} Amazon label cancelled. The next label moves the same Amazon package to a new pickup slot.`, { duration: 8000 });
     else toast.success(`${order.id} label cancelled. Order is back to New.`);
   };
 
@@ -160,6 +146,17 @@ export default function ShippingPage() {
     setBusy('');
     if (next?.error) toast.error(next.error);
     else toast.success(`${order.id} handed to ${order.courier || 'courier'}`);
+  };
+
+  const printAmazonLabel = async (order) => {
+    setBusy(order.id);
+    try {
+      await openAmazonLabel(order);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy('');
+    }
   };
 
   const openChannelLabel = async (order) => {
@@ -173,7 +170,8 @@ export default function ShippingPage() {
     }
   };
 
-  const pendingShopify = shipments.filter((row) => !row.marketplace && row.shipStatus === 'Label Pending');
+  const canLabel = (row) => row.shipStatus === 'Label Pending' && (!row.marketplace || row.channel === 'Amazon');
+  const pendingLabels = shipments.filter(canLabel);
 
   const exportManifest = async () => {
     setBusy('manifest');
@@ -190,20 +188,27 @@ export default function ShippingPage() {
   };
 
   const bookSelected = async () => {
-    const ids = pendingShopify.filter((row) => selectedIds.includes(row.id)).map((row) => row.id);
-    if (!ids.length) {
-      toast.error('Select Shopify orders that still need a label');
+    const { shopify, amazon } = splitLabelOrders(shipments, selectedIds);
+    if (!shopify.length && !amazon.length) {
+      toast.error('Select Shopify or Amazon orders that still need a label');
       return;
     }
     setBusy('bulk');
-    const job = await queueLabelJob(ids);
-    setBusy('');
-    if (job?.error) {
-      toast.error(job.error);
-      return;
+    if (shopify.length) {
+      const job = await queueLabelJob(shopify);
+      if (job?.error) toast.error(job.error);
+      else toast.success(`One label job queued for ${shopify.length} Shopify order${shopify.length === 1 ? '' : 's'}`);
     }
+    if (amazon.length) {
+      const result = await amazonLabels(amazon);
+      if (result?.error) toast.error(result.error);
+      else {
+        toast.success(result.message, { duration: 8000 });
+        result.failed.forEach((row) => toast.error(`${row.orderNo}: ${row.reason}`, { duration: 12000 }));
+      }
+    }
+    setBusy('');
     setSelectedIds([]);
-    toast.success(`One label job queued for ${ids.length} order${ids.length === 1 ? '' : 's'}`);
   };
 
   const shipMarketplace = async (order) => {
@@ -211,7 +216,9 @@ export default function ShippingPage() {
     const next = await shipOnMarketplace(order.id);
     setBusy('');
     if (next?.error) toast.error(next.error);
-    else toast.success(`${order.id} tracking saved on ${order.channel}. Delhivery was not used.`);
+    else if (order.channel === 'Amazon') {
+      toast.success(`${order.id} Easy Ship label ready. AWB ${next.awb}${next.labelReady === false ? ' · Amazon sent no label PDF, print it from Seller Central' : ''}`, { duration: 8000 });
+    } else toast.success(`${order.id} tracking saved on ${order.channel}. Delhivery was not used.`);
   };
 
   if (!loaded) return <PageLoader label="Loading shipping..." />;
@@ -222,13 +229,13 @@ export default function ShippingPage() {
         <div>
           <h1 className="text-xl font-bold">Shipping</h1>
           <p className="text-xs text-muted-foreground">
-            Amazon and Myntra keep that channel’s courier. Shopify books Delhivery from WH-001 or any other courier enabled for this company.
+            Amazon labels come from Easy Ship (Amazon’s courier). Myntra keeps its own courier. Shopify books Delhivery from WH-001 or any other courier enabled for this company.
             {readiness?.missing?.length ? ` Still needed: ${readiness.missing.join(', ')}.` : readiness?.courierReady ? ' Own courier is ready.' : ''}
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
           {can(PERMISSIONS.SHIPPING_GENERATE) && (
-            <Button variant="outline" onClick={bookSelected} disabled={busy === 'bulk' || pendingShopify.length === 0}>
+            <Button variant="outline" onClick={bookSelected} disabled={busy === 'bulk' || pendingLabels.length === 0}>
               Book selected labels
             </Button>
           )}
@@ -288,7 +295,7 @@ export default function ShippingPage() {
                   {paged.rows.map((row) => (
                     <TableRow key={row.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(row.id)}`)}>
                       <TableCell onClick={(event) => event.stopPropagation()}>
-                        {!row.marketplace && row.shipStatus === 'Label Pending' && (
+                        {canLabel(row) && (
                           <input
                             type="checkbox"
                             aria-label={`Select ${row.id}`}
@@ -324,6 +331,7 @@ export default function ShippingPage() {
                       <TableCell>{row.courier || '—'}</TableCell>
                       <TableCell className="font-mono text-xs">
                         <div>{row.tracking || '—'}</div>
+                        {row.tracking && pickupSlotText(row) && <div className="font-sans text-xs text-muted-foreground">{pickupSlotText(row)}</div>}
                         {row.scan && <div className="font-sans text-xs text-muted-foreground">{row.scan}</div>}
                       </TableCell>
                       <TableCell>
@@ -334,8 +342,17 @@ export default function ShippingPage() {
                         <div className="flex gap-2">
                           {row.marketplace && !row.tracking && can(PERMISSIONS.SHIPPING_GENERATE) && (
                             <Button variant="outline" size="sm" disabled={busy === row.id} onClick={() => shipMarketplace(row)}>
-                              Ship on {row.channel}
+                              {row.channel === 'Amazon' ? 'Easy Ship label' : `Ship on ${row.channel}`}
                             </Button>
+                          )}
+                          {row.channel === 'Amazon' && row.shipStatus === 'Label generated' && can(PERMISSIONS.SHIPPING_GENERATE) && (
+                            <>
+                              <Button variant="outline" size="sm" disabled={busy === row.id} onClick={() => printAmazonLabel(row)}>Amazon label</Button>
+                              <Button variant="outline" size="sm" disabled={busy === row.id} onClick={() => markDispatched(row)}>Mark dispatched</Button>
+                              {can(PERMISSIONS.SHIPPING_CANCEL) && (
+                                <Button variant="ghost" size="sm" disabled={busy === row.id} onClick={() => cancelOwnLabel(row)}>Cancel label</Button>
+                              )}
+                            </>
                           )}
                           {isChannelManaged(row) && packetIdOf(row) && (
                             <Button variant="outline" size="sm" disabled={busy === row.id} onClick={() => openChannelLabel(row)}>
@@ -347,7 +364,7 @@ export default function ShippingPage() {
                               Book courier
                             </Button>
                           )}
-                          {!row.marketplace && row.shipStatus === 'Ready' && can(PERMISSIONS.SHIPPING_GENERATE) && (
+                          {!row.marketplace && ['Ready', 'Label generated'].includes(row.shipStatus) && can(PERMISSIONS.SHIPPING_GENERATE) && (
                             <>
                               <Button variant="ghost" size="sm" disabled={busy === row.id} onClick={() => generateLabel(row.id)}>Reprint</Button>
                               <Button variant="outline" size="sm" disabled={busy === row.id} onClick={() => markDispatched(row)}>Mark dispatched</Button>
@@ -411,7 +428,7 @@ export default function ShippingPage() {
           )}
           <p className="text-sm text-muted-foreground">
             {picked.api
-              ? 'Delhivery is booked by API from WH-001 and the label is stored. Amazon and Myntra orders are not booked here.'
+              ? 'Delhivery is booked by API from WH-001 and the label is stored. Amazon orders use the Easy Ship label button; Myntra orders are not booked here.'
               : `Book the shipment on the ${picked.name} portal, then enter its AWB here. Couriers are enabled in Settings › Couriers.`}
           </p>
         </div>

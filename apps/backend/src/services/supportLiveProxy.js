@@ -47,15 +47,21 @@ function readJson(res) {
 }
 
 /** The chat filter counts from message DTOs, the same rules as supportChat.service messageCounts. */
+const STAGE_FILTER = { waiting_client: 'waiting', needs_input: 'input', blocked: 'blocked' };
+
 function countMessages(rows) {
-  const counts = { all: 0, pending: 0, progress: 0, fixed: 0, developer: 0, client: 0 };
+  const counts = {
+    all: 0, pending: 0, progress: 0, waiting: 0, input: 0, blocked: 0, fixed: 0, developer: 0, client: 0,
+  };
   for (const m of rows) {
     if (m.event || m.deleted) continue;
     counts.all += 1;
     const update = m.update;
-    if (update ? update.status === 'pending' : m.side === 'tenant') counts.pending += 1;
+    const held = update && !['done', 'confirmed'].includes(update.status) && STAGE_FILTER[update.stage];
+    if (held) counts[held] += 1;
+    else if (update ? update.status === 'pending' : m.side === 'tenant') counts.pending += 1;
     if (!update) continue;
-    if (update.status === 'in_progress') counts.progress += 1;
+    if (update.status === 'in_progress' && !held) counts.progress += 1;
     if (['done', 'confirmed'].includes(update.status)) counts.fixed += 1;
     if (update.markedBy === 'platform') counts.developer += 1;
     if (update.markedBy === 'tenant') counts.client += 1;
@@ -253,4 +259,4 @@ function createSupportLiveProxy(settings, guards = {}) {
   return router;
 }
 
-module.exports = { createSupportLiveProxy, LOOP_HEADER };
+module.exports = { createSupportLiveProxy, LOOP_HEADER, countMessages };

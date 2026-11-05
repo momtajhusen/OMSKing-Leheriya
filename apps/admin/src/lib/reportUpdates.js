@@ -139,6 +139,9 @@ export const CHAT_FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'pending', label: 'Pending' },
   { id: 'progress', label: 'In progress' },
+  { id: 'waiting', label: 'Waiting for client' },
+  { id: 'input', label: 'Needs input' },
+  { id: 'blocked', label: 'Blocked' },
   { id: 'fixed', label: 'Complete' },
   { id: 'developer', label: 'Developer' },
   { id: 'client', label: 'Client' },
@@ -149,10 +152,54 @@ export function filterCount(counts, id) {
   return typeof counts?.[id] === 'number' ? counts[id] : null;
 }
 
+/** Why an open message is not done yet; the default reasons are Hinglish for both the client and the developer. */
+export const STAGE_META = {
+  not_started: { label: 'Not started', reason: 'Abhi shuru nahi hua. Ye line me hai aur baari aane par kiya jayega.' },
+  working: { label: 'In progress', reason: 'Developer is par kaam kar raha hai.' },
+  waiting_client: { label: 'Waiting for client', reason: 'Client ke jawab ka intezaar hai; jo jaankari chahiye wo unse milni hai.' },
+  needs_input: { label: 'Needs input', reason: 'Kaam aage badhane se pehle ek decision chahiye.' },
+  blocked: { label: 'Blocked', reason: 'Ruka hua hai: isme kuch aisa chahiye jo yahan se abhi nahi ho sakta.' },
+  fix_failed: { label: 'Fix failed', reason: 'Pichhla fix apne checks me pass nahi hua; ise dobara try kiya jayega.' },
+};
+
+/** Stages held by someone else: they get their own chat filter instead of Pending / In progress. */
+const HELD = { waiting_client: 'waiting', needs_input: 'input', blocked: 'blocked' };
+
+function stageOf(message, local) {
+  const update = message.update;
+  if (update && FIXED.includes(update.status)) return null;
+  if (STAGE_META[update?.stage]) return update.stage;
+  return STAGE_META[local?.stage] ? local.stage : null;
+}
+
 /**
- * Every client message is Pending until work starts on it; Developer / Client mean who made the last mark. Status labels
- * in the chat only show under All.
+ * The status panel of an open message: stage, label and reason (the task list's Hinglish line when it has one).
+ * Null for done messages, status labels, unsent messages and client messages nobody tracks.
  */
+export function openStatus(message, local = null) {
+  if (!message || message.event || message.deleted || message.pending || message.failed) return null;
+  const update = message.update;
+  if (update ? FIXED.includes(update.status) : !local) return null;
+  const stage = stageOf(message, local) || (update?.status === 'in_progress' ? 'working' : 'not_started');
+  const own = local?.stage === stage ? local : null;
+  const reason = own?.reasonHi || (STAGE_META[update?.stage] && update.reason) || own?.reason || STAGE_META[stage].reason;
+  return { stage, label: STAGE_META[stage].label, reason };
+}
+
+/** Waiting / Needs input / Blocked counts from the local task list, for a live server that does not send stages yet. */
+export function stageCounts(reasons) {
+  const tally = { waiting: 0, input: 0, blocked: 0 };
+  Object.values(reasons || {}).forEach((r) => { if (HELD[r?.stage]) tally[HELD[r.stage]] += 1; });
+  return tally;
+}
+
+export function chipCount(counts, id, localTally) {
+  const value = filterCount(counts, id);
+  if (value === null || !(id in (localTally || {}))) return value;
+  const liveKnowsStages = ['waiting', 'input', 'blocked'].some((key) => counts[key] > 0);
+  return liveKnowsStages ? value : localTally[id];
+}
+
 /** Chat search: every word of the query appears in the message text, sender, file name or task title. */
 export function matchesSearch(message, query) {
   const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
@@ -161,13 +208,19 @@ export function matchesSearch(message, query) {
   return words.every((w) => hay.includes(w));
 }
 
-export function matchesFilter(message, filter) {
+/**
+ * Every client message is Pending until work starts on it, unless it waits for the client, a decision or a blocker
+ * (`local` = the local task list's stage). Developer / Client mean who made the last mark.
+ */
+export function matchesFilter(message, filter, local = null) {
   if (!filter || filter === 'all') return true;
   const update = message.update;
   if (message.event || message.deleted) return false;
-  if (filter === 'pending') return update ? update.status === 'pending' : message.side === 'tenant';
+  const held = HELD[stageOf(message, local)] || null;
+  if (['waiting', 'input', 'blocked'].includes(filter)) return held === filter;
+  if (filter === 'pending') return !held && (update ? update.status === 'pending' : message.side === 'tenant');
   if (!update) return false;
-  if (filter === 'progress') return update.status === 'in_progress';
+  if (filter === 'progress') return !held && update.status === 'in_progress';
   if (filter === 'fixed') return FIXED.includes(update.status);
   if (filter === 'developer') return update.markedBy === 'platform';
   if (filter === 'client') return update.markedBy === 'tenant';

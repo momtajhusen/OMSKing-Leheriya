@@ -8,6 +8,7 @@ const TITLE_MAX = 160;
 const NOTE_MAX = 500;
 const LIST_MAX = 300;
 const SUMMARY_MAX = { issue: 200, fix: 200, area: 120, check: 300 };
+const REASON_MAX = 400;
 const FIXED = ['done', 'confirmed'];
 
 /** Which side may apply which mark, and from which statuses. Developers finish work; clients confirm it. */
@@ -37,6 +38,14 @@ function readSummary(body) {
     if (value.length > max) throw new HttpError(400, `${key} must be ${max} characters or fewer`);
     return [key, value];
   }));
+}
+
+function readReason(body) {
+  const stage = String(body.stage ?? '');
+  if (!SupportUpdate.STAGES.includes(stage)) throw new HttpError(400, 'Unknown stage');
+  const reason = String(body.reason ?? '').replace(/\s+/g, ' ').trim();
+  if (reason.length > REASON_MAX) throw new HttpError(400, `Reason must be ${REASON_MAX} characters or fewer`);
+  return { stage, reason };
 }
 
 function defaultTitle(message) {
@@ -192,6 +201,12 @@ async function applyAction({ tenantId, user, side, updateId, action, note, title
     Object.assign(row, readSummary(summary));
     row.history.push({ action: 'summary', status: row.status, by: user.id, byName, side });
     await row.save();
+  } else if (action === 'reason') {
+    if (side !== 'platform') throw new HttpError(403, 'Only the OMSKing team can write why it is pending');
+    if (FIXED.includes(row.status)) throw new HttpError(400, 'A completed update has no pending reason');
+    Object.assign(row, readReason(summary));
+    row.history.push({ action: 'reason', status: row.status, by: user.id, byName, side });
+    await row.save();
   } else {
     const rule = ACTIONS[action];
     if (!rule) throw new HttpError(400, 'Unknown action');
@@ -204,6 +219,10 @@ async function applyAction({ tenantId, user, side, updateId, action, note, title
     if (action === 'complete') {
       row.doneByName = byName;
       row.doneAt = new Date();
+    }
+    if (FIXED.includes(row.status)) {
+      row.stage = '';
+      row.reason = '';
     }
     if (action === 'confirm') {
       row.confirmedByName = byName;

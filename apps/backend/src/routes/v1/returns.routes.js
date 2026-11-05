@@ -13,6 +13,8 @@ const approve = [authMiddleware, tenantMiddleware, vendorScope('orders'), requir
 router.get('/', ...approve, asyncHandler(returns.listReturns));
 router.post('/:returnNo/approve', ...approve, asyncHandler(returns.approveReturn));
 router.post('/:returnNo/receive', ...approve, asyncHandler(returns.receiveReturn));
+router.patch('/:returnNo/claim', ...approve, asyncHandler(returns.updateClaim));
+router.patch('/:returnNo/refund', ...approve, asyncHandler(returns.updateRefund));
 router.post(
   '/approve-restock',
   ...approve,

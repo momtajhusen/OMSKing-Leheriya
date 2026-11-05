@@ -94,11 +94,58 @@ test.after(async () => {
 test('order windows never exceed the Myntra 7-day limit', () => {
   const windows = orderWindows('2026-09-01', '2026-09-30');
   assert.equal(windows[0].startDate, '2026-09-01');
-  assert.equal(windows.at(-1).endDate, '2026-09-30');
+  assert.equal(windows.at(-1).endDate, '2026-10-01');
   windows.forEach((w) => {
     const days = (new Date(w.endDate) - new Date(w.startDate)) / 864e5;
     assert.ok(days <= 6, `${w.startDate}..${w.endDate}`);
   });
+  windows.slice(1).forEach((w, i) => assert.equal(w.startDate, windows[i].endDate));
+});
+
+test('order windows use IST days and end after today so today\'s orders are listed', () => {
+  const windows = orderWindows('2026-10-30T10:00:00Z', '2026-11-05T20:00:00Z');
+  assert.equal(windows[0].startDate, '2026-10-30');
+  assert.equal(windows.at(-1).endDate, '2026-11-07');
+});
+
+test('order pull lists orders placed today when Myntra endDate is exclusive', async () => {
+  const placed = { orderId: 'TODAY1', date: '2026-11-05', orderLines: [{ orderLineId: 'TL1', sellerOrderId: 'TS1' }] };
+  const seen = [];
+  const request = async (method, url) => {
+    const u = new URL(url);
+    if (u.pathname === '/authorization/generate_token') {
+      return reply(200, { statusType: 'SUCCESS' }, { access_token: 'acc-1', refresh_token: 'ref-1' });
+    }
+    const startDate = u.searchParams.get('startDate');
+    const endDate = u.searchParams.get('endDate');
+    seen.push(`${startDate}..${endDate}`);
+    const rows = placed.date >= startDate && placed.date < endDate ? [placed] : [];
+    return reply(200, { data: rows, pages: 1 });
+  };
+  const client = createMyntraClient({ merchantId: 'm', secretKey: 's' }, { request });
+  const refs = await client.listOrderRefs({ from: '2026-11-01T06:00:00Z', to: '2026-11-05T06:11:00Z' });
+  assert.deepEqual(refs.map((r) => r.orderId), ['TODAY1'], seen.join(', '));
+});
+
+test('order pull falls back to today when Myntra rejects a future endDate', async () => {
+  const today = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+  const seen = [];
+  const request = async (method, url) => {
+    const u = new URL(url);
+    if (u.pathname === '/authorization/generate_token') {
+      return reply(200, { statusType: 'SUCCESS' }, { access_token: 'acc-1', refresh_token: 'ref-1' });
+    }
+    const endDate = u.searchParams.get('endDate');
+    seen.push(endDate);
+    if (endDate > today) return reply(400, { statusType: 'ERROR', statusMessage: 'endDate cannot be in future' });
+    return reply(200, { data: [{ orderId: 'OLD1', orderLines: [{ orderLineId: 'OL1', sellerOrderId: 'OS1' }] }], pages: 1 });
+  };
+  const client = createMyntraClient({ merchantId: 'm', secretKey: 's' }, { request });
+  const errors = [];
+  const refs = await client.listOrderRefs({ from: new Date(Date.now() - 3 * 864e5), to: new Date(), errors });
+  assert.deepEqual(errors, []);
+  assert.equal(seen.at(-1), today);
+  assert.deepEqual(refs.map((r) => r.orderId), ['OLD1']);
 });
 
 test('client generates a token once, reuses it, and refreshes on 401', async () => {

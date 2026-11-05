@@ -33,6 +33,27 @@ export async function openMyntraDocument(order, type) {
   }
 }
 
+/** Opens the stored Amazon Easy Ship label PDF (reprint); Amazon is not called again. */
+export async function openAmazonLabel(order) {
+  const win = window.open('', '_blank');
+  try {
+    const { data } = await api.get(`/orders/${encodeURIComponent(order.id)}/amazon-label`, { responseType: 'blob' });
+    const url = URL.createObjectURL(data);
+    if (win) win.location.href = url;
+    else window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (err) {
+    if (win) win.close();
+    let message = 'Could not open the Amazon label';
+    if (err?.response?.data instanceof Blob) {
+      try {
+        message = JSON.parse(await err.response.data.text())?.message || message;
+      } catch { /* keep default */ }
+    }
+    throw new Error(message);
+  }
+}
+
 const DONE = new Set(['success', 'failed', 'partial_success', 'cancelled']);
 
 /** Queues a live Myntra order pull and waits for the worker to finish it. */

@@ -79,6 +79,13 @@ function toOrderDto(doc) {
     awb: order.awb || '',
     invoiceNo: order.channel === 'Shopify' ? invoiceNumber(order) : (order.invoiceNo || ''),
     labelGeneratedAt: order.labelGeneratedAt || null,
+    easyShip: order.easyShip?.packageId ? {
+      packageId: order.easyShip.packageId,
+      status: order.easyShip.status || '',
+      slotStart: order.easyShip.slotStart || null,
+      slotEnd: order.easyShip.slotEnd || null,
+      handover: order.easyShip.handover || '',
+    } : null,
     invoiceGeneratedAt: order.invoiceGeneratedAt || null,
     reversePickup: order.reversePickup || null,
     source: order.source || 'demo',

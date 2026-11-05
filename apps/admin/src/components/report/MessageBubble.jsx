@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, BadgeCheck, Ban, Camera, Check, CheckCheck, ChevronDown, CircleCheck, CirclePlay, Clock, Copy, Download, FileText, Mic, Pause, Play, Reply,
-  RotateCcw, RotateCw, SquareArrowOutUpRight, Trash2, Video, Wand2,
+  RotateCcw, RotateCw, SendHorizontal, SquareArrowOutUpRight, Trash2, Video, Wand2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import api from '../../lib/api';
@@ -192,6 +192,60 @@ const STATUS_CHIP = {
   confirmed: { cls: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300', icon: Check },
   client: { cls: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300', icon: CheckCheck },
 };
+const STAGE_TONE = {
+  not_started: { cls: 'border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200', icon: Clock },
+  working: { cls: 'border-sky-500/30 bg-sky-500/10 text-sky-900 dark:text-sky-200', icon: CirclePlay },
+  waiting_client: { cls: 'border-violet-500/30 bg-violet-500/10 text-violet-900 dark:text-violet-200', icon: Reply },
+  needs_input: { cls: 'border-orange-500/30 bg-orange-500/10 text-orange-900 dark:text-orange-200', icon: AlertCircle },
+  blocked: { cls: 'border-rose-500/30 bg-rose-500/10 text-rose-900 dark:text-rose-200', icon: Ban },
+  fix_failed: { cls: 'border-rose-500/30 bg-rose-500/10 text-rose-900 dark:text-rose-200', icon: RotateCcw },
+};
+
+/** Why an open message is not done (Hinglish, starts closed) and a reply box that answers this message only. */
+function OpenStatusPanel({ open, message, onQuickReply }) {
+  const [expanded, setExpanded] = useState(false);
+  const [text, setText] = useState('');
+  const tone = STAGE_TONE[open.stage] || STAGE_TONE.not_started;
+  const Icon = tone.icon;
+  const submit = (e) => {
+    e.preventDefault();
+    const body = text.trim();
+    if (!body) return;
+    onQuickReply(message, body);
+    setText('');
+  };
+  return (
+    <div className={cn('mx-1 mb-1 mt-0.5 rounded-md border text-[12px]', tone.cls)}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-left font-semibold"
+      >
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+        <span className="flex-1">{open.label}</span>
+        <span className="text-[11px] font-medium opacity-70">{expanded ? 'Reason chhupayein' : 'Kyun?'}</span>
+        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 transition-transform', expanded && 'rotate-180')} />
+      </button>
+      {expanded && <p className="whitespace-pre-wrap break-words px-2 pb-1.5 leading-snug [overflow-wrap:anywhere]">{open.reason}</p>}
+      {onQuickReply && (
+        <form onSubmit={submit} className="flex items-center gap-1 border-t border-current/10 px-1.5 py-1">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Is message ka reply likhein…"
+            aria-label="Reply to this message"
+            className="min-w-0 flex-1 rounded bg-white/70 px-2 py-1 text-[12px] text-foreground outline-none placeholder:text-foreground/45 dark:bg-black/20"
+          />
+          <button type="submit" disabled={!text.trim()} aria-label="Send the reply to this message" className="rounded-full p-1 text-[#00a884] disabled:opacity-40">
+            <SendHorizontal className="h-3.5 w-3.5" />
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 const OPTION_DOT = { pending: 'bg-amber-500', progress: 'bg-sky-500', complete: 'bg-emerald-500', fixed: 'bg-emerald-500' };
 
 /** The chevron in a message's top-right corner: set its status (developer or client marks), or delete your own message. */
@@ -320,7 +374,7 @@ export function DeletedLabel({ message }) {
 
 export default function MessageBubble({
   message, summary, showName, grouped, highlighted, onReply, onCopy, onJump, onOpenImage, onRetry, onMediaLoad, mySide, onMark, onDevMark,
-  onDelete, onOpenPage, onAutofix,
+  onDelete, onOpenPage, onAutofix, open, onQuickReply,
 }) {
   const { mine, attachment } = message;
   const page = onOpenPage ? fixedPage(message.update, summary, ROUTE_DEFS.admin) : null;
@@ -446,6 +500,8 @@ export default function MessageBubble({
               )}
             </div>
           )}
+
+          {open && <OpenStatusPanel key={open.stage} open={open} message={message} onQuickReply={onQuickReply} />}
 
           {message.update && showCheck && steps.length > 0 && (
             <div className="mx-1 mb-1 rounded-md bg-black/5 px-2 py-1.5 text-[12px] dark:bg-white/5">

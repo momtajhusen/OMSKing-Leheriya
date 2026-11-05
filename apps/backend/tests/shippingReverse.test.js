@@ -207,6 +207,7 @@ test('Amazon and Myntra ship on the marketplace courier and never call Delhivery
     channel: 'Amazon',
     externalOrderId: '902-9',
     source: 'channel_api',
+    items: [{ sku: 'KURTA-1', qty: 1, pack: { weightKg: 0.5, lengthCm: 30, breadthCm: 20, heightCm: 5 } }],
   });
   await Order.create({
     tenantId: tenant._id,
@@ -223,7 +224,8 @@ test('Amazon and Myntra ship on the marketplace courier and never call Delhivery
       amazonCreds: { sellerId: 'SELLER', refreshToken: 'r', lwaClientId: 'c', lwaClientSecret: 's', apiMode: 'live' },
       amazonRequest: async (method, url) => {
         if (String(url).includes('/auth/o2/token')) return { status: 200, text: JSON.stringify({ access_token: 'tok' }) };
-        return { status: 200, text: JSON.stringify({ trackingDetails: { trackingId: 'AMZ-AWB-9' } }) };
+        if (String(url).includes('/easyShip/2022-03-23/timeSlot')) return { status: 200, text: JSON.stringify({ timeSlots: [{ slotId: 'SLOT-1', startTime: '2026-11-06T04:30:00Z', endTime: '2026-11-06T08:30:00Z', handoverMethod: 'PICKUP' }] }) };
+        return { status: 200, text: JSON.stringify({ scheduledPackages: [{ scheduledPackageId: { amazonOrderId: '902-9', packageId: 'PKG-9' }, trackingDetails: { trackingId: 'AMZ-AWB-9' } }] }) };
       },
     });
     const myntraShipment = await bookMarketplace(tenant._id, 'MYN-MKT', {
@@ -325,7 +327,7 @@ test('a live courier or marketplace socket opens only when apiMode is live', asy
       /apiMode|Live API/,
     );
     await assert.rejects(
-      () => amazon.confirmShipment(amazonCreds, { amazonOrderId: '902-1' }),
+      () => amazon.easyShip(amazonCreds),
       /apiMode|Live API/,
     );
     await assert.rejects(

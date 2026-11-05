@@ -81,6 +81,13 @@ const orderSchema = new mongoose.Schema({
   awb: { type: String, default: '' },
   invoiceNo: { type: String, default: '' },
   labelGeneratedAt: { type: Date },
+  easyShip: {
+    packageId: { type: String, default: '' },
+    status: { type: String, default: '' },
+    slotStart: { type: Date, default: null },
+    slotEnd: { type: Date, default: null },
+    handover: { type: String, default: '' },
+  },
   invoiceGeneratedAt: { type: Date },
   orderDate: { type: Date },
   reversePickup: {

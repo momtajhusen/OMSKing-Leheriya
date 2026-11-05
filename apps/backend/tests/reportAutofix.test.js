@@ -499,3 +499,35 @@ test('GET /queue lists the pending messages in the order play fixes them, so the
   const all = (await (await app.call('GET', null, '/queue')).json()).data;
   assert.deepEqual(all.map((r) => r.messageId), [oid(6), oid(7), oid(1), oid(3)], 'after the last one it goes on from the top');
 });
+
+test('every open task gets a stage and an English reason for the chat; an explicit Reason line wins, Complete has none', async (t) => {
+  const { taskReasons } = require('../scripts/reportInbox');
+  const add = (n, label, lines = '') => entry(label, n).replace(`- Message id: ${oid(n)}\n`, `${lines}- Message id: ${oid(n)}\n`);
+  const text = [
+    add(1, 'Not started'),
+    add(2, 'Waiting for client', '- Waiting for: Easy Ship or Self Ship for Amazon orders\n'),
+    add(3, 'Needs input', '- Unclear: Which courier should book Amazon orders\n- Input from: developer\n'),
+    add(4, 'Blocked', '- Status: Blocked — 5 Nov 2026: needs the live Myntra job errors\n'),
+    add(5, 'In progress', '- Status: 5 Nov 2026, 8:16 am — Auto-fix left it In progress. Not verified yet: the delivery date column is missing.. The change is saved in /tmp/x.patch\n'),
+    add(6, 'Complete'),
+    add(7, 'Not started', `- Part of: ${oid(2)}\n`),
+    add(8, 'Needs input', '- Unclear: kya poora layout chahiye\n- Reason: Needs a decision from the developer: is the full OMSGuru layout needed?\n'),
+    add(9, 'Fix failed', '- Status: 5 Nov 2026, 12:41 am — Auto-fix change discarded, not applied: Not verified: backend tests failed\n'),
+  ].join('\n');
+  const r = taskReasons(text);
+  assert.deepEqual(r[oid(1)], { stage: 'not_started', reason: 'Not started yet. It is in the queue and will be worked on in order.' });
+  assert.deepEqual(r[oid(2)], { stage: 'waiting_client', reason: 'Waiting for the client: Easy Ship or Self Ship for Amazon orders' });
+  assert.deepEqual(r[oid(3)], { stage: 'needs_input', reason: 'Needs a decision from the developer: Which courier should book Amazon orders' });
+  assert.deepEqual(r[oid(4)], { stage: 'blocked', reason: 'Blocked: needs the live Myntra job errors' });
+  assert.deepEqual(r[oid(5)], { stage: 'working', reason: 'The fix is made but not verified yet: the delivery date column is missing.' });
+  assert.equal(r[oid(6)], undefined);
+  assert.deepEqual(r[oid(7)], { stage: 'waiting_client', reason: 'Handled together with "issue 2". Waiting for the client: Easy Ship or Self Ship for Amazon orders' });
+  assert.deepEqual(r[oid(8)], { stage: 'needs_input', reason: 'Needs a decision from the developer: is the full OMSGuru layout needed?' });
+  assert.deepEqual(r[oid(9)], { stage: 'fix_failed', reason: 'The last fix attempt failed (Not verified: backend tests failed); it will be tried again.' });
+
+  const app = await serve(t, { spawn: fakeSpawn().spawn });
+  fs.writeFileSync(path.join(app.outDir, 'TASKS.md'), text);
+  const res = await app.call('GET', null, '/reasons');
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).data[oid(2)].stage, 'waiting_client');
+});

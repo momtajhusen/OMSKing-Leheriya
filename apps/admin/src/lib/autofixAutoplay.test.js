@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { autoplayPhase, autoplayStep, elapsedLabel, logRun, playTarget, shouldAutoApply, shouldAutoVerify, targetReached } from './autofixAutoplay.js';
+import { autoplayPhase, autoplayStep, elapsedLabel, logRun, playTarget, rejectedRun, shouldAutoApply, shouldAutoVerify, targetReached } from './autofixAutoplay.js';
 
 const finished = (extra) => ({ id: 'r1', messageId: 'm1', running: false, error: '', patchFile: null, applied: false, discarded: null, verification: { pass: true }, ...extra });
 
@@ -195,4 +195,17 @@ test('the start modal lists the messages play will fix: the first N for a number
   assert.match(modal, /<MessageBubble/);
   const pane = fs.readFileSync(new URL('../components/report/ChatPane.jsx', import.meta.url), 'utf8');
   assert.match(pane, /<AutoplayStartModal pending=\{filterCount\(counts, 'pending'\)\} messages=\{messages\} mySide=\{mySide\} onOpenImage=\{setLightbox\}/);
+});
+
+test('a rejected Apply fix takes the server\'s run: an already applied change counts as done and the button goes away, with no stacked error toasts', () => {
+  const applied = finished({ patchFile: '/tmp/r1.patch', applied: true });
+  const err = { response: { status: 409, data: { message: 'No finished Auto-fix change is waiting to be applied', data: applied } } };
+  assert.deepEqual(rejectedRun(err), applied);
+  assert.equal(rejectedRun(new Error('Network Error')), null, 'no answer from the server: nothing to take');
+  assert.equal(rejectedRun({ response: { status: 500, data: { message: 'boom' } } }), null);
+
+  const header = fs.readFileSync(new URL('../components/report/AutoFixButton.jsx', import.meta.url), 'utf8');
+  assert.match(header, /const latest = rejectedRun\(err\);\s*if \(latest\) setRun\(latest\);/);
+  assert.match(header, /if \(latest\?\.applied\) \{\s*toast\.success\([^\n]*\);\s*return true;/, 'already applied: done, not an error');
+  assert.match(header, /toast\.error\(apiError\(err, 'Could not apply the fix'\), \{ id: 'autofix-apply'/, 'repeated errors replace one toast');
 });

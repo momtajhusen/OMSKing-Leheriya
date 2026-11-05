@@ -13,10 +13,12 @@ test('shipping has a separate RTO tab right after Exceptions', () => {
 });
 
 test('courier Return to Origin shipments go to the RTO tab, return pickups stay in Exceptions', () => {
-  const status = page.slice(page.indexOf('function shipmentStatus'), page.indexOf('export default'));
+  const lib = fs.readFileSync(new URL('../../lib/shippingStatus.js', import.meta.url), 'utf8');
+  assert.match(page, /import \{[^}]*shipmentStatus[^}]*\} from '\.\.\/\.\.\/lib\/shippingStatus'/);
+  const status = lib.slice(lib.indexOf('function shipmentStatus'), lib.indexOf('const DAY'));
   assert.match(status, /if \(isCourierRto\(order\)\) return 'RTO';/);
   assert.match(status, /if \(order\.reversePickup\?\.returnId\) return 'Exception';/);
-  const rtoCheck = page.slice(page.indexOf('function isCourierRto'), page.indexOf('function shipmentStatus'));
+  const rtoCheck = lib.slice(lib.indexOf('function isCourierRto'), lib.indexOf('function shipmentStatus'));
   assert.match(rtoCheck, /channelStatus/);
   assert.match(rtoCheck, /includes\('RTO'\)/);
   assert.doesNotMatch(rtoCheck, /reversePickup/);

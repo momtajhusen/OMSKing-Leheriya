@@ -201,8 +201,13 @@ test('the prompt fixes a clear task directly, reads the nearby messages only whe
   const { prompt } = readRun();
   assert.match(prompt, /If the task message alone is enough to understand and fix it, fix it directly and ask nothing\./);
   assert.match(prompt, /Only if it is not enough, read the nearby messages:\n {6}- before: \d+ \("issue 1", Complete\)\n {6}- after: \d+ \("issue 3", Not started\)/);
-  assert.match(prompt, new RegExp(`npm run report-inbox -- --unclear ${oid(2)} --need "<what is unclear>" --options "<option 1> \\| <option 2>" --from <developer\\|client>`));
+  assert.match(prompt, new RegExp(`npm run report-inbox -- --unclear ${oid(2)} --need "<what is unclear>" --need-hi "[^"]+" --options "<option 1> \\| <option 2>" --from <developer\\|client>`));
   assert.match(prompt, /Never guess and never leave the task In progress/);
+  assert.match(prompt, /--need-hi "<the same need in short Hinglish: Hindi words in English letters>"/);
+  assert.match(
+    prompt,
+    new RegExp(`If a test or check fails, or testing needs something you do not have .*--unclear ${oid(2)} --need "<what is needed>" --need-hi "<the same need in short Hinglish: Hindi words in English letters>" --options "<option 1> \\| <option 2>" --from <developer\\|client> --during testing`),
+  );
 });
 
 test('a run started from a chat filter or one message plans only that scope', async (t) => {

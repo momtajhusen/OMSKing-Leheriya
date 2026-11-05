@@ -7,8 +7,8 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 const {
-  runOnce, markTasks, askClient, attachFound, printHistory, planAutofix, nextTask, clientMessagesAfter, mediaFileName, syncSummaries,
-  completeApplied, discardRun, flagUnapplied, reconcileApplied, needInput, provideInput, inputRequests, nearbyTasks,
+  runOnce, markTasks, askClient, attachFound, printHistory, planAutofix, nextTask, clientMessagesAfter, mediaFileName, syncSummaries, saveReason, syncReasons,
+  completeApplied, discardRun, flagUnapplied, reconcileApplied, needInput, provideInput, inputRequests, nearbyTasks, taskReasons,
 } = require('../scripts/reportInbox');
 
 const PASSWORD = 'live-secret-pw';
@@ -29,6 +29,7 @@ const LIVE_ACTIONS = {
   complete: { from: ['pending', 'in_progress'], to: 'done' },
   reopen: { from: ['done', 'confirmed'], to: 'pending' },
   summary: { from: ['done', 'confirmed'], to: null },
+  reason: { from: ['pending', 'in_progress'], to: null },
 };
 
 /** Stands in for the live API: records every request, pages messages and tracks updates like the real routes. */
@@ -65,6 +66,7 @@ function startFakeLive(messages, { oldServer = false } = {}) {
       if (!rule) return json(400, { success: false, message: 'Unknown action' });
       if (!rule.from.includes(update.status)) return json(400, { success: false, message: `Cannot ${body.action} an update that is ${update.status}` });
       if (rule.to) update.status = rule.to;
+      else if (body.action === 'reason') Object.assign(update, { stage: body.stage, reason: body.reason });
       else Object.assign(update, { issue: body.issue, fix: body.fix, area: body.area });
       messages.forEach((m) => { if (m.update?.id === update.id) m.update = { ...update }; });
       return json(200, { success: true, data: update });
@@ -687,6 +689,27 @@ test('a category Auto-fix only plans tasks in that chat filter; a message Auto-f
   assert.equal(planAutofix(text, { messageId: oid(2) }), null);
 });
 
+test('an input request can carry its need in Hinglish and say it came up while testing', () => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'needs-input-hi-'));
+  try {
+    fs.writeFileSync(path.join(outDir, 'TASKS.md'), tasksDoc([row('In progress', 1), row('Not started', 2)]));
+    needInput({
+      outDir, messageId: oid(1), unclear: 'Sample settlement file to test the match', unclearHi: 'Match check karne ke liye ek settlement file chahiye', options: ['I will paste it', 'Ask the client'], from: 'client', during: 'testing',
+    });
+    const text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+    assert.match(text, /- Unclear: Sample settlement file to test the match\n/);
+    assert.match(text, /- Unclear in Hinglish: Match check karne ke liye ek settlement file chahiye\n/);
+    assert.match(text, /- Asked during: testing\n/);
+    const [request] = inputRequests(text);
+    assert.equal(request.needHi, 'Match check karne ke liye ek settlement file chahiye');
+    assert.equal(request.during, 'testing');
+    assert.equal(taskReasons(text)[oid(1)].reasonHi, 'Match check karne ke liye ek settlement file chahiye');
+    assert.throws(() => needInput({ outDir, messageId: oid(2), unclear: 'x', options: [], from: 'developer', during: 'later' }), /--during/);
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
 test('waiting-for-client tasks are listed for the paste form too, and pasted data unblocks them', () => {
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'paste-'));
   try {
@@ -702,4 +725,22 @@ test('waiting-for-client tasks are listed for the paste form too, and pasted dat
   } finally {
     fs.rmSync(outDir, { recursive: true, force: true });
   }
+});
+
+test('saveReason writes an English Reason line and puts the stage and reason on the tracked live update; syncReasons sends all open ones', async () => {
+  const messages = [message(1, { update: { id: 'u9', status: 'pending' } }), message(2), message(3, { update: { id: 'u8', status: 'done' } })];
+  await withLive(messages, async (live, outDir) => {
+    await runOnce({ settings: settings(live), outDir, logger: quiet });
+    await assert.rejects(saveReason({ settings: settings(live), outDir, messageId: oid(1), reason: '', logger: quiet }), /in English/);
+    await saveReason({ settings: settings(live), outDir, messageId: oid(1), reason: 'Waiting for the courier API keys to be set up on live.', logger: quiet });
+    await saveReason({ settings: settings(live), outDir, messageId: oid(2), reason: 'Queued after the label work.', logger: quiet });
+    const tasks = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+    assert.match(tasks, /- Reason: Waiting for the courier API keys to be set up on live\.\n- Message id: 000000000000000000000001/);
+    const writes = () => live.seen.filter((r) => r.method === 'PATCH' && r.body.action === 'reason').map((r) => r.body);
+    assert.deepEqual(writes(), [{ action: 'reason', stage: 'not_started', reason: 'Waiting for the courier API keys to be set up on live.' }], 'the untracked message is not tracked just for a reason');
+
+    const result = await syncReasons({ settings: settings(live), outDir, logger: quiet });
+    assert.deepEqual(result, { saved: [oid(1)], skipped: [oid(2), oid(3)] }, 'a live update already done is left alone');
+    assert.equal(writes().length, 2);
+  });
 });

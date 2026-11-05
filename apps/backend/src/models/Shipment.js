@@ -11,6 +11,7 @@ const shipmentSchema = new mongoose.Schema({
   warehouseCode: { type: String, default: 'WH-001' },
   shopifyFulfillmentId: { type: String, default: '' },
   labelPdf: { type: Buffer, default: null },
+  channelPackageId: { type: String, default: '' },
   reserveReleased: { type: Boolean, default: false },
   bookedAt: { type: Date },
   cancelledAt: { type: Date },

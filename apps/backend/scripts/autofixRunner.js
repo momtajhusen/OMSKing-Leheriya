@@ -97,7 +97,7 @@ function fixSteps(id, buildDir, nearby = null) {
     '   - If the task message alone is enough to understand and fix it, fix it directly and ask nothing.',
     `   - Only if it is not enough, read the nearby messages:\n${nearbyLines(nearby)}`,
     '     The requirement may be split over them or said slightly earlier; use what they add.',
-    `   - Still not enough after them: npm run report-inbox -- --unclear ${id} --need "<what is unclear>" --options "<option 1> | <option 2>" --from <developer|client>`
+    `   - Still not enough after them: npm run report-inbox -- --unclear ${id} --need "<what is unclear>" --need-hi "${NEED_HI}" --options "<option 1> | <option 2>" --from <developer|client>`
     + ' (2-3 concrete options; developer = a decision about the code or product, client = information only the client has). That shows a form to the developer with this context. Then go on with the next step below. Never guess and never leave the task In progress.',
     '   - Read the task, its notes and its collapsed blocks in client-reports/TASKS.md, and look at every media file it links in client-reports/media: open each screenshot, and for a video open its "Video frames" folder (still frames of the video). Then read the relevant code. Write a failing automated test first, then the smallest fix.',
     '   - A voice note cannot be listened to. If the task depends on what a voice note says, do not guess: run npm run report-inbox -- --unclear <task id> --need "what the voice note says" --options "I will type it here | Ask the client to write it" --from developer, then go on with the next step below.',
@@ -108,13 +108,16 @@ function fixSteps(id, buildDir, nearby = null) {
     + ' (each a single line in short Hinglish (Hindi words in English letters, not Devanagari, not pure English), e.g. --issue "Inventory page load nahi ho raha tha" --fix "Inventory API halki ki, ab page jaldi khulta hai"; it shows on the message\'s detail icon),',
     `     and add "- Status: Fixed and verified <date> — <what was checked>; made by Auto-fix, apply it with the header Apply fix button; local only, not deployed" to that task.`,
     '     In this Auto-fix copy that sets the task to Awaiting apply: it becomes Complete only when the developer applies the change. Do not mark it again.',
+    `   - If a test or check fails, or testing needs something you do not have (data, a sample file, a decision, an answer), and only the developer or the client can give it: do not mark it failed. Ask for it in the same input form: npm run report-inbox -- --unclear ${id} --need "<what is needed>" --need-hi "${NEED_HI}" --options "<option 1> | <option 2>" --from <developer|client> --during testing, undo your unfinished changes for it, then go on with the next step below.`,
     `   - Still failing after one retry with a different approach: undo your changes for it, run --mark failed ${id} and add a "- Status:" line with the reason.`,
   ].join('\n');
 }
 
+const NEED_HI = '<the same need in short Hinglish: Hindi words in English letters>';
+
 function askOrNext(id, next) {
   return [
-    `   - If the fix needs something only the client can give (information, a file, a screenshot, a decision), do not guess: run npm run report-inbox -- --ask ${id} --need "<what is needed>" --question "<one short, polite question in simple English>". It marks the task Waiting for client and asks the client as a reply to their message.`,
+    `   - If the fix needs something only the client can give (information, a file, a screenshot, a decision), do not guess: run npm run report-inbox -- --ask ${id} --need "<what is needed>" --need-hi "${NEED_HI}" --question "<one short, polite question in simple English>". It marks the task Waiting for client and asks the client as a reply to their message.`,
     `   - Never ask the client for passwords, API keys or other secrets: mark that task blocked instead (--mark blocked ${id}, with a "- Status: Blocked — <what is needed>" line). Anything else you cannot get, like a live action, is blocked too.`,
     next ? `   - After asking or blocking, do not stop: fix task ${next.messageId} ("${next.message}") instead, with the same steps; if that one also needs the client, ask and stop.` : '   - After asking or blocking, stop: there is no other pending task.',
   ].join('\n');

@@ -69,7 +69,7 @@ const useReturnsStore = create(persist((set, get) => ({
   loadReturns: async () => {
     try {
       const { data } = await api.get('/returns');
-      const apiRows = (data.data || []).map((row) => withDefaults({ ...row, source: 'api', type: 'customer_return' }));
+      const apiRows = (data.data || []).map((row) => withDefaults({ ...row, source: 'api', type: row.type || 'customer_return' }));
       const local = get().returns.filter((row) => row.source !== 'api');
       set({ returns: [...apiRows, ...local] });
     } catch (err) {
@@ -133,25 +133,30 @@ const useReturnsStore = create(persist((set, get) => ({
     get().patchReturn(id, { status: 'Rejected' });
   },
 
-  markReceived: async (id, { warehouse, action, destination } = {}) => {
+  markReceived: async (id, { warehouse, action, destination, qcNote = '' } = {}) => {
     const row = get().returns.find((item) => item.id === id);
     if (!row) return null;
     const dest = destination || row.restockDestination || 'All';
+    if (row.source === 'api') {
+      try {
+        await api.post(`/returns/${encodeURIComponent(id)}/receive`, { destination: action === 'restock' ? dest : 'None', action, qcNote });
+      } catch (err) {
+        return { error: apiError(err, 'Could not save the return') };
+      }
+      await get().loadReturns();
+      return get().returns.find((item) => item.id === id);
+    }
     if (action === 'restock' && dest !== 'None') {
       try {
-        if (row.source === 'api') {
-          await api.post(`/returns/${encodeURIComponent(id)}/receive`, { destination: dest, action: 'restock' });
-        } else {
-          await api.post('/returns/approve-restock', {
-            returnId: id,
-            referenceId: id,
-            destination: dest,
-            movementType: 'return_restock',
-            warehouseCode: warehouse || 'WH-001',
-            items: (row.items || []).map((item) => ({ sku: item.sku, qty: item.qty || 1 })),
-            reason: `Return ${id} received`,
-          });
-        }
+        await api.post('/returns/approve-restock', {
+          returnId: id,
+          referenceId: id,
+          destination: dest,
+          movementType: 'return_restock',
+          warehouseCode: warehouse || 'WH-001',
+          items: (row.items || []).map((item) => ({ sku: item.sku, qty: item.qty || 1 })),
+          reason: `Return ${id} received`,
+        });
       } catch (err) {
         return { error: apiError(err, 'Restock failed') };
       }
@@ -162,6 +167,26 @@ const useReturnsStore = create(persist((set, get) => ({
       receiveAction: action,
       restockDestination: dest,
     });
+    return get().returns.find((item) => item.id === id);
+  },
+
+  saveClaim: async (id, body) => {
+    try {
+      await api.patch(`/returns/${encodeURIComponent(id)}/claim`, body);
+    } catch (err) {
+      return { error: apiError(err, 'Could not save the claim') };
+    }
+    await get().loadReturns();
+    return get().returns.find((item) => item.id === id);
+  },
+
+  saveRefund: async (id, body) => {
+    try {
+      await api.patch(`/returns/${encodeURIComponent(id)}/refund`, body);
+    } catch (err) {
+      return { error: apiError(err, 'Could not save the refund status') };
+    }
+    await get().loadReturns();
     return get().returns.find((item) => item.id === id);
   },
 }), {

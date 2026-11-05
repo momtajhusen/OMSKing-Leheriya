@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const { spawn: spawnProcess, execFile } = require('child_process');
 const {
-  planAutofix, taskStatus, taskSummaries, completeApplied, discardRun, reconcileApplied, inputRequests, provideInput, askClient, taskArea, SCOPE_STATUSES, statusCounts, runTasks, pendingQueue,
+  planAutofix, taskStatus, taskSummaries, completeApplied, discardRun, reconcileApplied, inputRequests, provideInput, askClient, taskArea, SCOPE_STATUSES, statusCounts, runTasks, pendingQueue, taskReasons,
 } = require('../../scripts/reportInbox');
 
 const RUNNER = path.resolve(__dirname, '../../scripts/autofixRunner.js');
@@ -125,6 +125,10 @@ function createReportAutofix({
 
   router.get('/summaries', (req, res) => {
     res.json({ success: true, data: taskSummaries(tasksText()) });
+  });
+
+  router.get('/reasons', (req, res) => {
+    res.json({ success: true, data: taskReasons(tasksText()) });
   });
 
   router.get('/queue', (req, res) => {

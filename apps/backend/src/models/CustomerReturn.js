@@ -18,6 +18,20 @@ const customerReturnSchema = new mongoose.Schema({
   },
   restockDestination: { type: String, default: '' },
   labelAwb: { type: String, default: '' },
+  kind: { type: String, enum: ['customer', 'rto'], default: 'customer' },
+  qcStatus: { type: String, enum: ['pending', 'pass', 'fail', 'hold'], default: 'pending' },
+  qcNote: { type: String, default: '' },
+  refundStatus: { type: String, enum: ['not_due', 'pending', 'refunded', 'rejected'], default: 'pending' },
+  refundAmount: { type: Number, default: 0 },
+  claim: {
+    type: { type: String, enum: ['', 'safet', 'myntra'], default: '' },
+    status: { type: String, enum: ['none', 'to_file', 'filed', 'approved', 'rejected'], default: 'none' },
+    claimId: { type: String, default: '' },
+    amount: { type: Number, default: 0 },
+    note: { type: String, default: '' },
+    filedAt: { type: Date, default: null },
+    settledAt: { type: Date, default: null },
+  },
 }, { timestamps: true, collection: 'customer_returns' });
 
 customerReturnSchema.index({ tenantId: 1, returnNo: 1 }, { unique: true });

@@ -159,6 +159,7 @@ test('one Amazon order stores marketplace tracking and never calls Delhivery', a
     channel: 'Amazon',
     externalOrderId: '902-1',
     source: 'channel_api',
+    items: [{ sku: 'KURTA-1', qty: 1, pack: { weightKg: 0.5, lengthCm: 30, breadthCm: 20, heightCm: 5 } }],
   });
   let delhiveryCalls = 0;
   const amazonCalls = [];
@@ -167,7 +168,8 @@ test('one Amazon order stores marketplace tracking and never calls Delhivery', a
     amazonRequest: async (method, url) => {
       amazonCalls.push(url);
       if (url.includes('/auth/o2/token')) return { status: 200, text: JSON.stringify({ access_token: 'tok' }) };
-      return { status: 200, text: JSON.stringify({ trackingDetails: { trackingId: 'AMZ-TRACK-9' } }) };
+      if (url.includes('/easyShip/2022-03-23/timeSlot')) return { status: 200, text: JSON.stringify({ timeSlots: [{ slotId: 'SLOT-1', startTime: '2026-11-06T04:30:00Z', endTime: '2026-11-06T08:30:00Z', handoverMethod: 'PICKUP' }] }) };
+      return { status: 200, text: JSON.stringify({ scheduledPackages: [{ scheduledPackageId: { amazonOrderId: '902-1', packageId: 'PKG-1' }, trackingDetails: { trackingId: 'AMZ-TRACK-9' } }] }) };
     },
     delhiveryRequest: async () => { delhiveryCalls += 1; },
   });

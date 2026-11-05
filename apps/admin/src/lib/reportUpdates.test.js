@@ -119,8 +119,8 @@ test('on localhost the client chat also gets the developer marks, sent through t
 });
 
 test('the chat filters keep messages by status or by who made the last mark', () => {
-  assert.deepEqual(CHAT_FILTERS.map((f) => f.id), ['all', 'pending', 'progress', 'fixed', 'developer', 'client']);
-  assert.deepEqual(CHAT_FILTERS.map((f) => f.label), ['All', 'Pending', 'In progress', 'Complete', 'Developer', 'Client']);
+  assert.deepEqual(CHAT_FILTERS.map((f) => f.id), ['all', 'pending', 'progress', 'waiting', 'input', 'blocked', 'fixed', 'developer', 'client']);
+  assert.deepEqual(CHAT_FILTERS.map((f) => f.label), ['All', 'Pending', 'In progress', 'Waiting for client', 'Needs input', 'Blocked', 'Complete', 'Developer', 'Client']);
   const plain = { id: '1', side: 'tenant', text: 'hi', update: null };
   const open = { id: '2', side: 'tenant', update: { status: 'in_progress', markedBy: 'platform' } };
   const fixed = { id: '3', side: 'tenant', update: { status: 'done', markedBy: 'platform' } };
@@ -139,8 +139,8 @@ test('the chat filters keep messages by status or by who made the last mark', ()
   assert.deepEqual(ids('client'), ['4', '5']);
 });
 
-test('marks live on each message: no Updates tab, cards or pending bar, just a scrolling filter row', () => {
-  assert.doesNotMatch(chat, /UpdatesBoard|role="tablist"|pendingSummary|Still open/);
+test('marks live on each message: no old updates board or pending bar, just a scrolling filter row', () => {
+  assert.doesNotMatch(chat, /UpdatesBoard|pendingSummary|Still open/);
   assert.doesNotMatch(inbox, /UpdatesBoard|AllUpdatesPane|all-updates/);
   assert.ok(!fs.existsSync(new URL('../components/report/UpdatesBoard.jsx', import.meta.url)));
   assert.match(chat, /CHAT_FILTERS/);
@@ -222,7 +222,7 @@ test('each chat filter shows the count of the whole chat from the server', () =>
   assert.equal(filterCount(counts, 'client'), 0);
   assert.equal(filterCount(null, 'pending'), null, 'an older server sends no counts: no number shown');
   assert.match(chat, /meta\?\.counts/);
-  assert.match(chat, /filterCount\(counts, f\.id\)/);
+  assert.match(chat, /chipCount\(counts, f\.id, localTally\)/, 'chipCount uses filterCount, with the local tally for stage chips');
 });
 
 test('chat search matches the message text, sender, file name and task title, ignoring case and extra spaces', async () => {
@@ -244,4 +244,76 @@ test('the chat has a search box that filters the messages and loads older pages 
   assert.match(pane, /aria-label="Search messages"/);
   assert.match(pane, /matchesSearch\(m, search\)/);
   assert.match(pane, /if \(search\.trim\(\) && hasMore && !loadingOlder\) loadOlder\(\);/);
+});
+
+test('an open message says why it is not done in Hinglish: the local Hinglish line first, then the live reason, then a Hinglish default', async () => {
+  const { openStatus } = await import('./reportUpdates.js');
+  const tenant = (update, extra = {}) => ({ id: 'm1', side: 'tenant', text: 'x', update, ...extra });
+  assert.deepEqual(
+    openStatus(tenant({ status: 'in_progress', stage: 'waiting_client', reason: 'Waiting for the client: Easy Ship or Self Ship?' })),
+    { stage: 'waiting_client', label: 'Waiting for client', reason: 'Waiting for the client: Easy Ship or Self Ship?' },
+  );
+  assert.equal(
+    openStatus(
+      tenant({ status: 'in_progress', stage: 'needs_input', reason: 'Needs a decision from the developer: which way?' }),
+      { stage: 'needs_input', reason: 'Needs a decision from the developer: which way?', reasonHi: 'Amazon label kaise kaam kare?' },
+    ).reason,
+    'Amazon label kaise kaam kare?',
+    'the Hinglish line from the task list wins over the English live reason',
+  );
+  assert.equal(
+    openStatus(tenant({ status: 'pending', stage: '', reason: '' }), { stage: 'blocked', reason: 'Blocked: needs live job errors' }).reason,
+    'Blocked: needs live job errors',
+  );
+  assert.equal(openStatus(tenant({ status: 'in_progress' })).reason, 'Developer is par kaam kar raha hai.');
+  assert.equal(openStatus(tenant({ status: 'pending' })).label, 'Not started');
+  assert.equal(openStatus(tenant(null)), null, 'a client message nobody tracks gets no panel');
+  assert.equal(openStatus(tenant({ status: 'done' }), { stage: 'working', reason: 'x' }), null, 'done messages have no pending reason');
+  assert.equal(openStatus(tenant({ status: 'pending' }, { event: { action: 'start' } })), null);
+  assert.equal(openStatus(tenant({ status: 'pending' }, { pending: true })), null, 'not while it is still sending');
+});
+
+test('the default reasons are Hinglish (English letters, no Devanagari)', async () => {
+  const { STAGE_META } = await import('./reportUpdates.js');
+  Object.values(STAGE_META).forEach(({ reason }) => assert.doesNotMatch(reason, /[\u0900-\u097F]/));
+  assert.equal(STAGE_META.needs_input.reason, 'Kaam aage badhane se pehle ek decision chahiye.');
+});
+
+test('chat filters split open messages into Pending, In progress, Waiting for client, Needs input and Blocked', async () => {
+  const { CHAT_FILTERS, chipCount, matchesFilter, stageCounts } = await import('./reportUpdates.js');
+  assert.deepEqual(CHAT_FILTERS.map((f) => f.label), ['All', 'Pending', 'In progress', 'Waiting for client', 'Needs input', 'Blocked', 'Complete', 'Developer', 'Client']);
+  const waiting = { side: 'tenant', update: { status: 'in_progress', stage: 'waiting_client' } };
+  const working = { side: 'tenant', update: { status: 'in_progress', stage: 'working' } };
+  const untracked = { side: 'tenant', update: null };
+  assert.equal(matchesFilter(waiting, 'waiting'), true);
+  assert.equal(matchesFilter(waiting, 'progress'), false, 'held by the client, so not In progress');
+  assert.equal(matchesFilter(working, 'progress'), true);
+  assert.equal(matchesFilter(untracked, 'pending'), true);
+  assert.equal(matchesFilter(untracked, 'blocked', { stage: 'blocked' }), true, 'the local task list knows the stage before the live server does');
+  assert.equal(matchesFilter(untracked, 'pending', { stage: 'blocked' }), false);
+  assert.equal(matchesFilter({ side: 'tenant', update: { status: 'done', stage: '' } }, 'blocked', { stage: 'blocked' }), false);
+
+  const tally = stageCounts({ a: { stage: 'waiting_client' }, b: { stage: 'waiting_client' }, c: { stage: 'blocked' }, d: { stage: 'working' } });
+  assert.deepEqual(tally, { waiting: 2, input: 0, blocked: 1 });
+  assert.equal(chipCount({ waiting: 0, input: 0, blocked: 0, pending: 5 }, 'waiting', tally), 2, 'an older live server sends no stages: use the local tally');
+  assert.equal(chipCount({ waiting: 4, input: 0, blocked: 0 }, 'waiting', tally), 4, 'the live count wins once it knows stages');
+  assert.equal(chipCount({ pending: 5 }, 'pending', tally), 5);
+  assert.equal(chipCount(null, 'pending', tally), null);
+});
+
+test('each open message shows its status and Hinglish reason in a panel that starts closed, with a reply box for that message', () => {
+  const bubble = fs.readFileSync(new URL('../components/report/MessageBubble.jsx', import.meta.url), 'utf8');
+  assert.match(bubble, /function OpenStatusPanel\(/);
+  assert.match(bubble, /const \[expanded, setExpanded\] = useState\(false\);/);
+  assert.match(bubble, /aria-expanded=\{expanded\}/);
+  assert.match(bubble, /\{expanded \? 'Reason chhupayein' : 'Kyun\?'\}/);
+  assert.match(bubble, /placeholder="Is message ka reply likhein…"/);
+  assert.match(bubble, /aria-label="Reply to this message"/);
+  assert.match(bubble, /\{open && <OpenStatusPanel/);
+  const pane = fs.readFileSync(new URL('../components/report/ChatPane.jsx', import.meta.url), 'utf8');
+  assert.match(pane, /const reasons = useTaskReasons\(\);/);
+  assert.match(pane, /matchesFilter\(m, filter, reasons\[m\.id\]\)/);
+  assert.match(pane, /open=\{openStatus\(m, reasons\[m\.id\]\)\}/);
+  assert.match(pane, /onQuickReply=\{\(m, body\) => sendOne\(\{ body, reply: quoteOf\(m\) \}\)\}/);
+  assert.match(pane, /chipCount\(counts, f\.id, localTally\)/);
 });

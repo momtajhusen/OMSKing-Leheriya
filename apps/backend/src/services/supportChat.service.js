@@ -86,6 +86,8 @@ function toDto(row, viewerId, quotes = new Map(), updates = new Map()) {
       fix: update.fix || '',
       area: update.area || '',
       check: update.check || '',
+      stage: update.stage || '',
+      reason: update.reason || '',
     } : null,
     event: row.event?.action ? {
       action: row.event.action,
@@ -101,14 +103,14 @@ function toDto(row, viewerId, quotes = new Map(), updates = new Map()) {
 
 /** The side that last set the status; renames do not count as a mark. */
 function markedBy(update) {
-  const marks = (update.history || []).filter((h) => h.action !== 'rename' && h.action !== 'summary');
+  const marks = (update.history || []).filter((h) => !['rename', 'summary', 'reason'].includes(h.action));
   return marks.length ? marks[marks.length - 1].side : null;
 }
 
 async function updatesFor(tenantId, rows) {
   const ids = [...new Set(rows.filter((r) => r.updateId).map((r) => String(r.updateId)))];
   if (!ids.length) return new Map();
-  const found = await SupportUpdate.find({ tenantId, _id: { $in: ids } }).select('title status issue fix area check history.action history.side').lean();
+  const found = await SupportUpdate.find({ tenantId, _id: { $in: ids } }).select('title status issue fix area check stage reason history.action history.side').lean();
   return new Map(found.map((u) => [String(u._id), u]));
 }
 
@@ -126,19 +128,26 @@ async function quotesFor(tenantId, rows) {
   return new Map(found.map((q) => [String(q._id), q]));
 }
 
+/** Open updates held by someone else go under their own chat filter instead of Pending / In progress. */
+const STAGE_FILTER = { waiting_client: 'waiting', needs_input: 'input', blocked: 'blocked' };
+
 /** Filter counts over the whole chat, matching the admin chat filters: every client message is Pending until work starts. */
 async function messageCounts(tenantId) {
   const [rows, updates] = await Promise.all([
     SupportMessage.find({ tenantId, deletedAt: null, 'event.action': null }).select('side updateId').lean(),
-    SupportUpdate.find({ tenantId }).select('status history.action history.side').lean(),
+    SupportUpdate.find({ tenantId }).select('status stage history.action history.side').lean(),
   ]);
   const byId = new Map(updates.map((u) => [String(u._id), u]));
-  const counts = { all: rows.length, pending: 0, progress: 0, fixed: 0, developer: 0, client: 0 };
+  const counts = {
+    all: rows.length, pending: 0, progress: 0, waiting: 0, input: 0, blocked: 0, fixed: 0, developer: 0, client: 0,
+  };
   for (const row of rows) {
     const update = row.updateId && byId.get(String(row.updateId));
-    if (update ? update.status === 'pending' : row.side === 'tenant') counts.pending += 1;
+    const held = update && !['done', 'confirmed'].includes(update.status) && STAGE_FILTER[update.stage];
+    if (held) counts[held] += 1;
+    else if (update ? update.status === 'pending' : row.side === 'tenant') counts.pending += 1;
     if (!update) continue;
-    if (update.status === 'in_progress') counts.progress += 1;
+    if (update.status === 'in_progress' && !held) counts.progress += 1;
     if (['done', 'confirmed'].includes(update.status)) counts.fixed += 1;
     const by = markedBy(update);
     if (by === 'platform') counts.developer += 1;

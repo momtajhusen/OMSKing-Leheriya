@@ -261,7 +261,9 @@ test('the localhost client chat adds whole-chat filter counts when the live serv
     const first = await (await fetch(`${local.url}/messages?limit=2`)).json();
     assert.deepEqual(first.data.map((m) => m.id), ['m07', 'm08'], 'the page itself is unchanged');
     assert.equal(first.meta.hasMore, true);
-    assert.deepEqual(first.meta.counts, { all: 6, pending: 2, progress: 1, fixed: 2, developer: 2, client: 2 });
+    assert.deepEqual(first.meta.counts, {
+      all: 6, pending: 2, progress: 1, waiting: 0, input: 0, blocked: 0, fixed: 2, developer: 2, client: 2,
+    });
 
     const pages = live.seen.filter((r) => r.url.startsWith('/api/v1/support/messages')).length;
     await fetch(`${local.url}/messages?limit=2`);
@@ -274,5 +276,20 @@ test('the localhost client chat adds whole-chat filter counts when the live serv
 
     const older = await (await fetch(`${local.url}/messages?limit=2&before=m07`)).json();
     assert.equal(older.meta.counts, undefined, 'older pages are not recounted');
+  });
+});
+
+test('the proxy counts open messages held by the client, a decision or a blocker under their own chat filters', () => {
+  const { countMessages } = require('../src/services/supportLiveProxy');
+  const counts = countMessages([
+    { side: 'tenant', update: null },
+    { side: 'tenant', update: { status: 'pending', stage: 'waiting_client', markedBy: 'platform' } },
+    { side: 'tenant', update: { status: 'in_progress', stage: 'needs_input', markedBy: 'platform' } },
+    { side: 'tenant', update: { status: 'pending', stage: 'blocked', markedBy: 'platform' } },
+    { side: 'tenant', update: { status: 'in_progress', stage: 'working', markedBy: 'platform' } },
+    { side: 'tenant', update: { status: 'done', stage: '', markedBy: 'platform' } },
+  ]);
+  assert.deepEqual(counts, {
+    all: 6, pending: 1, progress: 1, waiting: 1, input: 1, blocked: 1, fixed: 1, developer: 5, client: 0,
   });
 });

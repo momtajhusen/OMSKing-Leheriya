@@ -36,6 +36,7 @@ async function ingestReturns(tenantId, rows = []) {
       channel: row.channel || order.channel,
       status: 'Pending',
       reason: row.reason || '',
+      kind: returnKind(row),
       items: (row.items || order.items || []).map((item) => ({
         sku: item.sku || '',
         qty: item.qty || 1,
@@ -45,6 +46,32 @@ async function ingestReturns(tenantId, rows = []) {
   }
   const after = await Order.countDocuments({ tenantId });
   return { saved: saved.length, createdOrder: after !== before };
+}
+
+const RTO_HINT = /\bRTO\b|return to origin|undeliver/i;
+
+function returnKind(row) {
+  if (row.kind === 'rto' || row.kind === 'customer') return row.kind;
+  return RTO_HINT.test(`${row.reason || ''} ${row.type || ''}`) ? 'rto' : 'customer';
+}
+
+/** Marketplace claim for a damaged return: Amazon = SAFE-T, Myntra = Myntra claim; other channels have none. */
+function claimTypeOf(channel) {
+  const name = String(channel || '').toLowerCase();
+  if (name === 'amazon') return 'safet';
+  if (name === 'myntra') return 'myntra';
+  return '';
+}
+
+function claimView(row) {
+  const claim = row.claim || {};
+  return {
+    type: claim.type || claimTypeOf(row.channel),
+    status: claim.status || 'none',
+    claimId: claim.claimId || '',
+    amount: claim.amount || 0,
+    note: claim.note || '',
+  };
 }
 
 function withReturnImage(item, bySku) {
@@ -74,7 +101,13 @@ async function listReturns(tenantId) {
     orderId: row.orderNo,
     reason: row.reason,
     status: row.status,
-    type: 'customer_return',
+    type: row.kind === 'rto' ? 'rto' : 'customer_return',
+    kind: row.kind || 'customer',
+    qcStatus: row.qcStatus || 'pending',
+    qcNote: row.qcNote || '',
+    refundStatus: row.refundStatus || 'pending',
+    refundAmount: row.refundAmount || 0,
+    claim: claimView(row),
     channel: row.channel,
     items: (row.items || []).map((item) => withReturnImage(item, bySku)),
     restockDestination: row.restockDestination,
@@ -124,7 +157,7 @@ async function approveReturn(tenantId, returnNo, deps = {}) {
   return row;
 }
 
-async function receiveReturn(tenantId, userId, returnNo, { destination = 'All', action = 'restock' } = {}) {
+async function receiveReturn(tenantId, userId, returnNo, { destination = 'All', action = 'restock', qcNote = '' } = {}) {
   const row = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
   if (!row) throw new HttpError(404, 'Return not found');
   if (row.status === 'Pending') throw new HttpError(400, 'Approve the return before receiving it');
@@ -143,6 +176,12 @@ async function receiveReturn(tenantId, userId, returnNo, { destination = 'All', 
   }
   row.status = 'Completed';
   row.restockDestination = destination;
+  row.qcStatus = action === 'damaged' ? 'fail' : action === 'hold' ? 'hold' : 'pass';
+  row.qcNote = String(qcNote || '').trim().slice(0, 500);
+  const claimType = claimTypeOf(row.channel);
+  if (row.qcStatus === 'fail' && claimType && (!row.claim?.status || row.claim.status === 'none')) {
+    row.claim = { ...(row.claim?.toObject ? row.claim.toObject() : row.claim || {}), type: claimType, status: 'to_file' };
+  }
   await row.save();
   const { notifyEventEmail } = require('./notify.service');
   await notifyEventEmail(tenantId, 'NOT-006', {
@@ -153,7 +192,42 @@ async function receiveReturn(tenantId, userId, returnNo, { destination = 'All', 
   return { row, restock };
 }
 
+const CLAIM_STATUSES = ['none', 'to_file', 'filed', 'approved', 'rejected'];
+const REFUND_STATUSES = ['not_due', 'pending', 'refunded', 'rejected'];
+
+async function updateClaim(tenantId, returnNo, { status, claimId, amount, note } = {}) {
+  const row = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
+  if (!row) throw new HttpError(404, 'Return not found');
+  const type = claimTypeOf(row.channel);
+  if (!type) throw new HttpError(400, 'Claims are only for Amazon (SAFE-T) and Myntra returns.');
+  if (!CLAIM_STATUSES.includes(status)) throw new HttpError(400, 'Unknown claim status');
+  const claim = row.claim?.toObject ? row.claim.toObject() : { ...(row.claim || {}) };
+  if (claimId !== undefined) claim.claimId = String(claimId || '').trim().slice(0, 80);
+  if (status === 'filed' && !claim.claimId) {
+    throw new HttpError(400, `Enter the ${type === 'safet' ? 'SAFE-T claim ID' : 'Myntra claim ID'} from the portal.`);
+  }
+  if (amount !== undefined) claim.amount = Math.max(0, Number(amount) || 0);
+  if (note !== undefined) claim.note = String(note || '').trim().slice(0, 500);
+  if (status === 'filed' && !claim.filedAt) claim.filedAt = new Date();
+  if (status === 'approved' || status === 'rejected') claim.settledAt = new Date();
+  row.claim = { ...claim, type, status };
+  await row.save();
+  return row;
+}
+
+async function updateRefund(tenantId, returnNo, { status, amount } = {}) {
+  const row = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
+  if (!row) throw new HttpError(404, 'Return not found');
+  if (!REFUND_STATUSES.includes(status)) throw new HttpError(400, 'Unknown refund status');
+  row.refundStatus = status;
+  if (amount !== undefined) row.refundAmount = Math.max(0, Number(amount) || 0);
+  await row.save();
+  return row;
+}
+
 module.exports = {
+  updateClaim,
+  updateRefund,
   ingestReturns,
   listReturns,
   approveReturn,

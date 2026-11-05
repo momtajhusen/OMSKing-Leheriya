@@ -384,3 +384,38 @@ test('the first chat page carries the filter counts of the whole chat, for this 
   const older = await api('GET', `/api/v1/support/messages?limit=1&before=${tracked.body.data.id}`, { token: ownerToken });
   assert.equal(older.body.meta.counts, undefined, 'older pages do not recount');
 });
+
+test('an open update carries why it is waiting (stage + English reason) that the client chat shows and the filters count', async () => {
+  const counts = async () => (await api('GET', '/api/v1/support/messages?limit=1', { token: ownerToken })).body.meta.counts;
+  const before = await counts();
+  const sent = await api('POST', '/api/v1/support/messages', {
+    token: ownerToken, form: textForm({ text: 'Amazon labels are not generated', trackAsUpdate: 'true' }),
+  });
+  const updateId = sent.body.data.update.id;
+  const mark = (json, token = platformToken) => api('PATCH', `/api/v1/support/threads/${leheriya._id}/updates/${updateId}`, { token, json });
+  const why = { action: 'reason', stage: 'waiting_client', reason: 'Waiting for the client: do you ship Amazon orders with Easy Ship or Self Ship?' };
+
+  const merchantTry = await api('PATCH', `/api/v1/support/updates/${updateId}`, { token: ownerToken, json: why });
+  assert.equal(merchantTry.status, 403, 'only the OMSKing team writes the reason');
+  assert.equal((await mark({ ...why, stage: 'sleeping' })).status, 400, 'unknown stage');
+  assert.equal((await mark({ ...why, reason: 'x'.repeat(401) })).status, 400);
+  const saved = await mark(why);
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.data.status, 'pending', 'a reason does not change the status');
+
+  const chat = await api('GET', '/api/v1/support/messages', { token: ownerToken });
+  const source = chat.body.data.find((m) => m.id === sent.body.data.id);
+  assert.equal(source.update.stage, 'waiting_client');
+  assert.equal(source.update.reason, why.reason);
+  assert.equal(source.update.markedBy, 'tenant', 'the reason is not a status mark');
+  assert.equal(chat.body.data.filter((m) => m.event?.action === 'reason').length, 0, 'no status label is posted for it');
+
+  const after = await counts();
+  assert.equal(after.waiting - (before.waiting || 0), 1, 'counted under Waiting for client');
+  assert.equal(after.pending - before.pending, 0, 'and not under Pending any more');
+
+  await mark({ action: 'complete' });
+  assert.equal((await mark(why)).status, 400, 'a completed update has no pending reason');
+  const done = (await api('GET', '/api/v1/support/messages', { token: ownerToken })).body.data.find((m) => m.id === sent.body.data.id);
+  assert.deepEqual([done.update.stage, done.update.reason], ['', ''], 'completing clears the reason');
+});

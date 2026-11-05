@@ -392,38 +392,123 @@ async function pushInventory(creds, opts = {}) {
   return { sku: sellerSku, quantity: qty };
 }
 
-async function confirmShipment(creds, opts = {}) {
+function httpsBinary(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { family: 4, timeout: 30000 }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) reject(new Error(`Amazon label download returned ${res.statusCode}`));
+        else resolve(Buffer.concat(chunks));
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Timed out downloading the Amazon label'));
+    });
+    req.on('error', reject);
+  });
+}
+
+const EASY_SHIP = '/easyShip/2022-03-23';
+const PICKED_UP = ['PickedUp', 'Delivered', 'Damaged', 'LostInTransit', 'ReturnedToSeller', 'Undeliverable'];
+
+const SANDBOX_REAL_ORDER = 'Amazon sandbox cannot make a label for a real order. It only answers Amazon test examples, so nothing was booked. Switch Amazon to Live in Settings › Channels to make real Easy Ship labels.';
+
+function easyShipError(what, res, sandbox = false) {
+  const sandboxMiss = sandbox && res.status === 400 && /Could not match input arguments/i.test(res.text || '');
+  const err = new Error(sandboxMiss ? SANDBOX_REAL_ORDER : `Amazon Easy Ship ${what} returned ${res.status}. ${lwaDetail(res.text) || 'Nothing was saved.'}`);
+  err.statusCode = res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404 ? 400 : 502;
+  err.terminal = err.statusCode === 400;
+  return err;
+}
+
+function packageView(pkg) {
+  if (!pkg) return null;
+  const slot = pkg.packageTimeSlot || {};
+  return {
+    amazonOrderId: String(pkg.scheduledPackageId?.amazonOrderId || ''),
+    packageId: String(pkg.scheduledPackageId?.packageId || ''),
+    trackingId: String(pkg.trackingDetails?.trackingId || '').trim(),
+    status: String(pkg.packageStatus || ''),
+    pickedUp: PICKED_UP.includes(pkg.packageStatus),
+    slot: { slotId: slot.slotId || '', start: slot.startTime || null, end: slot.endTime || null, handover: slot.handoverMethod || '' },
+  };
+}
+
+/**
+ * Easy Ship for one batch of work on one Amazon token: pickup slots, scheduling a package (with its label documents),
+ * looking a package up, moving it to another slot, and downloading the label from Amazon S3.
+ */
+async function easyShip(creds, opts = {}) {
   assertAmazonCreds(creds);
   const request = amazonRequest(creds, opts.request);
-  const { amazonOrderId } = opts;
+  const download = gatedRequest(creds, opts.download, httpsBinary, { allowSandbox: true });
   const token = await accessToken(creds, request);
-  const marketplaceId = apiModeOf(creds) === 'sandbox'
-    ? 'ATVPDKIKX0DER'
-    : String(creds.marketplaceId || 'A21TJRUUN4KGV').trim();
-  const res = await request(
-    'POST',
-    `${amazonHost(creds)}/easyShip/2022-03-23/package`,
-    {
-      headers: {
-        'x-amz-access-token': token,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: {
-        amazonOrderId: String(amazonOrderId || ''),
+  const sandbox = apiModeOf(creds) === 'sandbox';
+  const marketplaceId = sandbox ? 'ATVPDKIKX0DER' : String(creds.marketplaceId || 'A21TJRUUN4KGV').trim();
+  const call = async (method, path, body) => {
+    const res = await request(method, `${amazonHost(creds)}${EASY_SHIP}${path}`, {
+      headers: { 'x-amz-access-token': token, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { body } : {}),
+    });
+    let json = {};
+    try { json = JSON.parse(res.text || '{}'); } catch { json = {}; }
+    return { res, json };
+  };
+
+  return {
+    async slots(amazonOrderId, { weightGrams, lengthCm, breadthCm, heightCm }) {
+      const { res, json } = await call('POST', '/timeSlot', {
         marketplaceId,
-      },
+        amazonOrderId,
+        packageDimensions: { length: lengthCm, width: breadthCm, height: heightCm, unit: 'cm' },
+        packageWeight: { value: weightGrams, unit: 'g' },
+      });
+      if (res.status < 200 || res.status >= 300) throw easyShipError('pickup slots', res, sandbox);
+      return (json.timeSlots || []).filter((slot) => slot?.slotId);
     },
-  );
-  const body = (() => { try { return JSON.parse(res.text || '{}'); } catch { return {}; } })();
-  const trackingNumber = String(body.trackingDetails?.trackingId || body.trackingId || '').trim();
-  if (res.status < 200 || res.status >= 300 || !trackingNumber) {
-    const err = new Error(`Amazon ship API returned ${res.status}. ${lwaDetail(res.text) || 'No marketplace tracking id was returned.'}`);
-    err.statusCode = res.status === 400 || res.status === 401 || res.status === 403 ? 400 : 502;
-    err.terminal = err.statusCode === 400;
-    throw err;
-  }
-  return { trackingNumber, courier: 'amazon' };
+    async schedule(amazonOrderId, slotId) {
+      const { res, json } = await call('POST', '/packages/bulk', {
+        marketplaceId,
+        orderScheduleDetailsList: [{ amazonOrderId, packageDetails: { packageTimeSlot: { slotId } } }],
+        labelFormat: 'PDF',
+      });
+      if (res.status < 200 || res.status >= 300) throw easyShipError('schedule', res, sandbox);
+      const rejected = (json.rejectedOrders || []).find((row) => row.amazonOrderId === amazonOrderId);
+      const pkg = packageView((json.scheduledPackages || []).find((row) => row.scheduledPackageId?.amazonOrderId === amazonOrderId));
+      return {
+        pkg: pkg?.trackingId ? pkg : null,
+        rejected: rejected ? (rejected.error?.message || rejected.error?.code || 'Amazon refused this order') : (pkg?.trackingId ? '' : 'Amazon returned no tracking id'),
+        documentsUrl: json.printableDocumentsUrl || '',
+      };
+    },
+    async find(amazonOrderId) {
+      const qs = new URLSearchParams({ amazonOrderId, marketplaceId });
+      const { res, json } = await call('GET', `/package?${qs}`);
+      if (res.status === 404) return null;
+      if (res.status < 200 || res.status >= 300) throw easyShipError('package lookup', res, sandbox);
+      return packageView(json);
+    },
+    async reschedule(amazonOrderId, packageId, slotId) {
+      const { res, json } = await call('PATCH', '/package', {
+        marketplaceId,
+        updatePackageDetailsList: [{ scheduledPackageId: { amazonOrderId, packageId }, packageTimeSlot: { slotId } }],
+      });
+      if (res.status < 200 || res.status >= 300) throw easyShipError('reschedule', res, sandbox);
+      return packageView((json.packages || [])[0]);
+    },
+    async label(url) {
+      let u;
+      try { u = new URL(url); } catch { u = null; }
+      if (!u || u.protocol !== 'https:' || !/(^|\.)amazonaws\.com$/.test(u.hostname)) {
+        const err = new Error('The Amazon label link is not an Amazon S3 https link, so it was not downloaded.');
+        err.statusCode = 502;
+        throw err;
+      }
+      return download(String(url));
+    },
+  };
 }
 
 async function probeConnection(creds, opts = {}) {
@@ -467,5 +552,5 @@ module.exports = {
   pullReturns,
   probeConnection,
   pushInventory,
-  confirmShipment,
+  easyShip,
 };
