@@ -53,12 +53,23 @@ function withReturnImage(item, bySku) {
   return imageUrl ? { ...plain, imageUrl } : plain;
 }
 
+function returnAmount(row, order) {
+  const priceBySku = new Map((order?.items || []).map((item) => [item.sku, Number(item.price) || 0]));
+  return (row.items || []).reduce((sum, item) => sum + (priceBySku.get(item.sku) || 0) * (Number(item.qty) || 1), 0);
+}
+
 async function listReturns(tenantId) {
   const [rows, bySku] = await Promise.all([
     skip(CustomerReturn.find({ tenantId }).sort({ createdAt: -1 })),
     imagesBySku(tenantId),
   ]);
+  const orderNos = [...new Set(rows.map((row) => row.orderNo).filter(Boolean))];
+  const orders = orderNos.length
+    ? await skip(Order.find({ tenantId, orderNo: { $in: orderNos } }).select('orderNo items.sku items.price').lean())
+    : [];
+  const orderByNo = new Map(orders.map((order) => [order.orderNo, order]));
   return rows.map((row) => ({
+    amount: returnAmount(row, orderByNo.get(row.orderNo)),
     id: row.returnNo,
     orderId: row.orderNo,
     reason: row.reason,

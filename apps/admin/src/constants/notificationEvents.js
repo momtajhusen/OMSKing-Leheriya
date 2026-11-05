@@ -68,6 +68,6 @@ export const NOTIFICATION_EVENTS = [
     event: 'Owner Alert on Vendor Assignment',
     channels: { telegram: true, email: true, whatsapp: true, other: false },
     description: 'Alert owner when vendor is assigned to order',
-    isOwnerAlert: true,
+    isOwnerAlert: false,
   },
 ];

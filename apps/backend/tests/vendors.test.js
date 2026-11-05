@@ -93,6 +93,21 @@ test('vendor CRUD rejects duplicates and soft-deletes', async () => {
   assert.equal(back.removed, false);
 });
 
+test('two vendors may share phone and email; save returns who shares them', async () => {
+  const first = await call(vendors.createVendor, { body: { name: 'Shared One', phone: '+91 98765 43210', email: 'Same@Mail.com' } });
+  assert.deepEqual(first.sharedContacts, { phone: [], email: [] });
+  const second = await call(vendors.createVendor, { body: { name: 'Shared Two', phone: '+919876543210', email: 'same@mail.com ' } });
+  assert.deepEqual(second.sharedContacts, { phone: ['Shared One'], email: ['Shared One'] });
+  const third = await call(vendors.createVendor, { body: { name: 'Shared Three', phone: '111' } });
+  const edited = await call(vendors.updateVendor, { params: { id: third.id }, body: { email: 'SAME@mail.com' } });
+  assert.deepEqual(edited.sharedContacts, { phone: [], email: ['Shared One', 'Shared Two'] });
+  await call(vendors.removeVendor, { params: { id: first.id } });
+  const afterRemove = await call(vendors.updateVendor, { params: { id: second.id }, body: { name: 'Shared Two' } });
+  assert.deepEqual(afterRemove.sharedContacts, { phone: [], email: ['Shared Three'] });
+  const own = await call(vendors.updateMe, vendorReq(second.id, { body: { location: 'Jaipur' } }));
+  assert.equal(own.sharedContacts, undefined);
+});
+
 test('assigning needs a saved vendor and copies its contact', async () => {
   await assert.rejects(
     () => call(orders.assignSubOrder, { params: { orderId: 'SHP-1', subOrderId: 'SHP-1-1' }, body: { assignedVendor: 'Ghost Co' } }),

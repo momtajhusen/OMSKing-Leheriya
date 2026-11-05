@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { formatINR, statusBadgeVariant } from '../../utils/format';
+import { cn } from '../../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -10,12 +11,15 @@ import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Modal from '../../components/ui/Modal';
 import PageLoader from '../../components/ui/PageLoader';
+import { cachedPage, rememberPage } from '../../lib/pageCache';
 import EmptyState from '../../components/ui/EmptyState';
 import ProductThumb from '../../components/ui/ProductThumb';
 import { FormBanner } from '../../components/ui/FormBanner';
 import KpiCard from '../../components/ui/KpiCard';
-import { Package, Plus, Search, Pencil, Trash2 } from 'lucide-react';
+import { Package, Plus, Search, Pencil, Trash2, Printer } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
+import { printBarcodeLabel } from '../../lib/barcodeLabel';
+import { productVariantRows, variantLabel, rowImage } from '../../lib/productRows';
 import { usePermissions } from '../../hooks/usePermissions';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 
@@ -32,38 +36,31 @@ const emptyProduct = {
   mrp: '',
 };
 
-const emptyVariant = {
-  color: '',
-  size: '',
-  barcode: '',
-  sellingPrice: '',
-  mrp: '',
-};
-
 export default function ProductsPage() {
   const navigate = useNavigate();
   const { canCatalogEdit } = usePermissions();
-  const [rows, setRows] = useState([]);
+  const seed = cachedPage('products');
+  const [rows, setRows] = useState(seed?.rows || []);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [stats, setStats] = useState({ active: 0, variants: 0 });
+  const [total, setTotal] = useState(seed?.total || 0);
+  const [stats, setStats] = useState(seed?.stats || { active: 0, variants: 0 });
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [variantOpen, setVariantOpen] = useState(false);
   const [form, setForm] = useState(emptyProduct);
   const [edit, setEdit] = useState(null);
-  const [variantForm, setVariantForm] = useState(emptyVariant);
   const [banner, setBanner] = useState('');
 
   const load = async () => {
     setLoading(true);
     try {
       const { data } = await api.get('/products', { params: { q: searchQuery, page, limit: PAGE_SIZE } });
-      setRows(data.data || []);
-      setTotal(data.meta?.total || 0);
-      setStats({ active: data.meta?.active || 0, variants: data.meta?.variants || 0 });
+      const next = { rows: data.data || [], total: data.meta?.total || 0, stats: { active: data.meta?.active || 0, variants: data.meta?.variants || 0 } };
+      setRows(next.rows);
+      setTotal(next.total);
+      setStats(next.stats);
+      if (page === 1 && !searchQuery) rememberPage('products', next);
     } catch (err) {
       toast.error(apiError(err, 'Could not load products'));
     } finally {
@@ -156,29 +153,7 @@ export default function ProductsPage() {
     }
   };
 
-  const saveVariant = async () => {
-    setBanner('');
-    try {
-      await api.post(`/products/${edit.id}/variants`, {
-        name: edit.name,
-        barcode: variantForm.barcode,
-        sellingPrice: Number(variantForm.sellingPrice) || 0,
-        mrp: Number(variantForm.mrp) || 0,
-        variantAttributes: {
-          ...(variantForm.color ? { color: variantForm.color } : {}),
-          ...(variantForm.size ? { size: variantForm.size } : {}),
-        },
-      });
-      toast.success('Master SKU variant added');
-      setVariantOpen(false);
-      setVariantForm(emptyVariant);
-      load();
-    } catch (err) {
-      setBanner(apiFormError(err).message);
-    }
-  };
-
-  if (loading) return <PageLoader label="Loading products..." />;
+  if (loading && rows.length === 0) return <PageLoader label="Loading products..." />;
 
   return (
     <div className="space-y-3">
@@ -186,7 +161,7 @@ export default function ProductsPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-bold">Products</h1>
           <p className="text-muted-foreground">
-            Catalog shell. Each color/size variant is one Master SKU. Stock comes in the inventory phase — not here.
+            Catalog shell. Each color/size variant is one Master SKU. In Stock shows on-hand qty in the Offline (WH-001) and Virtual (WH-002) warehouses.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -214,7 +189,7 @@ export default function ProductsPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search name, brand, category or HSN..."
+                placeholder="Search name, vendor, category or HSN..."
                 className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -230,7 +205,7 @@ export default function ProductsPage() {
         <CardHeader>
           <CardTitle>Product catalog ({rows.length})</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent aria-busy={loading} className={cn('transition-opacity', loading && 'pointer-events-none opacity-60')}>
           {rows.length === 0 ? (
             <EmptyState
               title="No products yet"
@@ -242,22 +217,25 @@ export default function ProductsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Product</TableHead>
-                  <TableHead>Master SKUs</TableHead>
+                  <TableHead>Master SKU</TableHead>
                   <TableHead>HSN</TableHead>
                   <TableHead>GST %</TableHead>
                   <TableHead>Price</TableHead>
+                  <TableHead className="text-right">In Stock (Shopify Offline/Amazon/Myntra)</TableHead>
+                  <TableHead className="text-right">In Stock (Virtual)</TableHead>
                   <TableHead>Status</TableHead>
                   {canCatalogEdit && <TableHead />}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((product) => (
-                  <TableRow key={product.id}>
+                {productVariantRows(rows).map(({ key, product, variant: v }) => (
+                  <TableRow key={key}>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <ProductThumb name={product.name} sku={product.variants?.[0]?.code || product.name} src={(product.images || [])[0]} size="lg" />
+                        <ProductThumb name={product.name} sku={v?.code || product.name} src={rowImage(product, v)} size="lg" />
                         <div>
                           <div className="font-medium">{product.name}</div>
+                          {variantLabel(v) && <div className="text-xs">{variantLabel(v)}</div>}
                           <div className="text-xs text-muted-foreground">
                             {[product.brand, product.category].filter(Boolean).join(' · ') || '—'}
                           </div>
@@ -265,13 +243,32 @@ export default function ProductsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {(product.variants || []).map((v) => (
-                        <div key={v.id} className="font-mono text-xs">{v.code}</div>
-                      ))}
+                      {v ? (
+                        <div className="flex items-center gap-1 font-mono text-xs">
+                          {v.code}
+                          <button
+                            type="button"
+                            className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            title="Print barcode (51 x 25 mm PDF)"
+                            aria-label={`Print barcode for ${v.code}`}
+                            onClick={() => {
+                              try {
+                                printBarcodeLabel({ value: v.barcode || v.code, name: product.name });
+                              } catch (err) {
+                                toast.error(err.message);
+                              }
+                            }}
+                          >
+                            <Printer className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : '—'}
                     </TableCell>
                     <TableCell>{product.hsnCode || '—'}</TableCell>
                     <TableCell>{product.gstRatePercent}%</TableCell>
-                    <TableCell>{formatINR(product.variants?.[0]?.sellingPrice || 0)}</TableCell>
+                    <TableCell>{formatINR(v?.sellingPrice || 0)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{v?.stock?.offline ?? 0}</TableCell>
+                    <TableCell className="text-right tabular-nums">{v?.stock?.virtual ?? 0}</TableCell>
                     <TableCell>
                       <Badge variant={statusBadgeVariant(product.status === 'active' ? 'Active' : product.status)}>
                         {product.status}
@@ -291,18 +288,6 @@ export default function ProductsPage() {
                           >
                             <Pencil className="w-3 h-3 mr-1" />
                             Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setEdit(product);
-                              setVariantForm(emptyVariant);
-                              setBanner('');
-                              setVariantOpen(true);
-                            }}
-                          >
-                            Add variant
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => removeProduct(product)}>
                             <Trash2 className="w-3 h-3 mr-1" />
@@ -340,7 +325,7 @@ export default function ProductsPage() {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-sm font-medium">Brand</label>
+              <label className="text-sm font-medium">Vendor</label>
               <Input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} />
             </div>
             <div>
@@ -407,7 +392,7 @@ export default function ProductsPage() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-sm font-medium">Brand</label>
+                <label className="text-sm font-medium">Vendor</label>
                 <Input value={edit.brand || ''} onChange={(e) => setEdit({ ...edit, brand: e.target.value })} />
               </div>
               <div>
@@ -459,46 +444,6 @@ export default function ProductsPage() {
         )}
       </Modal>
 
-      <Modal
-        open={variantOpen}
-        onOpenChange={setVariantOpen}
-        title="Add variant"
-        description={edit ? `New Master SKU under ${edit.name}. Code auto-generates.` : ''}
-        footer={(
-          <>
-            <Button variant="outline" onClick={() => setVariantOpen(false)}>Cancel</Button>
-            <Button onClick={saveVariant}>Create Master SKU</Button>
-          </>
-        )}
-      >
-        <div className="space-y-3">
-          {banner && <FormBanner tone="error" title="Could not save">{banner}</FormBanner>}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-sm font-medium">Color</label>
-              <Input value={variantForm.color} onChange={(e) => setVariantForm({ ...variantForm, color: e.target.value })} />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Size</label>
-              <Input value={variantForm.size} onChange={(e) => setVariantForm({ ...variantForm, size: e.target.value })} />
-            </div>
-          </div>
-          <div>
-            <label className="text-sm font-medium">Barcode / EAN</label>
-            <Input value={variantForm.barcode} onChange={(e) => setVariantForm({ ...variantForm, barcode: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-sm font-medium">Selling price</label>
-              <Input type="number" value={variantForm.sellingPrice} onChange={(e) => setVariantForm({ ...variantForm, sellingPrice: e.target.value })} />
-            </div>
-            <div>
-              <label className="text-sm font-medium">MRP</label>
-              <Input type="number" value={variantForm.mrp} onChange={(e) => setVariantForm({ ...variantForm, mrp: e.target.value })} />
-            </div>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

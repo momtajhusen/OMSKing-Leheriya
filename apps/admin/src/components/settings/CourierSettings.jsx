@@ -8,6 +8,7 @@ import Input from '../ui/Input';
 import Select from '../ui/Select';
 import Modal from '../ui/Modal';
 import { FormBanner } from '../ui/FormBanner';
+import PackageDefaultsCard from './PackageDefaultsCard';
 import api, { apiError } from '../../lib/api';
 
 const CAP_LABEL = { forward: 'Forward', return: 'Return', ndr: 'NDR' };
@@ -293,6 +294,8 @@ export default function CourierSettings() {
           </p>
         </div>
       </div>
+
+      <PackageDefaultsCard />
 
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={() => { setLane('platform'); setQuery(''); }} className={`pill-tab ${lane === 'platform' ? 'pill-tab-active' : 'pill-tab-inactive'}`}>

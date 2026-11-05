@@ -85,9 +85,26 @@ export function vendorCatalog(orders, vendorNames) {
   return [...bySku.values()].sort((a, b) => a.sku.localeCompare(b.sku));
 }
 
-/** The vendor shown in a sub-order's dropdown (the pick, else the saved vendor) and whether Assign would change it. */
-export function vendorPick(picks, sub) {
+/** The saved vendor a Shopify vendor name belongs to: same name, else listed in its Shopify vendor names. */
+export function mappedVendor(vendors, shopifyName) {
+  const key = String(shopifyName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!key) return '';
+  const same = (name) => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ') === key;
+  const hit = vendors.find((vendor) => same(vendor.name)) || vendors.find((vendor) => (vendor.shopifyVendors || []).some(same));
+  return hit?.name || '';
+}
+
+/** The vendor shown in a sub-order's dropdown (the pick, else the saved vendor, else the mapped one) and whether Assign would change it. */
+export function vendorPick(picks, sub, mapped = '') {
   const saved = sub.assignedVendor || '';
-  const value = Object.hasOwn(picks, sub.id) ? picks[sub.id] : saved;
+  const value = Object.hasOwn(picks, sub.id) ? picks[sub.id] : (saved || mapped);
   return { value, changed: value !== saved };
+}
+
+/** Sub-orders Assign all would save: the shown vendor differs from the saved one and is not Unassigned. */
+export function pendingAssigns(subs, picks, mappedOf) {
+  return (subs || []).flatMap((sub) => {
+    const { value, changed } = vendorPick(picks, sub, mappedOf(sub));
+    return changed && value ? [{ sub, name: value }] : [];
+  });
 }

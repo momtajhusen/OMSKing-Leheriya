@@ -7,7 +7,7 @@ const chat = require('./supportChat.service');
 const TITLE_MAX = 160;
 const NOTE_MAX = 500;
 const LIST_MAX = 300;
-const SUMMARY_MAX = { issue: 200, fix: 200, area: 120 };
+const SUMMARY_MAX = { issue: 200, fix: 200, area: 120, check: 300 };
 const FIXED = ['done', 'confirmed'];
 
 /** Which side may apply which mark, and from which statuses. Developers finish work; clients confirm it. */

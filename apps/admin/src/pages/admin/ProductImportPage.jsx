@@ -9,6 +9,7 @@ import { ArrowRight, Download, RefreshCw, Upload } from 'lucide-react';
 import ProductThumb from '../../components/ui/ProductThumb';
 import api, { apiError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
+import { BULK_IMPORT_GUIDE } from '../../lib/bulkImportGuide';
 
 const STEPS = [
   { id: 'shopify', name: 'Shopify' },
@@ -110,6 +111,49 @@ export default function ProductImportPage() {
           <Button variant="outline" onClick={() => navigate('/sku-mapping')}>Open mapping</Button>
         </div>
       </div>
+
+      <details open className="rounded-lg border bg-card p-4 text-sm">
+        <summary className="cursor-pointer font-semibold">How Bulk import works</summary>
+        <div className="mt-3 grid gap-4 md:grid-cols-2">
+          <div className="space-y-3">
+            <div>
+              <p className="font-medium">What it is for</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
+                {BULK_IMPORT_GUIDE.purpose.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            </div>
+            <div>
+              <p className="font-medium">Steps</p>
+              <ol className="mt-1 list-decimal space-y-1 pl-5 text-muted-foreground">
+                {BULK_IMPORT_GUIDE.steps.map((step) => (
+                  <li key={step.title}><span className="font-medium text-foreground">{step.title}.</span> {step.text}</li>
+                ))}
+              </ol>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div>
+              <p className="font-medium">Pull or upload</p>
+              <ul className="mt-1 space-y-1 text-muted-foreground">
+                {BULK_IMPORT_GUIDE.sources.map((s) => (
+                  <li key={s.label}><span className="font-medium text-foreground">{s.label}:</span> {s.text}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="font-medium">What the results mean</p>
+              <ul className="mt-1 space-y-1 text-muted-foreground">
+                {BULK_IMPORT_GUIDE.results.map((r) => (
+                  <li key={r.label}><span className="font-medium text-foreground">{r.label}:</span> {r.text}</li>
+                ))}
+              </ul>
+            </div>
+            <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+              {BULK_IMPORT_GUIDE.notes.map((line) => <li key={line}>{line}</li>)}
+            </ul>
+          </div>
+        </div>
+      </details>
 
       <p className="text-sm text-muted-foreground">
         Columns: channelSkuCode, channelVariantId, channelProductId, title, barcode, price, hsnCode, color, size.

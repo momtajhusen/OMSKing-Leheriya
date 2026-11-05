@@ -15,9 +15,8 @@ test('orders show the channel order number, and sub-orders add the unit index to
   assert.equal(shortSubOrderId(manual, { id: 'MAN-1001-1', index: 1 }), 'MAN-1001-1');
 });
 
-test('the order page shows short ids, the Shopify vendor next to the photo, and assigns a vendor per item', () => {
+test('the order page shows short ids and the Shopify vendor next to the photo', () => {
   assert.match(detail, /shortOrderId\(order\)/);
   assert.match(detail, /shortSubOrderId\(order, sub\)/);
   assert.match(detail, /item\.vendor/);
-  assert.match(detail, /assignItem\(item, /);
 });

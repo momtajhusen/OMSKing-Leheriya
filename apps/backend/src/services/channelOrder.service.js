@@ -90,6 +90,8 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       address: order.address || '',
       city: order.city || '',
       shipState: order.shipState || '',
+      courier: String(order.courier || '').trim(),
+      awb: String(order.awb || '').trim(),
       sourceOrderData: order.sourceOrderData,
     });
     const { doc, created } = await claimChannelOrder(
@@ -108,6 +110,11 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       doc.orderDate = next.orderDate || doc.orderDate;
       doc.source = 'channel_api';
       if (next.channelOrderNo) doc.channelOrderNo = next.channelOrderNo;
+      if (!doc.email && next.email) doc.email = next.email;
+      if (!doc.awb && next.awb) {
+        doc.awb = next.awb;
+        doc.courier = next.courier || doc.courier;
+      }
       const savedPin = /\b\d{6}\b/.test(`${doc.address || ''} ${doc.city || ''}`);
       const incomingPin = /\b\d{6}\b/.test(`${next.address || ''} ${next.city || ''}`);
       if (!savedPin && incomingPin) {

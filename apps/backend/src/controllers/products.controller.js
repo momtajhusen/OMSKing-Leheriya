@@ -3,6 +3,8 @@ const MasterSku = require('../models/MasterSku');
 const SkuMapping = require('../models/SkuMapping');
 const Inventory = require('../models/Inventory');
 const InventoryReservation = require('../models/InventoryReservation');
+const Warehouse = require('../models/Warehouse');
+const { onHandOf } = require('../services/inventory.service');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
 const { pageRequest, escapeRegex } = require('../utils/page');
@@ -37,6 +39,46 @@ function productFilter(tenantId, q) {
   return filter;
 }
 
+async function mappingsByMaster(tenantId, variants) {
+  if (!variants.length) return {};
+  const rows = await SkuMapping.find({ tenantId, masterSkuId: { $in: variants.map((v) => v._id) } })
+    .select('masterSkuId channel channelSkuCode syncStatus imageUrl')
+    .setOptions({ skipTenantFilter: true })
+    .lean();
+  const out = {};
+  rows.forEach((row) => {
+    const key = String(row.masterSkuId);
+    out[key] = out[key] || [];
+    out[key].push(row);
+  });
+  return out;
+}
+
+async function stockByMaster(tenantId, variants) {
+  if (!variants.length) return {};
+  const [rows, warehouses] = await Promise.all([
+    Inventory.find({ tenantId, masterSkuId: { $in: variants.map((v) => v._id) } })
+      .setOptions({ skipTenantFilter: true })
+      .lean(),
+    Warehouse.find({ tenantId }).select('type').setOptions({ skipTenantFilter: true }).lean(),
+  ]);
+  const virtualWh = new Set(warehouses.filter((wh) => wh.type === 'virtual').map((wh) => String(wh._id)));
+  const out = {};
+  rows.forEach((row) => {
+    const key = String(row.masterSkuId);
+    out[key] = out[key] || { offline: 0, virtual: 0 };
+    out[key][virtualWh.has(String(row.warehouseId)) ? 'virtual' : 'offline'] += onHandOf(row);
+  });
+  return out;
+}
+
+function withStock(product, stock) {
+  product.variants.forEach((variant) => {
+    variant.stock = stock[variant.id] || { offline: 0, virtual: 0 };
+  });
+  return product;
+}
+
 async function listProducts(req, res) {
   const tenantId = merchantTenant(req);
   const filter = productFilter(tenantId, req.query.q);
@@ -51,16 +93,18 @@ async function listProducts(req, res) {
       byProduct[key] = byProduct[key] || [];
       byProduct[key].push(v);
     });
-    const data = products.map((p) => mapProduct(p, byProduct[String(p._id)] || []));
+    const [mappings, stock] = await Promise.all([mappingsByMaster(tenantId, variants), stockByMaster(tenantId, variants)]);
+    const data = products.map((p) => withStock(mapProduct(p, byProduct[String(p._id)] || [], mappings), stock));
     return paginatedResponse(res, data, 1, data.length || 25, data.length, 'Products', {
       active: data.filter((row) => row.status === 'active').length,
       variants: data.reduce((sum, row) => sum + (Number(row.variantCount) || 0), 0),
     });
   }
+  const searching = Boolean(filter.$or);
   const [total, active, matched, products] = await Promise.all([
     Product.countDocuments(filter).setOptions({ skipTenantFilter: true }),
     Product.countDocuments({ ...filter, status: 'active' }).setOptions({ skipTenantFilter: true }),
-    Product.find(filter).select('_id').setOptions({ skipTenantFilter: true }).lean(),
+    searching ? Product.find(filter).select('_id').setOptions({ skipTenantFilter: true }).lean() : [],
     Product.find(filter).sort({ createdAt: -1 }).skip(paging.skip).limit(paging.limit).setOptions({ skipTenantFilter: true }),
   ]);
   const matchedIds = matched.map((row) => row._id);
@@ -69,9 +113,11 @@ async function listProducts(req, res) {
     pageIds.length
       ? MasterSku.find({ tenantId, productId: { $in: pageIds } }).setOptions({ skipTenantFilter: true })
       : [],
-    matchedIds.length
-      ? MasterSku.countDocuments({ tenantId, productId: { $in: matchedIds } }).setOptions({ skipTenantFilter: true })
-      : 0,
+    !searching
+      ? MasterSku.countDocuments({ tenantId, productId: { $ne: null } }).setOptions({ skipTenantFilter: true })
+      : matchedIds.length
+        ? MasterSku.countDocuments({ tenantId, productId: { $in: matchedIds } }).setOptions({ skipTenantFilter: true })
+        : 0,
   ]);
   const byProduct = {};
   variants.forEach((variant) => {
@@ -79,7 +125,8 @@ async function listProducts(req, res) {
     byProduct[key] = byProduct[key] || [];
     byProduct[key].push(variant);
   });
-  const data = products.map((product) => mapProduct(product, byProduct[String(product._id)] || []));
+  const [mappings, stock] = await Promise.all([mappingsByMaster(tenantId, variants), stockByMaster(tenantId, variants)]);
+  const data = products.map((product) => withStock(mapProduct(product, byProduct[String(product._id)] || [], mappings), stock));
   return paginatedResponse(res, data, paging.page, paging.limit, total, 'Products', {
     active,
     variants: variantCount,

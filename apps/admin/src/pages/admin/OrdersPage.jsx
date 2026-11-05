@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
-import { formatINR, formatDate, statusBadgeVariant } from '../../utils/format';
+import { formatINR, formatDate, formatDateTime, statusBadgeVariant } from '../../utils/format';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Select from '../../components/ui/Select';
+import Input from '../../components/ui/Input';
 import KpiCard from '../../components/ui/KpiCard';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
 import Modal from '../../components/ui/Modal';
-import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, RotateCcw, CheckCircle } from 'lucide-react';
+import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, RotateCcw, CheckCircle, Check, X } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import { isChannelManaged, packetIdOf, openMyntraDocument, pullMyntraOrders } from '../../lib/channelOrders';
@@ -24,6 +26,10 @@ import TableToolbar from '../../components/ui/TableToolbar';
 import { orderChannelLabel } from '../../constants/channelCatalog';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { withSubOrders } from '../../lib/orderSubOrders';
+import { channelFromSearch } from '../../lib/ordersChannelLink';
+import { searchFromParams } from '../../lib/headerSearch';
+import { menuPosition, statusOptions, statusParam, selectedStatuses } from '../../lib/statusFilter';
+import { toggleId, togglePage, packableIds, labelableIds } from '../../lib/bulkOrderActions';
 
 const STATUS_TABS = [
   { id: 'Unfulfillable', label: 'Unfulfillable' },
@@ -40,6 +46,121 @@ const STATUS_TABS = [
 
 const IN_TRANSIT = ['Dispatched', 'In transit'];
 
+function ColumnFilter({ column, label, active, onOpen }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <button
+        type="button"
+        aria-label={`Filter by ${column}`}
+        title={`Filter by ${column}`}
+        onClick={onOpen}
+        className={`rounded p-0.5 hover:bg-muted ${active ? 'text-primary' : 'text-muted-foreground'}`}
+      >
+        <Filter className="h-3.5 w-3.5" />
+      </button>
+    </span>
+  );
+}
+
+function StatusColumnFilter({ value, onChange }) {
+  const ref = useRef(null);
+  const menuRef = useRef(null);
+  const [position, setPosition] = useState(null);
+  const [draft, setDraft] = useState([]);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!position) return undefined;
+    const close = (event) => {
+      if (event.type === 'keydown' ? event.key === 'Escape' : !ref.current?.contains(event.target) && !menuRef.current?.contains(event.target)) setPosition(null);
+    };
+    const dismiss = () => setPosition(null);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+      window.removeEventListener('resize', dismiss);
+    };
+  }, [position]);
+
+  const options = statusOptions(STATUS_TABS, search);
+  const allTicked = options.length > 0 && options.every((tab) => draft.includes(tab.id));
+  const toggle = (id) => setDraft((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  const toggleAll = () => setDraft((prev) => (allTicked
+    ? prev.filter((id) => !options.some((tab) => tab.id === id))
+    : [...new Set([...prev, ...options.map((tab) => tab.id)])]));
+  const apply = (next) => {
+    onChange(next);
+    setPosition(null);
+  };
+
+  return (
+    <span ref={ref} className="inline-flex items-center gap-1">
+      Status
+      <button
+        type="button"
+        aria-label="Filter by status"
+        title="Filter by status"
+        onClick={(event) => {
+          if (position) {
+            setPosition(null);
+            return;
+          }
+          const rect = event.currentTarget.getBoundingClientRect();
+          setDraft(selectedStatuses(value, STATUS_TABS));
+          setSearch('');
+          setPosition(menuPosition(rect, window.innerWidth));
+        }}
+        className={`rounded p-0.5 hover:bg-muted ${value !== 'all' ? 'text-primary' : 'text-muted-foreground'}`}
+      >
+        <Filter className="h-3.5 w-3.5" />
+      </button>
+      {position && createPortal(
+        <div
+          ref={menuRef}
+          style={{ top: position.top, left: position.left }}
+          className="fixed z-50 w-72 rounded-xl border bg-card p-2 text-left text-sm font-normal normal-case tracking-normal text-foreground shadow-pop"
+        >
+          <div className="px-1 pb-2 text-muted-foreground">Filter By Status</div>
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <Input autoFocus placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8" />
+            </div>
+            <Button type="button" size="sm" variant="outline" className="h-8 px-2" aria-label="Clear status filter" title="Clear" onClick={() => apply('all')}>
+              <X className="h-4 w-4" />
+            </Button>
+            <Button type="button" size="sm" className="h-8 px-2" aria-label="Apply status filter" title="Apply" onClick={() => apply(statusParam(draft, STATUS_TABS))}>
+              <Check className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="mt-2 max-h-64 overflow-y-auto">
+            {options.length === 0 ? (
+              <div className="px-1 py-2 text-muted-foreground">No status matches</div>
+            ) : (
+              <>
+                <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 hover:bg-muted">
+                  <input type="checkbox" checked={allTicked} onChange={toggleAll} />
+                  SELECT ALL
+                </label>
+                {options.map((tab) => (
+                  <label key={tab.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 hover:bg-muted">
+                    <input type="checkbox" checked={draft.includes(tab.id)} onChange={() => toggle(tab.id)} />
+                    {tab.label.toUpperCase()}
+                  </label>
+                ))}
+              </>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </span>
+  );
+}
+
 export default function OrdersPage() {
   const navigate = useNavigate();
   const { can } = usePermissions();
@@ -50,11 +171,16 @@ export default function OrdersPage() {
   const generateInvoice = useOrderStore((s) => s.generateInvoice);
   const markDelivered = useOrderStore((s) => s.markDelivered);
   const bookReversePickup = useOrderStore((s) => s.bookReversePickup);
+  const setStatus = useOrderStore((s) => s.setStatus);
+  const queueLabelJob = useOrderStore((s) => s.queueLabelJob);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState('');
   const [reverseFor, setReverseFor] = useState(null);
   const [reverseReason, setReverseReason] = useState('Customer reverse pickup');
   const [reverseCourier, setReverseCourier] = useState('Delhivery');
   const [activeTab, setActiveTab] = useState('all');
-  const [channelFilter, setChannelFilter] = useState('all');
+  const [searchParams] = useSearchParams();
+  const [channelFilter, setChannelFilter] = useState(() => channelFromSearch(searchParams));
   const connected = useConnectedChannels();
   const connectedKey = connected.loaded ? (connected.labels.join(',') || '__none__') : '';
   const channelTabs = [
@@ -66,12 +192,22 @@ export default function OrdersPage() {
   ];
   const [paymentFilter, setPaymentFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [readyFilter, setReadyFilter] = useState('all');
+  const [parcelFilter, setParcelFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [searchQuery, setSearchQuery] = useState(() => searchFromParams(searchParams));
   const [syncing, setSyncing] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [manifestData, setManifestData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(() => searchFromParams(searchParams));
+  const urlQuery = searchFromParams(searchParams);
+
+  useEffect(() => {
+    if (urlQuery) setSearchQuery(urlQuery);
+  }, [urlQuery]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -93,10 +229,16 @@ export default function OrdersPage() {
           connected: connectedKey || undefined,
           payment: paymentFilter,
           source: sourceFilter,
+          ready: readyFilter,
+          parcel: parcelFilter,
+          from: dateFrom || undefined,
+          to: dateTo || undefined,
+          tzOffset: new Date().getTimezoneOffset(),
           q: query || undefined,
         },
       });
       setOrderList((data.data || []).map((order) => withSubOrders(order)));
+      setSelectedIds([]);
       setTotal(data.meta?.total || 0);
       if (data.meta?.counts) setCounts(data.meta.counts);
       setLoadError('');
@@ -109,7 +251,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     loadOrders(page);
-  }, [page, activeTab, channelFilter, paymentFilter, sourceFilter, query, connectedKey]);
+  }, [page, activeTab, channelFilter, paymentFilter, sourceFilter, readyFilter, parcelFilter, dateFrom, dateTo, query, connectedKey]);
 
   const filteredOrders = orderList;
 
@@ -148,6 +290,44 @@ export default function OrdersPage() {
 
   const openOrder = (order) => navigate(`/orders/${encodeURIComponent(order.id)}`);
 
+  const pageIds = filteredOrders.map((order) => order.id);
+  const allPageTicked = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
+
+  const packSelected = async () => {
+    const ids = packableIds(filteredOrders, selectedIds);
+    if (!ids.length) {
+      toast.error('Select New orders with mapped SKUs to pack');
+      return;
+    }
+    setBulkBusy('pack');
+    let failed = 0;
+    for (const id of ids) {
+      const next = await setStatus(id, 'Packed');
+      if (next?.error) failed += 1;
+    }
+    setBulkBusy('');
+    if (failed) toast.error(`${failed} of ${ids.length} orders could not be packed`);
+    else toast.success(`${ids.length} order${ids.length === 1 ? '' : 's'} packed`);
+    await loadOrders(page);
+  };
+
+  const labelSelected = async () => {
+    const ids = labelableIds(filteredOrders, selectedIds);
+    if (!ids.length) {
+      toast.error('Select own-courier orders that still need a label. Amazon and Myntra use their own courier.');
+      return;
+    }
+    setBulkBusy('label');
+    const job = await queueLabelJob(ids);
+    setBulkBusy('');
+    if (job?.error) {
+      toast.error(job.error);
+      return;
+    }
+    toast.success(`One label job queued for ${ids.length} order${ids.length === 1 ? '' : 's'}`);
+    await loadOrders(page);
+  };
+
   const exportOrders = async () => {
     try {
       const { data } = await api.get('/orders', {
@@ -157,6 +337,11 @@ export default function OrdersPage() {
           connected: connectedKey || undefined,
           payment: paymentFilter,
           source: sourceFilter,
+          ready: readyFilter,
+          parcel: parcelFilter,
+          from: dateFrom || undefined,
+          to: dateTo || undefined,
+          tzOffset: new Date().getTimezoneOffset(),
           q: query || undefined,
         },
       });
@@ -183,6 +368,24 @@ export default function OrdersPage() {
     }
   };
 
+  const openManifests = async () => {
+    try {
+      const { data } = await api.get('/orders/manifests');
+      setManifestData(data.data);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not load courier manifests'));
+    }
+  };
+
+  const downloadManifest = (manifest) => {
+    downloadCsv(`${manifest.manifestId}.csv`,
+      ['Manifest ID', 'Courier', 'Date', 'Order', 'Channel order', 'AWB', 'Customer', 'City', 'Payment', 'COD amount', 'Qty'],
+      manifest.rows.map((row) => [
+        manifest.manifestId, manifest.courier, manifest.date, row.orderNo, row.channelOrderNo, row.awb,
+        row.customer, row.city, row.paymentMode, row.codAmount, row.qty,
+      ]));
+  };
+
   if (loading) return <PageLoader label="Loading orders..." />;
 
   return (
@@ -193,6 +396,22 @@ export default function OrdersPage() {
           <p className="text-xs text-muted-foreground">Packing desk tabs: Unfulfillable, New, Packed, Ready To Ship. Shipping tabs: Pickup & Manifest, In Transit, Delivered, RTO.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {can(PERMISSIONS.ORDERS_EDIT) && (
+            <Button variant="outline" size="sm" onClick={packSelected} disabled={!selectedIds.length || Boolean(bulkBusy)}>
+              {bulkBusy === 'pack' ? 'Packing…' : `Pack selected (${selectedIds.length})`}
+            </Button>
+          )}
+          {can(PERMISSIONS.SHIPPING_GENERATE) && (
+            <Button variant="outline" size="sm" onClick={labelSelected} disabled={!selectedIds.length || Boolean(bulkBusy)}>
+              {bulkBusy === 'label' ? 'Queuing…' : `Generate labels (${selectedIds.length})`}
+            </Button>
+          )}
+          {activeTab === 'Ready to Ship' && can(PERMISSIONS.SHIPPING_GENERATE) && (
+            <Button variant="outline" size="sm" onClick={openManifests}>
+              <FileText className="w-4 h-4 mr-2" />
+              Courier manifests
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={syncOrders} disabled={syncing}>
             <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? 'Syncing…' : 'Sync Orders'}
@@ -275,27 +494,44 @@ export default function OrdersPage() {
               icon={<ShoppingCart className="h-7 w-7 text-muted-foreground" />}
               title="No orders found"
               description="Change the tab, search, or filters to see orders."
-              action={<Button variant="outline" onClick={() => { setActiveTab('all'); setSearchQuery(''); setChannelFilter('all'); setPage(1); }}>Reset</Button>}
+              action={<Button variant="outline" onClick={() => { setActiveTab('all'); setSearchQuery(''); setChannelFilter('all'); setDateFrom(''); setDateTo(''); setPage(1); }}>Reset</Button>}
             />
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all orders on this page"
+                      checked={allPageTicked}
+                      onChange={() => setSelectedIds((prev) => togglePage(prev, pageIds))}
+                    />
+                  </TableHead>
                   <TableHead>Order ID</TableHead>
                   <TableHead>Customer</TableHead>
                   <TableHead>Channel</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Value</TableHead>
                   <TableHead>Fulfil From</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Date</TableHead>
+                  <TableHead><StatusColumnFilter value={activeTab} onChange={(next) => { setActiveTab(next); setPage(1); }} /></TableHead>
+                  <TableHead><ColumnFilter column="payment" label="Payment" active={paymentFilter !== 'all'} onOpen={() => setFiltersOpen(true)} /></TableHead>
+                  <TableHead><ColumnFilter column="date" label="Date" active={Boolean(dateFrom || dateTo)} onOpen={() => setFiltersOpen(true)} /></TableHead>
+                  <TableHead>SLA Date</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredOrders.map((order) => (
                   <TableRow key={order.id} className="cursor-pointer" onClick={() => openOrder(order)}>
+                    <TableCell onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${order.channelOrderNo || order.id}`}
+                        checked={selectedIds.includes(order.id)}
+                        onChange={() => setSelectedIds((prev) => toggleId(prev, order.id))}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">
                       <span className="text-primary hover:underline">{order.channelOrderNo || order.id}</span>
                       {order.channelOrderNo && order.channelOrderNo !== order.id && (
@@ -330,6 +566,9 @@ export default function OrdersPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge>
+                      {order.orderReady && (
+                        <div className="mt-1"><Badge variant="outline" className="border-emerald-500 text-emerald-700">Order ready</Badge></div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{order.paymentMode}</Badge>
@@ -338,6 +577,11 @@ export default function OrdersPage() {
                       )}
                     </TableCell>
                     <TableCell>{formatDate(order.createdAt)}</TableCell>
+                    <TableCell>
+                      {order.slaDate ? (
+                        <span className="whitespace-nowrap font-medium text-red-600" title="Dispatch by this date">{formatDateTime(order.slaDate)}</span>
+                      ) : '—'}
+                    </TableCell>
                     <TableCell onClick={(event) => event.stopPropagation()}>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="sm" onClick={() => openOrder(order)}>
@@ -407,15 +651,32 @@ export default function OrdersPage() {
         open={filtersOpen}
         onOpenChange={setFiltersOpen}
         title="More filters"
-        description="Narrow orders by payment and fulfilment source."
+        description="Narrow orders by status, payment, order date and fulfilment source."
         footer={
           <>
-            <Button variant="outline" onClick={() => { setPaymentFilter('all'); setSourceFilter('all'); }}>Clear</Button>
+            <Button variant="outline" onClick={() => { setActiveTab('all'); setPaymentFilter('all'); setSourceFilter('all'); setReadyFilter('all'); setParcelFilter('all'); setDateFrom(''); setDateTo(''); setPage(1); }}>Clear</Button>
             <Button onClick={() => setFiltersOpen(false)}>Apply</Button>
           </>
         }
       >
         <div className="space-y-3">
+          <div>
+            <label className="text-sm font-medium">Status</label>
+            <Select value={activeTab} onChange={(e) => { setActiveTab(e.target.value); setPage(1); }}>
+              {activeTab.includes(',') && <option value={activeTab}>{selectedStatuses(activeTab, STATUS_TABS).length} statuses selected</option>}
+              {STATUS_TABS.map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium">Order date from</label>
+              <Input type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Order date to</label>
+              <Input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} />
+            </div>
+          </div>
           <div>
             <label className="text-sm font-medium">Payment mode</label>
             <Select value={paymentFilter} onChange={(e) => { setPaymentFilter(e.target.value); setPage(1); }}>
@@ -434,7 +695,59 @@ export default function OrdersPage() {
               <option value="Mixed">Mixed</option>
             </Select>
           </div>
+          <div>
+            <label className="text-sm font-medium">Order ready</label>
+            <Select value={readyFilter} onChange={(e) => { setReadyFilter(e.target.value); setPage(1); }}>
+              <option value="all">All</option>
+              <option value="ready">Order ready{counts.Ready != null ? ` (${counts.Ready})` : ''}</option>
+              <option value="not_ready">Not ready</option>
+            </Select>
+            <p className="mt-1 text-xs text-muted-foreground">Ready = every vendor (Virtual) item is marked Delivered or is in stock at the offline store.</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Vendor parcel status</label>
+            <Select value={parcelFilter} onChange={(e) => { setParcelFilter(e.target.value); setPage(1); }}>
+              <option value="all">All</option>
+              <option value="Dispatched">Dispatched by vendor (AWB)</option>
+              <option value="Delivered">Delivered by vendor</option>
+            </Select>
+          </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(manifestData)}
+        onOpenChange={(open) => { if (!open) setManifestData(null); }}
+        title="Courier manifests"
+        description={manifestData ? `One manifest per courier for Ready to Ship orders on ${formatDate(manifestData.date)}.` : ''}
+      >
+        {manifestData && (
+          <div className="space-y-2">
+            {!manifestData.manifests.length && (
+              <EmptyState title="No manifests today" description="Ready to Ship orders with an AWB show up here, grouped by courier." />
+            )}
+            {manifestData.manifests.map((manifest) => (
+              <div key={manifest.manifestId} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{manifest.courier}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {manifest.manifestId} · {manifest.count} order{manifest.count === 1 ? '' : 's'}
+                    {manifest.codTotal > 0 && ` · COD ${formatINR(manifest.codTotal)}`}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => downloadManifest(manifest)}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Download Manifest
+                </Button>
+              </div>
+            ))}
+            {manifestData.withoutAwb > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {manifestData.withoutAwb} Ready to Ship order{manifestData.withoutAwb === 1 ? ' has' : 's have'} no AWB yet and {manifestData.withoutAwb === 1 ? 'is' : 'are'} not on a manifest.
+              </p>
+            )}
+          </div>
+        )}
       </Modal>
 
       <Modal

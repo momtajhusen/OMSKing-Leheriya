@@ -14,6 +14,7 @@ const edit = [authMiddleware, tenantMiddleware, vendorScope('inventory'), requir
 router.get('/', ...view, asyncHandler(inventory.list));
 router.get('/ats', ...view, asyncHandler(inventory.ats));
 router.get('/ledger', ...view, asyncHandler(inventory.ledger));
+router.get('/sku/:masterSkuId', ...view, asyncHandler(inventory.skuView));
 router.get('/alerts', ...view, asyncHandler(inventory.alerts));
 router.post('/stock-in', ...edit, body('masterSkuId').notEmpty(), body('warehouseId').notEmpty(), validate, asyncHandler(inventory.inStock));
 router.post('/stock-out', ...edit, body('masterSkuId').notEmpty(), body('warehouseId').notEmpty(), validate, asyncHandler(inventory.outStock));

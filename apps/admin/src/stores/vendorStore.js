@@ -58,6 +58,7 @@ const useVendorStore = create(persist((set, get) => ({
       phone: payload.phone || '',
       email: payload.email || '',
       telegramGroup: payload.telegramGroup || '',
+      shopifyVendors: String(payload.shopifyVendors || '').split(',').map((name) => name.trim()).filter(Boolean),
     };
     const { data } = id ? await api.patch(`/vendors/${id}`, body) : await api.post('/vendors', body);
     return get().upsertRow(data.data);

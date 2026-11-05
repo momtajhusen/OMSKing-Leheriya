@@ -75,8 +75,8 @@ export default function SkuMappingPage() {
     load(tab, 1);
   };
 
-  const mapExisting = async (id) => {
-    const code = mappingInput[id];
+  const mapExisting = async (id, suggested) => {
+    const code = mappingInput[id] ?? suggested;
     if (!code) return;
     try {
       await api.post(`/sku-mappings/${id}/map`, { masterSkuCode: code });
@@ -269,6 +269,9 @@ export default function SkuMappingPage() {
                     <TableCell>{row.productName || row.channelTitle}</TableCell>
                     <TableCell>
                       <Badge variant={row.status === 'error' || row.status === 'Error' ? 'destructive' : 'secondary'}>{row.status}</Badge>
+                      {row.unmappedReason && (
+                        <div className="mt-1 max-w-xs text-xs text-muted-foreground">{row.unmappedReason}</div>
+                      )}
                     </TableCell>
                     {activeTab === 'failed' && (
                       <TableCell className="text-xs text-destructive max-w-xs">{row.error || '—'}</TableCell>
@@ -285,10 +288,10 @@ export default function SkuMappingPage() {
                             className="h-8 w-36 rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-2 text-sm text-foreground placeholder:text-muted-foreground"
                             list="master-codes"
                             placeholder="Master SKU code"
-                            value={mappingInput[row.id] || ''}
+                            value={mappingInput[row.id] ?? row.suggestedMasterSku ?? ''}
                             onChange={(e) => setMappingInput((prev) => ({ ...prev, [row.id]: e.target.value }))}
                           />
-                          <Button variant="outline" size="sm" disabled={!mappingInput[row.id]} onClick={() => mapExisting(row.id)}>Map</Button>
+                          <Button variant="outline" size="sm" disabled={!(mappingInput[row.id] ?? row.suggestedMasterSku)} onClick={() => mapExisting(row.id, row.suggestedMasterSku)}>Map</Button>
                           <Button variant="outline" size="sm" onClick={() => createNew(row.id)}>Create as new</Button>
                           {activeTab === 'failed' && (
                             <Button variant="outline" size="sm" onClick={() => retry(row.id)}>Retry</Button>

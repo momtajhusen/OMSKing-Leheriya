@@ -329,13 +329,16 @@ test('a completed update carries a short issue / fix summary that the client cha
   });
   const updateId = sent.body.data.update.id;
   const mark = (json, token = platformToken) => api('PATCH', `/api/v1/support/threads/${leheriya._id}/updates/${updateId}`, { token, json });
-  const summary = { action: 'summary', issue: 'Inventory page atak jaata tha', fix: 'Inventory API halki ki', area: 'Stock → Inventory' };
+  const summary = {
+    action: 'summary', issue: 'Inventory page atak jaata tha', fix: 'Inventory API halki ki', area: 'Stock → Inventory', check: 'Inventory kholo; list load hoti hai',
+  };
 
   assert.equal((await mark(summary)).status, 400, 'only a completed update gets a summary');
   await mark({ action: 'complete' });
   const merchantTry = await api('PATCH', `/api/v1/support/updates/${updateId}`, { token: ownerToken, json: summary });
   assert.equal(merchantTry.status, 403, 'only the OMSKing team writes the summary');
   assert.equal((await mark({ ...summary, issue: 'x'.repeat(201) })).status, 400);
+  assert.equal((await mark({ ...summary, check: 'x'.repeat(301) })).status, 400);
 
   const saved = await mark(summary);
   assert.equal(saved.status, 200, JSON.stringify(saved.body));
@@ -345,6 +348,8 @@ test('a completed update carries a short issue / fix summary that the client cha
   const source = chat.body.data.find((m) => m.id === sent.body.data.id);
   assert.equal(source.update.issue, 'Inventory page atak jaata tha');
   assert.equal(source.update.fix, 'Inventory API halki ki');
+  assert.equal(source.update.area, 'Stock → Inventory', 'the chat can open the page the fix was on');
+  assert.equal(source.update.check, 'Inventory kholo; list load hoti hai', 'the chat shows how to verify the fix');
   assert.equal(source.update.markedBy, 'platform', 'the summary is not a status mark');
   assert.equal(chat.body.data.filter((m) => m.event?.action === 'summary').length, 0, 'no status label is posted for it');
 
@@ -357,4 +362,25 @@ test('a completed update carries a short issue / fix summary that the client cha
   assert.equal(surat.body.data.length, 0, 'another company never sees these summaries');
   const vendor = await api('GET', '/api/v1/support/summaries', { token: vendorToken });
   assert.notEqual(vendor.status, 200, 'vendors cannot read support summaries');
+});
+
+test('the first chat page carries the filter counts of the whole chat, for this company only', async () => {
+  const counts = async (token = ownerToken) => (await api('GET', '/api/v1/support/messages?limit=1', { token })).body.meta.counts;
+  const before = await counts();
+  const suratBefore = await counts(suratToken);
+
+  await api('POST', '/api/v1/support/messages', { token: ownerToken, form: textForm({ text: 'Orders page slow hai' }) });
+  await api('POST', `/api/v1/support/threads/${leheriya._id}/messages`, { token: platformToken, form: textForm({ text: 'Dekh raha hoon' }) });
+  const tracked = await api('POST', '/api/v1/support/messages', { token: ownerToken, form: textForm({ text: 'Label nahi ban raha', trackAsUpdate: 'true' }) });
+  await api('PATCH', `/api/v1/support/threads/${leheriya._id}/updates/${tracked.body.data.update.id}`, { token: platformToken, json: { action: 'start' } });
+
+  const after = await counts();
+  assert.equal(after.all - before.all, 3, 'status labels are not counted');
+  assert.equal(after.pending - before.pending, 1, 'a client message is pending until work starts; replies are not');
+  assert.equal(after.progress - before.progress, 1);
+  assert.equal(after.fixed, before.fixed);
+  assert.equal(after.developer - before.developer, 1);
+  assert.deepEqual(await counts(suratToken), suratBefore, 'another company never counts these messages');
+  const older = await api('GET', `/api/v1/support/messages?limit=1&before=${tracked.body.data.id}`, { token: ownerToken });
+  assert.equal(older.body.meta.counts, undefined, 'older pages do not recount');
 });

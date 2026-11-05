@@ -1,5 +1,13 @@
 const { paymentStanding, invoiceNumber } = require('../services/finance.service');
 
+const SLA_CHANNELS = ['Amazon', 'Myntra'];
+
+function slaDateOf(order) {
+  if (!SLA_CHANNELS.includes(order.channel)) return null;
+  const dates = (order.channelLines || []).map((line) => line.shipByTime).filter(Boolean).map((d) => new Date(d));
+  return dates.length ? new Date(Math.min(...dates)) : null;
+}
+
 function toOrderDto(doc) {
   const order = typeof doc.toObject === 'function' ? doc.toObject() : doc;
   const subOrders = order.subOrders || [];
@@ -12,9 +20,12 @@ function toOrderDto(doc) {
     phone: order.phone,
     address: order.address,
     city: order.city,
+    customerGstin: order.customerGstin || '',
+    notes: order.notes || '',
     channel: order.channel,
     status: order.status,
     paymentMode: order.paymentMode,
+    labelPaymentMode: order.labelPaymentMode || '',
     paymentStatus: order.paymentStatus || '',
     paymentLabel: paymentStanding(order).label,
     paid: paymentStanding(order).paid,
@@ -34,6 +45,7 @@ function toOrderDto(doc) {
       vendor: item.vendor || '',
       masterSkuId: item.masterSkuId ? String(item.masterSkuId) : '',
       fulfilmentSource: item.fulfilmentSource || order.fulfilmentSource || 'Offline',
+      pack: item.pack || null,
     })),
     subOrders: subOrders.map((sub) => ({
       id: sub.id,
@@ -87,6 +99,7 @@ function toOrderDto(doc) {
       shipByTime: line.shipByTime || null,
     })),
     lastChannelSyncAt: order.lastChannelSyncAt || null,
+    slaDate: slaDateOf(order),
   };
 }
 

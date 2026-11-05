@@ -7,6 +7,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const { als } = require('../src/lib/tenantContext');
 const Tenant = require('../src/models/Tenant');
 const MasterSku = require('../src/models/MasterSku');
+const Product = require('../src/models/Product');
 const SkuMapping = require('../src/models/SkuMapping');
 const Inventory = require('../src/models/Inventory');
 const ChannelConnection = require('../src/models/ChannelConnection');
@@ -303,4 +304,149 @@ test('each Shopify variant keeps its own photo on the order line', async () => {
   await run(() => importChannel(tenant._id, null, 'shopify', [{ ...variants[1], image: pink }]));
   const again = await imagesBySku(tenant._id, ['DUP-PR7']);
   assert.equal(paintOrder({ items: [{ sku: 'DUP-PR7' }] }, again).items[0].imageUrl, pink);
+});
+
+test('Shopify pull brings vendor, category and HSN onto the product, and a blank Shopify HSN stays blank', async () => {
+  const urls = [];
+  const request = async (url) => {
+    urls.push(url);
+    if (url.includes('/products.json')) {
+      return {
+        status: 200,
+        headers: {},
+        text: JSON.stringify({ products: [{
+          id: 70,
+          title: 'Banarasi Suit',
+          vendor: 'Leheriya Weaves',
+          product_type: 'Salwar Suit',
+          variants: [
+            { id: 71, sku: 'BAN-S', title: 'S', inventory_item_id: 801 },
+            { id: 72, sku: 'BAN-M', title: 'M', inventory_item_id: 802 },
+          ],
+        }] }),
+      };
+    }
+    if (url.includes('/locations.json')) return { status: 200, headers: {}, text: '{"locations":[]}' };
+    if (url.includes('/inventory_items.json')) {
+      return {
+        status: 200,
+        headers: {},
+        text: JSON.stringify({ inventory_items: [
+          { id: 801, harmonized_system_code: '62044390' },
+          { id: 802, harmonized_system_code: null },
+        ] }),
+      };
+    }
+    return { status: 404, headers: {}, text: '{}' };
+  };
+  const pulled = await pullCatalog({ shopUrl: 'shop.example', adminToken: 'shpat_test' }, { request });
+  assert.match(urls.find((url) => url.includes('/inventory_items.json')), /ids=801%2C802|ids=801,802/);
+  assert.deepEqual(pulled.rows.map((row) => [row.vendor, row.category, row.hsnCode]), [
+    ['Leheriya Weaves', 'Salwar Suit', '62044390'],
+    ['Leheriya Weaves', 'Salwar Suit', ''],
+  ]);
+
+  const shop = await Tenant.create({ name: 'Vendor shop', slug: `vend-${Date.now()}`, kind: 'merchant' });
+  const runShop = (work) => als.run({ tenantId: String(shop._id), skipTenantFilter: false }, work);
+  await runShop(() => importChannel(shop._id, null, 'shopify', [pulled.rows[1]]));
+  let product = await Product.findOne({ tenantId: shop._id });
+  assert.equal(product.brand, 'Leheriya Weaves');
+  assert.equal(product.category, 'Salwar Suit');
+  assert.equal(product.hsnCode, '');
+
+  await runShop(() => importChannel(shop._id, null, 'shopify', [
+    { ...pulled.rows[1], vendor: 'Leheriya Studio', category: 'Suit Set', hsnCode: '62044290' },
+  ]));
+  product = await Product.findById(product._id);
+  assert.equal(product.brand, 'Leheriya Studio');
+  assert.equal(product.category, 'Suit Set');
+  assert.equal(product.hsnCode, '62044290');
+
+  await runShop(() => importChannel(shop._id, null, 'shopify', [{ ...pulled.rows[1], hsnCode: '' }]));
+  product = await Product.findById(product._id);
+  assert.equal(product.hsnCode, '62044290');
+});
+
+test('a Shopify re-pull replaces a stale product photo, but keeps a photo uploaded in OMSKing', async () => {
+  const oldPhoto = 'https://cdn.shopify.com/s/files/abl-hand-painted-old.jpg';
+  const newPhoto = 'https://cdn.shopify.com/s/files/abl-hand-painted-new.jpg';
+  const shopifyProduct = (src) => ({
+    id: 90,
+    title: 'Premium Cotton Hand Painted 3 Pc Salwar Suit',
+    image: { id: 1, src },
+    images: [{ id: 1, src }],
+    variants: [{ id: 91, sku: 'LEH-ABL186', title: 'Default Title' }],
+  });
+  const [first] = variantRows(shopifyProduct(oldPhoto));
+  assert.equal(first.productImage, oldPhoto);
+
+  const shop = await Tenant.create({ name: 'Photo shop', slug: `photo-${Date.now()}`, kind: 'merchant' });
+  const runShop = (work) => als.run({ tenantId: String(shop._id), skipTenantFilter: false }, work);
+  await runShop(() => importChannel(shop._id, null, 'shopify', [first]));
+  let product = await Product.findOne({ tenantId: shop._id });
+  assert.deepEqual(product.images, [oldPhoto]);
+
+  const [repulled] = variantRows(shopifyProduct(newPhoto));
+  await runShop(() => importChannel(shop._id, null, 'shopify', [repulled]));
+  product = await Product.findById(product._id);
+  assert.deepEqual(product.images, [newPhoto]);
+
+  product.images = ['/uploads/products/own-photo.jpg'];
+  await product.save();
+  await runShop(() => importChannel(shop._id, null, 'shopify', [first]));
+  product = await Product.findById(product._id);
+  assert.deepEqual(product.images, ['/uploads/products/own-photo.jpg']);
+});
+
+test('each unmapped listing says why, checked against the real Master SKUs', async () => {
+  const { explainUnmapped, unmapListing } = require('../src/services/catalogMapping.service');
+  const shop = await Tenant.create({ name: 'Why unmapped', slug: `why-${Date.now()}`, kind: 'merchant' });
+  const runShop = (work) => als.run({ tenantId: String(shop._id), skipTenantFilter: false }, work);
+  const amazonRows = [
+    { channelSkuCode: 'LEH-KDS189', channelVariantId: 'amz-none', channelTitle: 'No master' },
+    { channelSkuCode: 'LEH-LATE-1', channelVariantId: 'amz-late', channelTitle: 'Master made later' },
+    { channelSkuCode: 'AMZ-BAR-1', channelVariantId: 'amz-bar', channelTitle: 'Barcode twin', barcode: '8902222222222' },
+    { channelSkuCode: 'LEH-OLD-1', channelVariantId: 'amz-old', channelTitle: 'Discontinued master' },
+    { channelSkuCode: 'LEH-HAND-1', channelVariantId: 'amz-hand', channelTitle: 'Unmapped by hand' },
+  ];
+  await runShop(() => MasterSku.create({ tenantId: shop._id, code: 'LEH-OLD-1', name: 'Old', status: 'discontinued' }));
+  await runShop(() => MasterSku.create({ tenantId: shop._id, code: 'LEH-HAND-1', name: 'Hand' }));
+  const first = await runShop(() => importChannel(shop._id, null, 'amazon', amazonRows));
+  assert.equal(first.unmapped, 4);
+  assert.equal(first.autoMapped, 1);
+  const hand = await SkuMapping.findOne({ tenantId: shop._id, channelVariantId: 'amz-hand' });
+  await runShop(() => unmapListing(shop._id, null, hand));
+
+  await runShop(() => MasterSku.create({ tenantId: shop._id, code: 'LEH-LATE-1', name: 'Late' }));
+  await runShop(() => MasterSku.create({ tenantId: shop._id, code: 'SHOP-OTHER', name: 'Other', barcode: '8902222222222' }));
+
+  const rows = await SkuMapping.find({ tenantId: shop._id, syncStatus: 'unmapped' });
+  assert.equal(rows.length, 5);
+  const why = await runShop(() => explainUnmapped(shop._id, rows));
+  const of = (variant) => why.get(String(rows.find((row) => row.channelVariantId === variant)._id));
+
+  assert.equal(of('amz-none').suggestedMasterSku, null);
+  assert.match(of('amz-none').reason, /No Master SKU has code LEH-KDS189/);
+  assert.match(of('amz-none').reason, /amazon sent no barcode/);
+
+  assert.equal(of('amz-late').suggestedMasterSku, 'LEH-LATE-1');
+  assert.match(of('amz-late').reason, /Master SKU LEH-LATE-1 has the same code/);
+
+  assert.equal(of('amz-bar').suggestedMasterSku, 'SHOP-OTHER');
+  assert.match(of('amz-bar').reason, /barcode 8902222222222/);
+
+  assert.equal(of('amz-old').suggestedMasterSku, null);
+  assert.match(of('amz-old').reason, /LEH-OLD-1 is discontinued/);
+
+  assert.equal(of('amz-hand').suggestedMasterSku, 'LEH-HAND-1');
+  assert.match(of('amz-hand').reason, /Master SKU LEH-HAND-1 has the same code/);
+
+  const { listMappings } = require('../src/controllers/skuMappings.controller');
+  let body;
+  const res = { status() { return this; }, json(payload) { body = payload; return this; } };
+  await runShop(() => listMappings({ tenantId: shop._id, query: { tab: 'unmapped', page: 1, limit: 50 } }, res));
+  assert.equal(body.data.length, 5);
+  const listed = body.data.find((row) => row.channelSku === 'LEH-LATE-1');
+  assert.equal(listed.suggestedMasterSku, 'LEH-LATE-1');
+  assert.match(listed.unmappedReason, /same code/);
 });

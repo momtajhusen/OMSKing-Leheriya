@@ -19,6 +19,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { relativeTime } from '../../lib/orderMetrics';
+import { ordersSearchPath } from '../../lib/headerSearch';
 import { cn } from '../../lib/utils';
 import useThemeStore from '../../stores/themeStore';
 import useUIStore from '../../stores/uiStore';
@@ -87,6 +88,7 @@ function AdminHeader() {
   const { canOpenPath } = usePermissions();
   const [events, setEvents] = useState([]);
   const [readIds, setReadIds] = useState(() => new Set());
+  const [searchText, setSearchText] = useState('');
 
   useEffect(() => {
     if (!user || user.role === 'vendor') return undefined;
@@ -122,6 +124,12 @@ function AdminHeader() {
   const handleLogout = async () => {
     await logout();
     navigate('/auth/login');
+  };
+
+  const submitSearch = (event) => {
+    event.preventDefault();
+    const path = ordersSearchPath(searchText);
+    if (path && canOpenPath('/orders')) navigate(path);
   };
 
   const openNotification = (item) => {
@@ -160,10 +168,12 @@ function AdminHeader() {
       </div>
 
       <div className="flex-1 flex justify-center px-2 sm:px-4 lg:px-8">
-        <div className="relative w-full max-w-md hidden md:block">
+        <form role="search" onSubmit={submitSearch} className="relative w-full max-w-md hidden md:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
-            type="text"
+            type="search"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
             placeholder="Search orders, products, customers..."
             className="w-full rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] py-1.5 pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-[hsl(var(--color-primary-blue))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--color-primary-blue))]/20 transition-all"
             style={{
@@ -171,7 +181,7 @@ function AdminHeader() {
               color: 'hsl(var(--color-foreground))',
             }}
           />
-        </div>
+        </form>
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2">

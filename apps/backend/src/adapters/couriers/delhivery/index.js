@@ -111,6 +111,10 @@ async function book(creds, shipment, opts = {}) {
       total_amount: shipment.amount,
       seller_add: shipment.pickupAddress,
       seller_name: creds.clientName || warehouse,
+      ...(shipment.weightGrams ? { weight: shipment.weightGrams } : {}),
+      ...(shipment.lengthCm ? { shipment_length: shipment.lengthCm } : {}),
+      ...(shipment.breadthCm ? { shipment_width: shipment.breadthCm } : {}),
+      ...(shipment.heightCm ? { shipment_height: shipment.heightCm } : {}),
     }],
     pickup_location: { name: warehouse },
   });
@@ -125,7 +129,14 @@ async function book(creds, shipment, opts = {}) {
     err.statusCode = 502;
     throw err;
   }
-  return { awb: waybill };
+  return { awb: waybill, paymentMode: bookedPayment(pack) };
+}
+
+function bookedPayment(pack) {
+  const text = String(pack.payment || '').trim();
+  if (/cod|cash/i.test(text) || Number(pack.cod_amount) > 0) return 'COD';
+  if (/pickup/i.test(text)) return 'Pickup';
+  return text ? 'Prepaid' : '';
 }
 
 async function bookReturn(creds, shipment, opts) {

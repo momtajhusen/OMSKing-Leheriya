@@ -15,18 +15,26 @@ const reconcile = [authMiddleware, tenantMiddleware, vendorScope('orders'), requ
 
 router.post('/labels/bulk', ...ship, asyncHandler(orders.bookBulkLabels));
 router.post('/manifest', ...ship, asyncHandler(orders.closeManifest));
+router.get('/manifests', ...ship, asyncHandler(orders.courierManifests));
 router.get('/shipping-readiness', ...view, asyncHandler(orders.shippingReadiness));
 router.get('/summary', ...view, requirePermission('dashboard.view'), asyncHandler(orders.orderSummary));
 router.get('/', ...view, asyncHandler(orders.listOrders));
 router.get('/:orderId', ...view, asyncHandler(orders.getOrder));
+router.get('/:orderId/customer-history', ...view, asyncHandler(orders.getCustomerHistory));
+router.patch('/:orderId', ...edit, asyncHandler(orders.editOrderDetails));
 router.post('/:orderId/label', ...ship, asyncHandler(orders.generateLabel));
 router.post('/:orderId/ship', ...ship, asyncHandler(orders.shipOrder));
 router.post('/:orderId/label/cancel', ...cancelShip, asyncHandler(orders.cancelLabel));
 router.post('/:orderId/invoice', ...finance, asyncHandler(orders.generateInvoice));
 router.post('/:orderId/payment', ...reconcile, asyncHandler(orders.markPaid));
 router.patch('/:orderId/sub-orders/:subOrderId', ...edit, asyncHandler(orders.assignSubOrder));
+router.get('/:orderId/sub-orders/:subOrderId/cost', ...view, asyncHandler(orders.lineCost));
+router.put('/:orderId/sub-orders/:subOrderId/cost', ...edit, asyncHandler(orders.saveLineCost));
 router.patch('/:orderId/sub-orders/:subOrderId/vendor', ...edit, asyncHandler(orders.vendorUpdate));
 router.patch('/:orderId/status', ...edit, asyncHandler(orders.patchStatus));
+router.patch('/:orderId/notes', ...edit, asyncHandler(orders.updateNotes));
+router.patch('/:orderId/items/:index/package', ...edit, asyncHandler(orders.updateItemPackage));
 router.post('/:orderId/reverse', ...edit, asyncHandler(orders.bookReverse));
+router.post('/:orderId/map-sku', ...edit, requirePermission('catalog.edit'), asyncHandler(orders.mapItemSku));
 
 module.exports = router;

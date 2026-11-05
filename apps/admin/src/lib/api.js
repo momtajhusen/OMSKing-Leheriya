@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { sessionRejected } from './authErrors';
 
 const api = axios.create({
   baseURL: import.meta.env?.VITE_API_BASE_URL || 'https://omskingapi.codersalpha.com/api/v1',
@@ -44,8 +45,10 @@ api.interceptors.response.use(
       original.headers.Authorization = `Bearer ${access}`;
       return api(original);
     } catch (err) {
-      const { default: useAuthStore } = await import('../stores/authStore');
-      useAuthStore.getState().logoutLocal();
+      if (sessionRejected(err)) {
+        const { default: useAuthStore } = await import('../stores/authStore');
+        useAuthStore.getState().logoutLocal();
+      }
       return Promise.reject(err);
     }
   },

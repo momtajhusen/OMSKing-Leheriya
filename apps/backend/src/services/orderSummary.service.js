@@ -33,10 +33,79 @@ function pendingPulse(order) {
     || (order.subOrders || []).some((sub) => sub.vendorStatus === 'Pending Acceptance');
 }
 
-function buildOrderSummary(orders, { channel = 'all', days = 'all', series = [], tzOffset = 0 } = {}) {
-  const start = days === 'all' || days === '' || days == null ? 0 : Date.now() - Number(days) * DAY;
+const RETURN_ISSUE_CHANNELS = new Set(['Shopify', 'Amazon', 'Myntra']);
+const RETURN_ISSUE_DAYS = 45;
+const ON_THE_WAY = new Set(['Dispatched', 'In transit']);
+
+function isRto(order) {
+  const codes = `${order.channelStatus || ''} ${(order.channelLines || []).map((line) => line.status || '').join(' ')}`;
+  return codes.toUpperCase().includes('RTO');
+}
+
+/** Shipped 45+ days ago and still neither delivered nor back with us; Cancelled, Voided and Paid are settled. */
+function isReturnIssue(order, { now, settled, returnsByOrder }) {
+  if (!RETURN_ISSUE_CHANNELS.has(order.channel)) return false;
+  if (order.status === 'Cancelled' || /^void/i.test(String(order.paymentMode || ''))) return false;
+  if (order.paymentStatus === 'paid' || settled.has(order.id)) return false;
+  if (now - orderTime(order) < RETURN_ISSUE_DAYS * DAY) return false;
+  const returns = returnsByOrder.get(order.id) || [];
+  if (returns.includes('Completed')) return false;
+  const lost = order.status !== 'Delivered' && (ON_THE_WAY.has(order.status) || isRto(order));
+  const returnOpen = returns.some((status) => status !== 'Rejected') || Boolean(order.reversePickup?.returnId);
+  return lost || returnOpen;
+}
+
+/** Delivered and not paid: Shopify after 45 days from order date; Amazon/Myntra once payment is missing from their report. */
+function isProblemInvoice(order, { now, settled }) {
+  if (order.status !== 'Delivered' || !RETURN_ISSUE_CHANNELS.has(order.channel)) return false;
+  if (order.paymentStatus === 'paid' || settled.has(order.id)) return false;
+  return order.channel !== 'Shopify' || now - orderTime(order) >= RETURN_ISSUE_DAYS * DAY;
+}
+
+function dateOnly(value) {
+  const text = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+  const time = Date.parse(`${text}T00:00:00.000Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === text ? text : '';
+}
+
+function customRange(from, to) {
+  let start = dateOnly(from);
+  let end = dateOnly(to);
+  if (!start && !end) return null;
+  if (start && end && start > end) [start, end] = [end, start];
+  return { from: start, to: end };
+}
+
+function trendKeys(range, days, tzOffset) {
+  if (range) {
+    const end = Date.parse(`${range.to || dayKey(Date.now(), tzOffset)}T00:00:00.000Z`);
+    const start = range.from ? Date.parse(`${range.from}T00:00:00.000Z`) : end - 13 * DAY;
+    const count = Math.min(Math.max(Math.round((end - start) / DAY) + 1, 1), 366);
+    return Array.from({ length: count }, (_, i) => new Date(end - (count - 1 - i) * DAY).toISOString().slice(0, 10));
+  }
+  const trendDays = days === 'all' || days === '' || days == null ? 14 : Number(days);
+  const today = startOfLocalDay(new Date(), tzOffset);
+  const keys = [];
+  for (let i = trendDays - 1; i >= 0; i -= 1) keys.push(dayKey(today - i * DAY, tzOffset));
+  return keys;
+}
+
+function buildOrderSummary(orders, {
+  channel = 'all', days = 'all', from, to, series = [], tzOffset = 0, returnRows = [], settledOrderNos = [],
+} = {}) {
+  const returnsByOrder = new Map();
+  returnRows.forEach((row) => returnsByOrder.set(row.orderNo, [...(returnsByOrder.get(row.orderNo) || []), row.status]));
+  const issueContext = { now: Date.now(), settled: new Set(settledOrderNos), returnsByOrder };
+  const range = customRange(from, to);
+  const start = range || days === 'all' || days === '' || days == null ? 0 : Date.now() - Number(days) * DAY;
   const filtered = (orders || []).filter((order) => {
     if (channel && channel !== 'all' && order.channel !== channel) return false;
+    if (range) {
+      const key = dayKey(order.createdAt, tzOffset);
+      if (!key || (range.from && key < range.from) || (range.to && key > range.to)) return false;
+      return true;
+    }
     if (!start) return true;
     const time = orderTime(order);
     return time >= start;
@@ -48,17 +117,14 @@ function buildOrderSummary(orders, { channel = 'all', days = 'all', series = [],
       id: String(label).toLowerCase(),
       label,
     }));
-  const trendDays = days === 'all' || days === '' || days == null ? 14 : Number(days);
-  const today = startOfLocalDay(new Date(), tzOffset);
   const trend = [];
   const index = {};
-  for (let i = trendDays - 1; i >= 0; i -= 1) {
-    const key = dayKey(today - i * DAY, tzOffset);
+  trendKeys(range, days, tzOffset).forEach((key) => {
     const row = { date: key.slice(5) };
     labels.forEach((entry) => { row[entry.id] = 0; });
     index[key] = row;
     trend.push(row);
-  }
+  });
   filtered.forEach((order) => {
     const row = index[dayKey(order.createdAt, tzOffset)];
     const field = String(order.channel || '').toLowerCase();
@@ -127,12 +193,19 @@ function buildOrderSummary(orders, { channel = 'all', days = 'all', series = [],
     total: filtered.length,
     newOrders: filtered.filter((order) => order.status === 'New').length,
     awaitingDispatch: filtered.filter((order) => AWAITING.has(order.status)).length,
-    returns: filtered.filter((order) => order.reversePickup?.returnId).length,
-    missingInvoice: live.filter((order) => ['Dispatched', 'Delivered'].includes(order.status) && !order.invoiceNo).length,
+    returns: (orders || [])
+      .filter((order) => !channel || channel === 'all' || order.channel === channel)
+      .filter((order) => isReturnIssue(order, issueContext)).length,
+    missingInvoice: live.filter((order) => isProblemInvoice(order, issueContext)).length,
     revenue: netSales(filtered),
     channels: labels.map((entry) => {
       const rows = filtered.filter((order) => order.channel === entry.label);
-      return { channel: entry.label, orders: rows.length, revenue: netSales(rows) };
+      return {
+        channel: entry.label,
+        orders: rows.length,
+        newOrders: rows.filter((order) => order.status === 'New').length,
+        revenue: netSales(rows),
+      };
     }),
     statuses: Object.entries(statusCounts)
       .map(([status, count]) => ({ status, count }))
@@ -144,4 +217,4 @@ function buildOrderSummary(orders, { channel = 'all', days = 'all', series = [],
   };
 }
 
-module.exports = { buildOrderSummary };
+module.exports = { buildOrderSummary, customRange, dayKey };

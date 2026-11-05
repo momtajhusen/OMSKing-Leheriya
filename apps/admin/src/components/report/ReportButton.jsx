@@ -7,6 +7,7 @@ import api, { apiError } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import { formatDuration } from '../../lib/reportChat';
 import screenRecorder from '../../lib/screenRecorder';
+import { onReportFocus } from '../../lib/reportFocus';
 import ReportChat from './ReportChat';
 
 const UNREAD_POLL_MS = 30000;
@@ -17,6 +18,7 @@ export default function ReportButton({ mode = 'merchant', className }) {
   const [thread, setThread] = useState(null);
   const [unread, setUnread] = useState(0);
   const [sending, setSending] = useState(false);
+  const [focusId, setFocusId] = useState(null);
   const known = useRef(null);
   const openRef = useRef(open);
   openRef.current = open;
@@ -53,9 +55,15 @@ export default function ReportButton({ mode = 'merchant', className }) {
     setOpen(true);
   }, [rec.kept]);
 
+  useEffect(() => onReportFocus((messageId) => {
+    setFocusId(messageId);
+    setOpen(true);
+  }), []);
+
   const close = useCallback(() => {
     setOpen(false);
     setThread(null);
+    setFocusId(null);
     loadUnread();
   }, [loadUnread]);
 
@@ -158,7 +166,7 @@ export default function ReportButton({ mode = 'merchant', className }) {
         </div>
       )}
 
-      <ReportChat open={open} onClose={close} mode={mode} onChanged={loadUnread} initialThread={thread} />
+      <ReportChat open={open} onClose={close} mode={mode} onChanged={loadUnread} initialThread={thread} focusId={focusId} />
     </>
   );
 }

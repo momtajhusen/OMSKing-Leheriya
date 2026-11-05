@@ -31,6 +31,7 @@ function toDto(row, counts = new Map()) {
     phone: row.phone || '',
     email: row.email || '',
     telegramGroup: row.telegramGroup || '',
+    shopifyVendors: row.shopifyVendors || [],
     status: row.status,
     source: row.source,
     removed: Boolean(row.removed),
@@ -48,6 +49,36 @@ async function assignedCounts(tenantId) {
     { $group: { _id: { $toLower: '$subOrders.assignedVendor' }, n: { $sum: 1 } } },
   ]);
   return new Map(rows.map((r) => [norm(r._id), r.n]));
+}
+
+/** Shopify vendor names mapped to this vendor; a name may belong to only one vendor in the company. */
+async function setShopifyVendors(tenantId, row, raw) {
+  const names = [];
+  (Array.isArray(raw) ? raw : []).map(cleanName).filter(Boolean).forEach((name) => {
+    if (!names.some((seen) => norm(seen) === norm(name))) names.push(name);
+  });
+  const others = await Vendor.find({ tenantId, _id: { $ne: row._id }, removed: false, shopifyVendors: { $ne: [] } })
+    .setOptions({ skipTenantFilter: true });
+  for (const name of names) {
+    const owner = others.find((other) => other.shopifyVendors.some((taken) => norm(taken) === norm(name)));
+    if (owner) throw new HttpError(409, `${name} is already mapped to ${owner.name}`);
+  }
+  row.shopifyVendors = names;
+}
+
+/** Other active vendors in the company with the same phone or email; allowed, the UI only warns. */
+async function sharedContacts(tenantId, row) {
+  const phone = String(row.phone || '').replace(/\D/g, '');
+  const email = String(row.email || '').trim().toLowerCase();
+  const result = { phone: [], email: [] };
+  if (!phone && !email) return result;
+  const others = await Vendor.find({ tenantId, _id: { $ne: row._id }, removed: false })
+    .sort({ name: 1 }).setOptions({ skipTenantFilter: true });
+  others.forEach((other) => {
+    if (phone && String(other.phone || '').replace(/\D/g, '') === phone) result.phone.push(other.name);
+    if (email && String(other.email || '').trim().toLowerCase() === email) result.email.push(other.name);
+  });
+  return result;
 }
 
 async function listVendors(req, res) {
@@ -73,8 +104,10 @@ async function createVendor(req, res) {
   row.status = 'Active';
   row.source = req.body.source === 'shopify' ? 'shopify' : 'manual';
   FIELDS.forEach((key) => { if (req.body[key] != null) row[key] = String(req.body[key]).trim(); });
+  if (req.body.shopifyVendors != null) await setShopifyVendors(tenantId, row, req.body.shopifyVendors);
   await row.save();
-  return successResponse(res, toDto(row, await assignedCounts(tenantId)), 'Vendor saved', 201);
+  const dto = { ...toDto(row, await assignedCounts(tenantId)), sharedContacts: await sharedContacts(tenantId, row) };
+  return successResponse(res, dto, 'Vendor saved', 201);
 }
 
 /** Vendor-role user updates the vendor row linked to this login. */
@@ -112,8 +145,13 @@ async function updateVendor(req, res) {
     row.status = req.body.status;
   }
   FIELDS.forEach((key) => { if (req.body[key] != null) row[key] = String(req.body[key]).trim(); });
+  if (req.body.shopifyVendors != null && !req.vendorScope?.active) {
+    await setShopifyVendors(tenantId, row, req.body.shopifyVendors);
+  }
   await row.save();
-  return successResponse(res, toDto(row, await assignedCounts(tenantId)), 'Vendor updated');
+  const dto = toDto(row, await assignedCounts(tenantId));
+  if (!req.vendorScope?.active) dto.sharedContacts = await sharedContacts(tenantId, row);
+  return successResponse(res, dto, 'Vendor updated');
 }
 
 function assertLoginPassword(password) {

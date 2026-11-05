@@ -35,8 +35,8 @@ async function platformThread(req, res, next) {
 }
 
 async function listOwn(req, res) {
-  const { rows, hasMore } = await chat.listMessages(req.supportTenantId, req.user.id, req.query);
-  return res.status(200).json({ success: true, message: 'Report messages', data: rows, meta: { hasMore } });
+  const { rows, hasMore, counts } = await chat.listMessages(req.supportTenantId, req.user.id, req.query);
+  return res.status(200).json({ success: true, message: 'Report messages', data: rows, meta: { hasMore, counts } });
 }
 
 function wantsTracking(body) {
@@ -83,8 +83,8 @@ async function listThreads(req, res) {
 }
 
 async function listThread(req, res) {
-  const { rows, hasMore } = await chat.listMessages(req.supportTenantId, req.user.id, req.query);
-  return res.status(200).json({ success: true, message: 'Report messages', data: rows, meta: { hasMore } });
+  const { rows, hasMore, counts } = await chat.listMessages(req.supportTenantId, req.user.id, req.query);
+  return res.status(200).json({ success: true, message: 'Report messages', data: rows, meta: { hasMore, counts } });
 }
 
 async function sendThread(req, res) {

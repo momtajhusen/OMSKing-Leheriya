@@ -64,6 +64,29 @@ const useOrderStore = create((set, get) => ({
     }
   },
 
+  readLineCost: async (masterId, subOrderId) => {
+    try {
+      const { data } = await api.get(
+        `/orders/${encodeURIComponent(masterId)}/sub-orders/${encodeURIComponent(subOrderId)}/cost`,
+      );
+      return data.data;
+    } catch (err) {
+      return { error: apiError(err, 'Could not read the cost') };
+    }
+  },
+
+  saveLineCost: async (masterId, subOrderId, cost) => {
+    try {
+      const { data } = await api.put(
+        `/orders/${encodeURIComponent(masterId)}/sub-orders/${encodeURIComponent(subOrderId)}/cost`,
+        { cost },
+      );
+      return { ...data.data, message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not save the cost') };
+    }
+  },
+
   vendorUpdate: async (masterId, subOrderId, body) => {
     try {
       const { data } = await api.patch(
@@ -128,11 +151,14 @@ const useOrderStore = create((set, get) => ({
     }
   },
 
-  generateInvoice: async (id, { kind = 'invoice', email = true, preview = true } = {}) => {
+  generateInvoice: async (id, { kind = 'invoice', email = true, preview = true, customerGstin } = {}) => {
     const orderId = get().orderId(id);
     if (!orderId) return { error: 'Order not found' };
     try {
-      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/invoice`, { kind, email });
+      const { data } = await api.post(
+        `/orders/${encodeURIComponent(orderId)}/invoice`,
+        { kind, email, ...(customerGstin === undefined ? {} : { customerGstin }) },
+      );
       const pdf = data.data?.invoicePdf;
       const number = kind === 'credit'
         ? `CN-${data.data?.invoiceNo || orderId}`
@@ -142,6 +168,50 @@ const useOrderStore = create((set, get) => ({
       return { ...get().putOrder(data.data), invoicePdf: pdf, invoiceEmail: data.data?.invoiceEmail };
     } catch (err) {
       return { error: apiError(err, 'Could not generate invoice') };
+    }
+  },
+
+  editOrder: async (id, body) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.patch(`/orders/${encodeURIComponent(orderId)}`, body);
+      return { ...get().putOrder(data.data), message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not update the order') };
+    }
+  },
+
+  saveOrderNotes: async (id, notes) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.patch(`/orders/${encodeURIComponent(orderId)}/notes`, { notes });
+      return { ...get().putOrder(data.data), message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not save the order notes') };
+    }
+  },
+
+  saveItemPackage: async (id, index, body) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.patch(`/orders/${encodeURIComponent(orderId)}/items/${index}/package`, body);
+      return { ...get().putOrder(data.data), message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not save the weight and size') };
+    }
+  },
+
+  mapItemSku: async (id, { sku, masterSkuCode }) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/map-sku`, { sku, masterSkuCode });
+      return { ...get().putOrder(data.data), message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not map the SKU') };
     }
   },
 
@@ -168,6 +238,20 @@ const useOrderStore = create((set, get) => ({
       error: '',
       generation: (state.generation || 0) + 1,
     }));
+  },
+
+  /** Load one order the list does not hold (stale or filtered); null when the server has none. */
+  fetchOrder: async (id) => {
+    const started = { generation: get().generation || 0, tenantId: activeTenantId() };
+    try {
+      const { data } = await api.get(`/orders/${encodeURIComponent(id)}`);
+      if (!sameCompanySnapshot(started, { generation: get().generation || 0, tenantId: activeTenantId() })) return null;
+      if (!data?.data) return null;
+      get().putOrder(data.data);
+      return get().getById(id);
+    } catch {
+      return null;
+    }
   },
 
   hydrateFromApi: async () => {

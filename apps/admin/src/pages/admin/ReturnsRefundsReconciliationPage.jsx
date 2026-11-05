@@ -7,6 +7,9 @@ import useReturnsStore, { EMPTY_WORKFLOW } from '../../stores/returnsStore';
 import useAuthStore from '../../stores/authStore';
 import { formatINR, formatDate } from '../../utils/format';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
+import { filterReturnRows } from '../../lib/reportFilters';
+import Select from '../../components/ui/Select';
+import Input from '../../components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -35,6 +38,11 @@ export default function ReturnsRefundsReconciliationPage() {
   const tenantId = useAuthStore((s) => s.user?.tenantId);
   const workflow = useReturnsStore((s) => (tenantId && s.workflowByTenant?.[tenantId]) || EMPTY_WORKFLOW);
   const [tab, setTab] = useState('all');
+  const [channelFilter, setChannelFilter] = useState('');
+  const [kindFilter, setKindFilter] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [returnFile, setReturnFile] = useState([]);
   const [busy, setBusy] = useState(false);
   const connected = useConnectedChannels();
@@ -68,15 +76,30 @@ export default function ReturnsRefundsReconciliationPage() {
     }];
   }).sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt))), [orders, workflow]);
 
-  const filtered = rows.filter((row) => {
+  const kinds = useMemo(() => [...new Set(rows.map((row) => row.kind))].sort(), [rows]);
+  const payments = useMemo(() => [...new Set(rows.map((row) => row.order.paymentMode).filter(Boolean))].sort(), [rows]);
+  const scoped = useMemo(
+    () => filterReturnRows(rows, { channel: channelFilter, kind: kindFilter, payment: paymentFilter, from: fromDate, to: toDate }),
+    [rows, channelFilter, kindFilter, paymentFilter, fromDate, toDate],
+  );
+  const hasFilters = Boolean(channelFilter || kindFilter || paymentFilter || fromDate || toDate);
+  const clearFilters = () => {
+    setChannelFilter('');
+    setKindFilter('');
+    setPaymentFilter('');
+    setFromDate('');
+    setToDate('');
+  };
+
+  const filtered = scoped.filter((row) => {
     if (tab === 'awaiting') return row.shipped && !row.received;
     if (tab === 'received') return row.shipped && row.received;
     if (tab === 'refund') return row.refund > 0;
     return true;
   });
 
-  const summary = connected.labels.map((channel) => {
-    const list = rows.filter((row) => row.order.channel === channel);
+  const summary = (channelFilter ? [channelFilter] : connected.labels).map((channel) => {
+    const list = scoped.filter((row) => row.order.channel === channel);
     return { channel, total: list.length, awaiting: list.filter((row) => row.shipped && !row.received).length };
   });
 
@@ -107,11 +130,44 @@ export default function ReturnsRefundsReconciliationPage() {
         </p>
       </div>
 
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="w-44">
+          <p className="mb-1 text-sm font-medium">Channel</p>
+          <Select value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)}>
+            <option value="">All channels</option>
+            {connected.labels.map((label) => <option key={label} value={label}>{label}</option>)}
+          </Select>
+        </div>
+        <div className="w-56">
+          <p className="mb-1 text-sm font-medium">Type</p>
+          <Select value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
+            <option value="">All types</option>
+            {kinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+          </Select>
+        </div>
+        <div className="w-40">
+          <p className="mb-1 text-sm font-medium">Payment</p>
+          <Select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)}>
+            <option value="">All payments</option>
+            {payments.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+          </Select>
+        </div>
+        <div className="w-44">
+          <p className="mb-1 text-sm font-medium">Order date from</p>
+          <Input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} />
+        </div>
+        <div className="w-44">
+          <p className="mb-1 text-sm font-medium">To</p>
+          <Input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} />
+        </div>
+        {hasFilters && <Button variant="ghost" onClick={clearFilters}>Clear filters</Button>}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <KpiCard label="Cancellations + returns" value={rows.length} icon={RotateCcw} onClick={() => setTab('all')} />
-        <KpiCard label="Parcel not back" value={rows.filter((row) => row.shipped && !row.received).length} icon={Clock} onClick={() => setTab('awaiting')} />
-        <KpiCard label="Return received" value={rows.filter((row) => row.shipped && row.received).length} icon={PackageCheck} onClick={() => setTab('received')} />
-        <KpiCard label="Prepaid refunds" value={formatINR(rows.reduce((sum, row) => sum + row.refund, 0))} icon={AlertTriangle} onClick={() => setTab('refund')} />
+        <KpiCard label="Cancellations + returns" value={scoped.length} icon={RotateCcw} onClick={() => setTab('all')} />
+        <KpiCard label="Parcel not back" value={scoped.filter((row) => row.shipped && !row.received).length} icon={Clock} onClick={() => setTab('awaiting')} />
+        <KpiCard label="Return received" value={scoped.filter((row) => row.shipped && row.received).length} icon={PackageCheck} onClick={() => setTab('received')} />
+        <KpiCard label="Prepaid refunds" value={formatINR(scoped.reduce((sum, row) => sum + row.refund, 0))} icon={AlertTriangle} onClick={() => setTab('refund')} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

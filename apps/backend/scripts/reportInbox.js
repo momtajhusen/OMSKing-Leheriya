@@ -9,7 +9,8 @@
  *   node scripts/reportInbox.js --watch 10   check now and then every 10 minutes
  *   node scripts/reportInbox.js --mark <in-progress|complete|blocked|failed|not-started> <messageId...> [--note text]
  *       set task status; in-progress and complete also show on that message in the live Report chat
- *       complete also takes --issue "<text>" --fix "<text>": short Hinglish lines for the message's detail tooltip
+ *       complete also takes --issue "<text>" --fix "<text>": short Hinglish lines for the message's detail tooltip,
+ *       and --check "<step; step>": how to verify the fix, shown with the message's open-page icon
  *   node scripts/reportInbox.js --ask <messageId> --need "<requirement>" --question "<text for the client>"
  *       ask the client as a reply to their message; the task becomes Waiting for client until they answer
  *   node scripts/reportInbox.js --attach <taskMessageId> <foundMessageId>
@@ -20,6 +21,8 @@
  *       an Auto-fix change was applied to the main files (its tasks become Complete) or will not be (Fix failed)
  *   node scripts/reportInbox.js --flag-unapplied  one-time scan: Complete tasks whose Auto-fix patch is not applied
  *       go back to Awaiting apply
+ *   node scripts/reportInbox.js --unclear <id> --need "<what is unclear>" --options "a | b" --from <developer|client>
+ *       still unclear after the task and its nearby messages: Needs input, answered in the Auto-fix form
  *   Inside an Auto-fix run (REPORT_AUTOFIX_RUN set) --mark complete only sets Awaiting apply.
  *
  * A check that finds new messages prints a line starting with REPORT_INBOX_NEW; a failed check prints REPORT_INBOX_ERROR.
@@ -39,7 +42,20 @@ const MIME_EXT = {
 };
 const KIND_LABEL = { image: 'Photo', video: 'Video', audio: 'Voice note', file: 'Document' };
 const EVENT_LABEL = { confirm: 'Client confirmed the fix', reopen: 'Client reopened', start: 'Started', complete: 'Marked done' };
-const STATUSES = ['Complete', 'In progress', 'Not started', 'Blocked', 'Fix failed', 'Waiting for client', 'Client replied', 'Awaiting apply'];
+const STATUSES = [
+  'Complete', 'In progress', 'Not started', 'Blocked', 'Fix failed', 'Waiting for client', 'Client replied', 'Awaiting apply', 'Needs input', 'Input given',
+];
+/** Still unclear after reading the task and its nearby messages: waits for the developer's answer in the Auto-fix form. */
+const NEEDS_INPUT = 'Needs input';
+/** Task list statuses behind each Report chat filter (the live chat shows waiting / asked tasks as In progress). */
+const SCOPE_STATUSES = {
+  pending: ['Not started'],
+  client: ['Not started'],
+  progress: ['In progress', 'Client replied', 'Input given', 'Waiting for client'],
+  developer: ['In progress', 'Client replied', 'Input given', 'Waiting for client'],
+  fixed: [],
+};
+const INPUT_GIVEN = 'Input given';
 const WAITING = 'Waiting for client';
 /** Fixed in an Auto-fix copy, but the change is not in the main files yet: Complete only once it is applied. */
 const AWAITING = 'Awaiting apply';
@@ -123,7 +139,11 @@ function taskBlocks(text) {
       issue: (/^- Issue: (.*)$/m.exec(block) || [])[1] || '',
       fix: (/^- Fix: (.*)$/m.exec(block) || [])[1] || verified[verified.length - 1] || '',
       fixLine: (/^- Fix: (.*)$/m.exec(block) || [])[1] || '',
+      check: (/^- Check: (.*)$/m.exec(block) || [])[1] || '',
       pendingRun: (/^- Pending patch: Auto-fix run (\S+)/m.exec(block) || [])[1] || null,
+      unclear: (/^- Unclear: (.*)$/m.exec(block) || [])[1] || '',
+      options: ((/^- Options: (.*)$/m.exec(block) || [])[1] || '').split(' | ').filter(Boolean),
+      inputFrom: (/^- Input from: (\w+)/m.exec(block) || [])[1] || '',
     };
   });
 }
@@ -135,27 +155,79 @@ function taskBlocks(text) {
 function nextTask(text, skip = []) {
   const rows = taskBlocks(text);
   const lastDone = rows.map((r) => (r.status === AWAITING ? 'Complete' : r.status)).lastIndexOf('Complete');
-  const row = rows.slice(lastDone + 1).find((r) => r.status === 'Not started' && r.messageId && !r.partOf && !skip.includes(r.messageId));
+  const open = (r) => r.status === 'Not started' && r.messageId && !r.partOf && !skip.includes(r.messageId);
+  const row = rows.slice(lastDone + 1).find(open) || rows.find(open);
   return row ? { messageId: row.messageId, time: row.time, message: row.message } : null;
 }
 
+/** The pending tasks in the order Pending auto-play fixes them (nextTask, again and again), at most `limit`. */
+function pendingQueue(text, limit = Infinity) {
+  const queue = [];
+  while (queue.length < limit) {
+    const row = nextTask(text, queue.map((q) => q.messageId));
+    if (!row) break;
+    queue.push(row);
+  }
+  return queue;
+}
+
 /**
- * What one Auto-fix click works on, in strict order: a task whose client reply has arrived; else the tasks waiting for
+ * What one Auto-fix click works on, in strict order: a task whose client reply has arrived; else a task an interrupted
+ * run left In progress (only one run works at a time, so nothing else is on it); else the tasks waiting for
  * the client (the agent searches the whole history for each requirement, and falls back to `next` when none is found);
  * else the next pending task. A waiting task never blocks the rest: `next` is always the following pending task.
  */
-function planAutofix(text) {
-  const rows = taskBlocks(text).filter((r) => r.messageId && !r.partOf);
+function planAutofix(text, { scope = 'all', messageId = '' } = {}) {
+  const statuses = messageId ? null : SCOPE_STATUSES[scope] || null;
+  const inScope = (r) => (!messageId || r.messageId === messageId) && (!statuses || statuses.includes(r.status));
+  const rows = taskBlocks(text).filter((r) => r.messageId && !r.partOf && inScope(r));
   const brief = (r) => (r ? { messageId: r.messageId, message: r.message } : null);
-  const next = brief(nextTask(text));
-  const replied = rows.find((r) => r.status === REPLIED);
+  const pick = (skip = []) => {
+    if (messageId) return rows.find((r) => r.status === 'Not started' && !skip.includes(r.messageId)) || null;
+    return !statuses || statuses.includes('Not started') ? nextTask(text, skip) : null;
+  };
+  const next = brief(pick());
+  const replied = rows.find((r) => r.status === REPLIED || r.status === INPUT_GIVEN);
+  if (replied?.status === INPUT_GIVEN) return { kind: 'replied', task: { ...brief(replied), unclear: replied.unclear, input: true }, next };
   if (replied) return { kind: 'replied', task: { ...brief(replied), need: replied.need }, next };
+  const stuck = rows.find((r) => r.status === 'In progress');
+  if (stuck) return { kind: 'resume', task: brief(stuck), next };
   const waiting = rows.filter((r) => r.status === WAITING);
   if (waiting.length) {
     return { kind: 'waiting', waiting: waiting.map((r) => ({ ...brief(r), need: r.need, questionId: r.questions[r.questions.length - 1] || null })), next };
   }
-  if (next) return { kind: 'next', task: next, next: brief(nextTask(text, [next.messageId])) };
+  if (next) return { kind: 'next', task: next, next: brief(pick([next.messageId])) };
   return null;
+}
+
+/** The tasks just before and after this one in the list (2 each): a requirement is often split over them. */
+function nearbyTasks(text, messageId, span = 2) {
+  const rows = taskBlocks(text).filter((r) => r.messageId);
+  const at = rows.findIndex((r) => r.messageId === messageId);
+  const pick = (list) => list.map((r) => ({ messageId: r.messageId, message: r.message, status: r.status }));
+  if (at < 0) return { before: [], after: [] };
+  return { before: pick(rows.slice(Math.max(0, at - span), at)), after: pick(rows.slice(at + 1, at + 1 + span)) };
+}
+
+/** The page area from the task's Type line, e.g. "Orders list" from "Type: Bug (Orders list)". */
+function taskArea(text, messageId) {
+  return taskBlocks(text).find((r) => r.messageId === messageId)?.area || '';
+}
+
+/** Tasks waiting for input in the Auto-fix form, with what is unclear, the options and the nearby messages. */
+function inputRequests(text) {
+  return taskBlocks(text).filter((r) => (r.status === NEEDS_INPUT || r.status === WAITING) && r.messageId).map((r) => {
+    const waiting = r.status === WAITING;
+    return {
+      messageId: r.messageId,
+      message: r.message,
+      kind: waiting ? 'waiting' : 'unclear',
+      unclear: waiting ? r.need : r.unclear,
+      options: waiting ? [] : r.options,
+      from: waiting ? 'client' : r.inputFrom || 'developer',
+      nearby: nearbyTasks(text, r.messageId),
+    };
+  });
 }
 
 const SUMMARY_MAX = 160;
@@ -168,7 +240,7 @@ const brief = (s) => (s.length > SUMMARY_MAX ? `${s.slice(0, SUMMARY_MAX - 1)}�
  */
 function taskSummaries(text) {
   const rows = taskBlocks(text).filter((r) => r.messageId && r.status === 'Complete');
-  const own = new Map(rows.map((r) => [r.messageId, { issue: brief(r.issue || r.message), fix: brief(r.fix), area: r.area }]));
+  const own = new Map(rows.map((r) => [r.messageId, { issue: brief(r.issue || r.message), fix: brief(r.fix), area: r.area, ...(r.check ? { check: r.check } : {}) }]));
   return Object.fromEntries(rows.map((r) => [r.messageId, (r.partOf && own.get(r.partOf)) || own.get(r.messageId)]));
 }
 
@@ -213,6 +285,15 @@ function collapsed(title, m, files, idLabel) {
 /** Status label of the task for `messageId`, or null when it is not in the list. */
 function taskStatus(text, messageId) {
   return taskBlocks(text).find((r) => r.messageId === messageId)?.status ?? null;
+}
+
+/** How many tasks are pending, being worked on and complete. */
+function statusCounts(text) {
+  const tasks = taskBlocks(text);
+  const count = (statuses) => tasks.filter((r) => statuses.includes(r.status)).length;
+  return {
+    pending: count(SCOPE_STATUSES.pending), progress: count(SCOPE_STATUSES.progress), complete: count(['Complete']), total: tasks.length,
+  };
 }
 
 function cell(text) {
@@ -451,7 +532,9 @@ async function moveLive(api, found, mark, note = '') {
 async function saveLiveSummary(api, found, update, summary, logger) {
   const url = `/support/threads/${encodeURIComponent(found.tenantId)}/updates/${encodeURIComponent(update.id)}`;
   try {
-    await api.request('PATCH', url, { action: 'summary', issue: summary.issue, fix: summary.fix, area: summary.area });
+    await api.request('PATCH', url, {
+      action: 'summary', issue: summary.issue, fix: summary.fix, area: summary.area, ...(summary.check ? { check: summary.check } : {}),
+    });
     return true;
   } catch (err) {
     logger.log(`report-inbox: summary not saved on live for ${found.message.id}: ${err.message}`);
@@ -473,7 +556,7 @@ function setTaskLabel(text, messageId, label) {
  * never touched. Not started, Blocked and Fix failed only change the task list.
  */
 async function markTasks({
-  settings, outDir = DEFAULT_OUT_DIR, mark, messageIds = [], note = '', issue = '', fix = '', pendingRun = '', logger = console,
+  settings, outDir = DEFAULT_OUT_DIR, mark, messageIds = [], note = '', issue = '', fix = '', check = '', pendingRun = '', logger = console,
 }) {
   if (!MARKS[mark]) throw new Error(`Unknown status "${mark}": use ${Object.keys(MARKS).join(', ')}`);
   const deferred = mark === 'complete' && Boolean(pendingRun);
@@ -493,12 +576,13 @@ async function markTasks({
       let next = setTaskLabel(current, id, label);
       if (mark === 'complete' && oneLine(issue)) next = setTaskLine(next, id, 'Issue', issue);
       if (mark === 'complete' && oneLine(fix)) next = setTaskLine(next, id, 'Fix', fix);
+      if (mark === 'complete' && oneLine(check)) next = setTaskLine(next, id, 'Check', check);
       if (deferred) next = setTaskLine(next, id, 'Pending patch', `Auto-fix run ${pendingRun} — apply it with the header Apply fix button`);
       else if (mark === 'complete') next = removeTaskLine(next, id, 'Pending patch');
       next = withOverview(next);
       if (next !== current) fs.writeFileSync(tasksFile, next);
       const summary = taskSummaries(next)[id];
-      if (update && mark === 'complete' && (oneLine(issue) || oneLine(fix)) && summary) {
+      if (update && mark === 'complete' && (oneLine(issue) || oneLine(fix) || oneLine(check)) && summary) {
         await saveLiveSummary(api, found, update, summary, logger);
       }
     }
@@ -513,8 +597,20 @@ const runTasks = (text, runId) => taskBlocks(text).filter((r) => r.status === AW
 async function completeApplied({ settings, outDir = DEFAULT_OUT_DIR, runId, logger = console }) {
   const rows = runTasks(fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8'), runId);
   for (const row of rows) {
-    await markTasks({ settings, outDir, mark: 'complete', messageIds: [row.messageId], issue: row.issue, fix: row.fixLine, logger });
+    await markTasks({ settings, outDir, mark: 'complete', messageIds: [row.messageId], issue: row.issue, fix: row.fixLine, check: row.check, logger });
   }
+  return rows.map((r) => r.messageId);
+}
+
+/** The Auto-fix change of `runId` could not be verified: its Awaiting apply tasks go back to In progress with the reason. */
+function holdRun({ outDir = DEFAULT_OUT_DIR, runId, reason }) {
+  const why = oneLine(reason);
+  const rows = runTasks(fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8'), runId);
+  updateTasks(outDir, (text) => rows.reduce((acc, row) => addToTask(
+    removeTaskLine(setTaskLabel(acc, row.messageId, MARKS['in-progress']), row.messageId, 'Pending patch'),
+    row.messageId,
+    `- Status: ${when(new Date().toISOString())} — Auto-fix left it In progress. ${why}\n`,
+  ), text));
   return rows.map((r) => r.messageId);
 }
 
@@ -532,9 +628,56 @@ function discardRun({ outDir = DEFAULT_OUT_DIR, runId, reason }) {
   return rows.map((r) => r.messageId);
 }
 
+/** The task stays unclear after its nearby messages: Needs input, with what is unclear and the options (task list only). */
+function needInput({ outDir = DEFAULT_OUT_DIR, messageId, unclear, options = [], from = 'developer' }) {
+  const what = oneLine(unclear);
+  if (!what) throw new Error('Say what is unclear with --need "<what is unclear>"');
+  if (!['developer', 'client'].includes(from)) throw new Error('--from must be developer or client');
+  const choices = options.map(oneLine).filter(Boolean);
+  const text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+  if (!taskBlocks(text).some((r) => r.messageId === messageId)) throw new Error(`Task ${messageId} is not in the task list`);
+  updateTasks(outDir, (t) => {
+    let next = setTaskLine(setTaskLabel(t, messageId, NEEDS_INPUT), messageId, 'Unclear', what);
+    next = choices.length ? setTaskLine(next, messageId, 'Options', choices.join(' | ')) : removeTaskLine(next, messageId, 'Options');
+    return setTaskLine(next, messageId, 'Input from', from);
+  });
+}
+
+/** The developer's answer from the Auto-fix form: added collapsed under the task, which is then fixed first (Input given). */
+function provideInput({ outDir = DEFAULT_OUT_DIR, messageId, text: answer }) {
+  const body = String(answer || '').trim();
+  if (!body) throw new Error('Write the answer first');
+  const text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+  if (![NEEDS_INPUT, WAITING].includes(taskStatus(text, messageId))) throw new Error(`Task ${messageId} is not waiting for input`);
+  const short = oneLine(body).slice(0, 80);
+  const block = `<details><summary>Developer input · ${when(new Date().toISOString())} · ${short}</summary>\n\n${body}\n\n</details>\n`;
+  updateTasks(outDir, (t) => addToTask(setTaskLabel(t, messageId, INPUT_GIVEN), messageId, block));
+}
+
 const gitOk = (repoDir, args) => {
   try { execFileSync('git', args, { cwd: repoDir, stdio: 'ignore' }); return true; } catch { return false; }
 };
+
+function patchState(repoDir, file) {
+  if (gitOk(repoDir, ['apply', '--check', '--reverse', file])) return 'applied';
+  return gitOk(repoDir, ['apply', '--check', file]) ? 'not applied' : 'conflicts';
+}
+
+/**
+ * Completes every Awaiting apply task whose run's patch is already in the main files. Apply fix changes backend files,
+ * so the dev server restarts and can cut the request off before the tasks are marked; this settles them afterwards.
+ * Safe to repeat: the live Complete mark is skipped when it is already there.
+ */
+async function reconcileApplied({ settings, outDir = DEFAULT_OUT_DIR, repoDir, logger = console }) {
+  const text = fs.existsSync(path.join(outDir, 'TASKS.md')) ? fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8') : '';
+  const runs = [...new Set(taskBlocks(text).filter((r) => r.status === AWAITING && r.pendingRun).map((r) => r.pendingRun))];
+  const done = [];
+  for (const runId of runs) {
+    const file = path.join(outDir, 'autofix', `${runId}.patch`);
+    if (fs.existsSync(file) && patchState(repoDir, file) === 'applied') done.push(...await completeApplied({ settings, outDir, runId, logger }));
+  }
+  return done;
+}
 
 /**
  * One-time scan of the saved Auto-fix patches: a patch that is not in the main files moves the Complete tasks its run
@@ -546,9 +689,7 @@ function flagUnapplied({ repoDir, outDir = DEFAULT_OUT_DIR, logger = console }) 
   const patches = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.patch')).sort() : [];
   const result = patches.map((patch) => {
     const file = path.join(dir, patch);
-    let state = 'conflicts';
-    if (gitOk(repoDir, ['apply', '--check', '--reverse', file])) state = 'applied';
-    else if (gitOk(repoDir, ['apply', '--check', file])) state = 'not applied';
+    const state = patchState(repoDir, file);
     const logFile = file.replace(/\.patch$/, '.log');
     const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
     const marked = [...log.matchAll(/--mark complete((?:\s+[0-9a-f]{24})+)/g)].flatMap((m) => m[1].trim().split(/\s+/));
@@ -666,6 +807,11 @@ async function main(argv) {
   if (argv.includes('--sync-summaries')) return once(() => syncSummaries({ settings, outDir }));
   if (argv.includes('--applied')) return once(() => completeApplied({ settings, outDir, runId: flag('--applied') }));
   if (argv.includes('--discard')) return once(async () => discardRun({ outDir, runId: flag('--discard'), reason: flag('--reason') }));
+  if (argv.includes('--unclear')) {
+    return once(async () => needInput({
+      outDir, messageId: flag('--unclear'), unclear: flag('--need'), options: flag('--options').split('|').map((o) => o.trim()), from: flag('--from') || 'developer',
+    }));
+  }
   if (argv.includes('--flag-unapplied')) return once(async () => flagUnapplied({ repoDir: path.resolve(__dirname, '../../..'), outDir }));
   if (argv.includes('--ask')) {
     return once(() => askClient({ settings, outDir, messageId: flag('--ask'), need: flag('--need'), question: flag('--question') }));
@@ -678,11 +824,11 @@ async function main(argv) {
   if (markAt >= 0) {
     const noteAt = argv.indexOf('--note');
     const note = noteAt >= 0 ? argv[noteAt + 1] || '' : '';
-    const valued = ['--note', '--issue', '--fix'];
+    const valued = ['--note', '--issue', '--fix', '--check'];
     const ids = argv.slice(markAt + 2).filter((a, i, all) => !valued.includes(a) && !valued.includes(all[i - 1]));
     try {
       await markTasks({
-        settings, outDir, mark: argv[markAt + 1], messageIds: ids, note, issue: flag('--issue'), fix: flag('--fix'),
+        settings, outDir, mark: argv[markAt + 1], messageIds: ids, note, issue: flag('--issue'), fix: flag('--fix'), check: flag('--check'),
         pendingRun: process.env.REPORT_AUTOFIX_RUN || '',
       });
     } catch (err) {
@@ -711,6 +857,6 @@ async function main(argv) {
 if (require.main === module) main(process.argv.slice(2));
 
 module.exports = {
-  runOnce, markTasks, syncSummaries, completeApplied, discardRun, flagUnapplied, askClient, attachFound, printHistory, nextTask, planAutofix, taskStatus, taskSummaries, clientMessagesAfter, mediaFileName,
+  runOnce, markTasks, syncSummaries, completeApplied, discardRun, flagUnapplied, reconcileApplied, needInput, provideInput, inputRequests, nearbyTasks, taskArea, SCOPE_STATUSES, statusCounts, runTasks, holdRun, askClient, attachFound, printHistory, nextTask, pendingQueue, planAutofix, taskStatus, taskSummaries, clientMessagesAfter, mediaFileName,
   taskEntry,
 };

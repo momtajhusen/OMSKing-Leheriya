@@ -7,6 +7,7 @@ const { getConnection, credsOf } = require('./channelConnection.service');
 const { releaseReservation } = require('./inventory.service');
 const { enqueue } = require('./jobQueue.service');
 const { bookPaymentMode } = require('./orderDesk.service');
+const { orderPackage } = require('./packageDefaults.service');
 const delhivery = require('../adapters/couriers/delhivery');
 const shopify = require('../adapters/shopify');
 const amazon = require('../adapters/amazon');
@@ -85,7 +86,9 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
       throw err;
     }
     await delhivery.serviceable(creds, { pincode, paymentMode: pay, request });
+    const pack = await orderPackage(tenantId, order.items || []);
     const booked = await delhivery.book(creds, {
+      ...pack,
       name: order.customer || 'Customer',
       address: order.address || order.city,
       pincode,
@@ -99,6 +102,7 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
       amount: order.total || 0,
       pickupAddress: pickup.address,
     }, { request });
+    order.labelPaymentMode = booked.paymentMode || pay;
     const label = await delhivery.labelPdf(creds, booked.awb, { request });
     shipment = await saveShipment({
       tenantId,
@@ -125,6 +129,62 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
   order.labelGeneratedAt = new Date();
   await order.save();
   return shipment;
+}
+
+async function bookOtherCourier(tenantId, orderNo, { courier, awb } = {}, deps = {}) {
+  const CourierAccount = require('../models/CourierAccount');
+  const order = await skip(Order.findOne({ tenantId, orderNo }));
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (String(order.channel).toLowerCase() !== 'shopify') {
+    throw new HttpError(400, `${order.channel} uses the marketplace courier.`);
+  }
+  const code = String(courier || '').trim();
+  const account = await skip(CourierAccount.findOne({ tenantId, code, status: 'active' }));
+  if (!account || /^delhivery/.test(code)) throw new HttpError(400, 'This courier is not enabled for this company.');
+  const tracking = String(awb || '').trim();
+  if (!tracking) throw new HttpError(400, `Enter the ${account.name} AWB from the courier portal.`);
+  const pay = bookPaymentMode(order.paymentMode);
+  if (pay === 'Void') throw new HttpError(400, 'This payment is Void. It is not booked as COD.');
+  if (await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked' }))) {
+    throw new HttpError(400, 'This order already has a booked AWB. Cancel it first.');
+  }
+  const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
+  if (!shopify.hasShopifyAuth(shopCreds)) throw new HttpError(400, 'Shopify shop URL and admin token are missing.');
+  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+    orderId: order.externalOrderId || order.orderNo,
+    trackingNumber: tracking,
+    company: account.name,
+    request: deps.shopifyRequest,
+  });
+  const shipment = await saveShipment({
+    tenantId,
+    orderNo: order.orderNo,
+    channel: 'shopify',
+    courier: account.code,
+    awb: tracking,
+    status: 'booked',
+    warehouseCode: 'WH-001',
+    shopifyFulfillmentId: fulfilled.fulfillmentId,
+    bookedAt: new Date(),
+  });
+  order.awb = tracking;
+  order.courier = account.name;
+  order.labelPaymentMode = pay;
+  order.status = 'Dispatched';
+  order.labelGeneratedAt = new Date();
+  await order.save();
+  return shipment;
+}
+
+async function bookingCouriers(tenantId) {
+  const CourierAccount = require('../models/CourierAccount');
+  const rows = await skip(CourierAccount.find({ tenantId, status: 'active' }).sort({ priority: 1, name: 1 }));
+  const seen = new Set(['delhivery']);
+  const others = rows.filter((row) => !/^delhivery/.test(row.code) && !seen.has(row.code) && seen.add(row.code));
+  return [
+    { code: 'delhivery', name: 'Delhivery', api: true },
+    ...others.map((row) => ({ code: row.code, name: row.name, api: false })),
+  ];
 }
 
 async function cancelShopifyLabel(tenantId, orderNo, { releaseReserve = false, deps = {} } = {}) {
@@ -335,6 +395,7 @@ async function shippingReadiness(tenantId) {
     courierReady,
     warehouseReady: Boolean(row?.address?.line1 && row?.address?.pincode && row?.contactPhone),
     missing,
+    couriers: await bookingCouriers(tenantId),
   };
 }
 
@@ -355,6 +416,7 @@ async function runShipmentJob(job, deps = {}) {
 
 module.exports = {
   bookShopify,
+  bookOtherCourier,
   cancelShopifyLabel,
   bookMarketplace,
   releaseVendorSlice,

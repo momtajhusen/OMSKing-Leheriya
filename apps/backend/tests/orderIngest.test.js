@@ -167,6 +167,28 @@ describe('order ingestion', () => {
     assert.match(`${saved.address} ${saved.city}`, /\b135001\b/);
   });
 
+  it('keeps the Shopify customer email and backfills an order saved without one', async () => {
+    const line = [{ sku: 'KURTA', title: 'Kurta', quantity: 1, price: '100.00' }];
+    assert.equal(shopify.mapShopifyOrder({ id: 5601, email: 'a@x.in', line_items: line }, {}).email, 'a@x.in');
+    assert.equal(shopify.mapShopifyOrder({ id: 5602, contact_email: 'b@x.in', line_items: line }, {}).email, 'b@x.in');
+    assert.equal(shopify.mapShopifyOrder({ id: 5603, customer: { email: 'c@x.in' }, line_items: line }, {}).email, 'c@x.in');
+    const { tenant } = await seller();
+    await Order.create({
+      tenantId: tenant._id,
+      orderNo: 'SHP-5604',
+      channel: 'Shopify',
+      externalOrderId: '5604',
+      email: '',
+      status: 'New',
+      source: 'channel_api',
+      items: [{ sku: 'KURTA', name: 'Kurta', qty: 1 }],
+    });
+    const mapped = shopify.mapShopifyOrder({ id: 5604, customer: { email: 'narvekar@example.com' }, line_items: line }, {});
+    await ingestChannelOrders(String(tenant._id), 'shopify', [mapped]);
+    const row = (await ordersFor(tenant, { status: 'all' })).find((order) => order.id === 'SHP-5604');
+    assert.equal(row.email, 'narvekar@example.com');
+  });
+
   it('keeps the Shopify product vendor on each order line without assigning it', async () => {
     const { tenant } = await seller();
     const mapped = shopify.mapShopifyOrder({
@@ -261,6 +283,39 @@ describe('order ingestion', () => {
     assert.equal(reopened.status, 'New');
     const fresh = await ordersFor(tenant, { status: 'New' });
     assert.ok(fresh.some((row) => row.id === 'SHP-4403'));
+  });
+
+  it('shows the courier and AWB from a Shopify fulfilment made outside OMSKing', async () => {
+    const { tenant } = await seller();
+    const id = String(tenant._id);
+    await ingestChannelOrders(id, 'shopify', [shopifyOrder(4408)]);
+    const raw = (fulfillments) => shopify.mapShopifyOrder({
+      id: 4408,
+      financial_status: 'paid',
+      fulfillment_status: 'fulfilled',
+      line_items: [{ sku: 'KURTA', title: 'Kurta', quantity: 1, price: '100.00' }],
+      fulfillments,
+    }, {});
+    const mapped = raw([
+      { id: 1, status: 'cancelled', tracking_company: 'Bluedart', tracking_number: 'OLD-1' },
+      { id: 2, status: 'success', tracking_company: 'Delhivery', tracking_number: '36925810147' },
+    ]);
+    assert.equal(mapped.courier, 'Delhivery');
+    assert.equal(mapped.awb, '36925810147');
+    await ingestChannelOrders(id, 'shopify', [mapped]);
+    const row = (await ordersFor(tenant, { status: 'all' })).find((order) => order.id === 'SHP-4408');
+    assert.equal(row.status, 'Dispatched');
+    assert.equal(row.courier, 'Delhivery');
+    assert.equal(row.awb, '36925810147');
+
+    await ingestChannelOrders(id, 'shopify', [shopifyOrder(4409)]);
+    await Order.updateOne({ tenantId: tenant._id, orderNo: 'SHP-4409' }, { $set: { courier: 'Delhivery', awb: 'OMS-AWB-1' } }).setOptions({ skipTenantFilter: true });
+    const other = raw([{ id: 3, status: 'success', tracking_company: 'Xpressbees', tracking_number: 'XB-9' }]);
+    other.externalOrderId = '4409';
+    await ingestChannelOrders(id, 'shopify', [other]);
+    const kept = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-4409' }).setOptions({ skipTenantFilter: true });
+    assert.equal(kept.awb, 'OMS-AWB-1', 'an AWB stamped by an OMSKing label is not replaced');
+    assert.equal(kept.courier, 'Delhivery');
   });
 
   it('shows the original Shopify, Amazon and Myntra order id on the list and finds it in search', async () => {

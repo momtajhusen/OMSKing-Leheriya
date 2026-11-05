@@ -101,3 +101,63 @@ test('orders list has Pickup & Manifest, In Transit, Delivered and RTO tabs with
   assert.equal(pickup.counts.RTO, 2);
   assert.equal(pickup.counts.total, 7);
 });
+
+test('orders list filters by order date range (marketplace order date, local day)', async () => {
+  const shop = await provisionMerchant({
+    name: 'Date filter shop',
+    ownerEmail: `date-${Date.now()}@example.com`,
+    ownerName: 'Date Owner',
+    password: 'Password1',
+    status: 'active',
+  });
+  const tenantId = shop.tenant._id;
+  const row = { tenantId, channel: 'Myntra', source: 'manual', status: 'New', items: [{ name: 'Kurta', sku: 'K1', qty: 1, price: 100 }] };
+  await Order.create([
+    { ...row, orderNo: 'DATE-OCT20', orderDate: new Date('2026-10-20T10:00:00.000Z') },
+    // 21 Oct 01:00 IST is still 20 Oct in UTC.
+    { ...row, orderNo: 'DATE-OCT21-IST', orderDate: new Date('2026-10-20T19:30:00.000Z') },
+    { ...row, orderNo: 'DATE-OCT22', orderDate: new Date('2026-10-22T10:00:00.000Z') },
+    { ...row, orderNo: 'DATE-OCT25', orderDate: new Date('2026-10-25T10:00:00.000Z') },
+  ]);
+  const token = await login(shop.owner.email);
+  const ids = async (query) => {
+    const res = await api('GET', `/api/v1/orders?limit=50&${query}`, { token });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    return res.body.data.map((item) => item.orderNo).sort();
+  };
+
+  assert.deepEqual(await ids('from=2026-10-21&to=2026-10-22&tzOffset=-330'), ['DATE-OCT21-IST', 'DATE-OCT22']);
+  assert.deepEqual(await ids('from=2026-10-22'), ['DATE-OCT22', 'DATE-OCT25']);
+  assert.deepEqual(await ids('to=2026-10-20'), ['DATE-OCT20', 'DATE-OCT21-IST']);
+  assert.equal((await ids('from=bad-date')).length, 4);
+});
+
+test('orders list filters by several statuses at once (comma separated)', async () => {
+  const shop = await provisionMerchant({
+    name: 'Multi status shop',
+    ownerEmail: `multi-${Date.now()}@example.com`,
+    ownerName: 'Multi Owner',
+    password: 'Password1',
+    status: 'active',
+  });
+  const tenantId = shop.tenant._id;
+  const row = { tenantId, channel: 'Shopify', source: 'manual', items: [{ name: 'Kurta', sku: 'K1', qty: 1, price: 100 }] };
+  await Order.create([
+    // An unmapped SKU line puts an open order on the Unfulfillable status.
+    { ...row, orderNo: 'MS-UNFULFILLABLE', status: 'New' },
+    { ...row, orderNo: 'MS-CANCELLED', status: 'Cancelled' },
+    { ...row, orderNo: 'MS-DELIVERED', status: 'Delivered', awb: 'AWB-MSD' },
+    { ...row, orderNo: 'MS-RTO', status: 'Dispatched', awb: 'AWB-MSR', channelStatus: 'RTO' },
+  ]);
+  const token = await login(shop.owner.email);
+  const ids = async (status) => {
+    const res = await api('GET', `/api/v1/orders?limit=50&status=${encodeURIComponent(status)}`, { token });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    return res.body.data.map((item) => item.orderNo).sort();
+  };
+
+  assert.deepEqual(await ids('Unfulfillable,Delivered'), ['MS-DELIVERED', 'MS-UNFULFILLABLE']);
+  assert.deepEqual(await ids('Cancelled,RTO'), ['MS-CANCELLED', 'MS-RTO']);
+  assert.deepEqual(await ids('Delivered'), ['MS-DELIVERED']);
+  assert.equal((await ids('all')).length, 4);
+});

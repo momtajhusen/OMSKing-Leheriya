@@ -146,7 +146,8 @@ test('a delivered Shopify COD order stays partially paid until it is marked paid
   assert.match(invoice.body.data.invoiceHtml, /Tax invoice 4401/);
   assert.equal(invoice.body.data.invoiceHtml.includes('INV-STALE'), false);
   const pdf = Buffer.from(invoice.body.data.invoicePdf, 'base64').toString('latin1');
-  assert.match(pdf, /Tax invoice 4401/);
+  assert.match(pdf, /Tax Invoice/);
+  assert.match(pdf, /Invoice No: 4401/);
   assert.equal(pdf.includes('INV-STALE'), false);
 });
 
@@ -233,6 +234,10 @@ test('reports and settlement totals stay on the caller company', async () => {
   assert.equal(foreign.status, 'exception');
   assert.equal(foreign.orderNo, undefined);
   assert.match(foreign.exception, /No Master Order/);
+  const paidOwn = await Order.findOne({ tenantId: alpha.tenant._id, orderNo: 'ALP-1' }).setOptions({ skipTenantFilter: true }).lean();
+  const otherTenant = await Order.findOne({ tenantId: beta.tenant._id, orderNo: 'BET-1' }).setOptions({ skipTenantFilter: true }).lean();
+  assert.equal(paidOwn.paymentStatus, 'paid');
+  assert.notEqual(otherTenant.paymentStatus, 'paid');
 });
 
 test('retrying an integrations order pull does not reserve a second piece', async () => {
@@ -356,14 +361,224 @@ test('a Shopify invoice uses the Shopify order number and the SKU GST rate, and 
   assert.equal(invoice.status, 200, JSON.stringify(invoice.body));
   assert.equal(invoice.body.data.invoiceNo, '68762-LEH');
   const pdf = Buffer.from(invoice.body.data.invoicePdf, 'base64').toString('latin1');
-  assert.match(pdf, /Tax invoice 68762-LEH/);
-  assert.match(pdf, /Order 68762-LEH/);
+  assert.match(pdf, /Invoice No: 68762-LEH/);
+  assert.match(pdf, /Order Id: 68762-LEH/);
   assert.equal(pdf.includes('SHP-19028924072029'), false);
-  assert.match(pdf, /Taxable 2665\.71/);
-  assert.match(pdf, /IGST 133\.29/);
+  assert.match(pdf, /Total Amount before Tax:\) Tj ET\n.*\(Rs\. 2665\.71\)/);
+  assert.match(pdf, /Total IGST:\) Tj ET\n.*\(Rs\. 133\.29\)/);
   assert.match(invoice.body.data.invoiceHtml, /Tax invoice 68762-LEH/);
   assert.match(invoice.body.data.invoiceHtml, /620443/);
   const saved = await Order.findOne({ tenantId, orderNo: 'SHP-19028924072029' }).setOptions({ skipTenantFilter: true });
   assert.equal(saved.items[0].gst, 5);
   assert.equal(saved.items[0].hsn, '620443');
+});
+
+test('the GSTIN saved in Company Details replaces the old one on the invoice header and supplier block', async () => {
+  const shop = await provisionMerchant({
+    name: 'GSTIN shop',
+    ownerEmail: `gstin-${Date.now()}@example.com`,
+    ownerName: 'GSTIN Owner',
+    password: 'Password1',
+    status: 'active',
+  });
+  const tenantId = shop.tenant._id;
+  await ensureDefaultWarehouses(tenantId);
+  await Warehouse.updateOne(
+    { tenantId, code: 'WH-001' },
+    { $set: { 'address.state': 'Delhi', 'address.city': 'New Delhi' } },
+  ).setOptions({ skipTenantFilter: true });
+  await Order.create({
+    tenantId,
+    orderNo: 'SHP-GSTIN-1',
+    channel: 'Shopify',
+    externalOrderId: '7001',
+    channelOrderNo: '#7001-LEH',
+    status: 'Dispatched',
+    shipState: 'Delhi',
+    customer: 'Delhi Buyer',
+    total: 1050,
+    items: [{ name: 'Dupatta', sku: 'D1', qty: 1, price: 1050, gst: 5, hsn: '5407' }],
+    source: 'channel_api',
+  });
+  const token = await login(shop.owner.email);
+
+  const old = await api('PATCH', '/api/v1/settings/company', { token, json: { gstin: '07ACCPD9873C1ZP' } });
+  assert.equal(old.status, 200, JSON.stringify(old.body));
+  const saved = await api('PATCH', '/api/v1/settings/company', { token, json: { gstin: ' 07aaqcp4784p1zb ' } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const company = await api('GET', '/api/v1/settings/company', { token });
+  assert.equal(company.body.data.gstin, '07AAQCP4784P1ZB');
+
+  const invoice = await api('POST', '/api/v1/orders/SHP-GSTIN-1/invoice', { token, json: { email: false } });
+  assert.equal(invoice.status, 200, JSON.stringify(invoice.body));
+  const pdf = Buffer.from(invoice.body.data.invoicePdf, 'base64').toString('latin1');
+  assert.equal(pdf.split('(GSTIN: 07AAQCP4784P1ZB)').length - 1, 2, 'header and supplier block both show the new GSTIN');
+  assert.equal(pdf.includes('07ACCPD9873C1ZP'), false);
+});
+
+test('the supplier block shows the legal name from Company Details while the header keeps the store name', async () => {
+  const shop = await provisionMerchant({
+    name: 'Leheriya',
+    ownerEmail: `supplier-${Date.now()}@example.com`,
+    ownerName: 'Supplier Owner',
+    password: 'Password1',
+    status: 'active',
+  });
+  const tenantId = shop.tenant._id;
+  await ensureDefaultWarehouses(tenantId);
+  await Warehouse.updateOne(
+    { tenantId, code: 'WH-001' },
+    { $set: { 'address.state': 'Delhi', 'address.city': 'New Delhi' } },
+  ).setOptions({ skipTenantFilter: true });
+  await Order.create({
+    tenantId,
+    orderNo: 'SHP-SUPPLIER-1',
+    channel: 'Shopify',
+    externalOrderId: '7002',
+    channelOrderNo: '#7002-LEH',
+    status: 'Dispatched',
+    shipState: 'Delhi',
+    customer: 'Delhi Buyer',
+    total: 1050,
+    items: [{ name: 'Dupatta', sku: 'D1', qty: 1, price: 1050, gst: 5, hsn: '5407' }],
+    source: 'channel_api',
+  });
+  const token = await login(shop.owner.email);
+
+  const saved = await api('PATCH', '/api/v1/settings/company', {
+    token,
+    json: {
+      legalName: ' PRDOSCO GLOBAL PRIVATE LIMITED ',
+      gstin: '07AAQCP4784P1ZB',
+      address: 'BASEMENT, PLOT NO 24, SECTOR 12-A ROAD',
+      city: 'SECTOR 12, DWARKA-110078',
+      district: '',
+      supportEmail: 'support@leheriya.com',
+      supportPhone: '+91 9873003388',
+    },
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const company = await api('GET', '/api/v1/settings/company', { token });
+  assert.equal(company.body.data.legalName, 'PRDOSCO GLOBAL PRIVATE LIMITED');
+  assert.equal(company.body.data.companyName, 'Leheriya');
+
+  const invoice = await api('POST', '/api/v1/orders/SHP-SUPPLIER-1/invoice', { token, json: { email: false } });
+  assert.equal(invoice.status, 200, JSON.stringify(invoice.body));
+  const pdf = Buffer.from(invoice.body.data.invoicePdf, 'base64').toString('latin1');
+  assert.ok(pdf.includes('(PRDOSCO GLOBAL PRIVATE LIMITED)'), 'supplier block shows the legal name');
+  assert.ok(pdf.includes('(Leheriya)'), 'header keeps the store name');
+  assert.ok(pdf.includes('(BASEMENT, PLOT NO 24, SECTOR 12-A ROAD)'));
+  assert.ok(pdf.includes('(SECTOR 12, DWARKA-110078)'));
+  assert.ok(pdf.includes('(Tel: +91 9873003388)'));
+  assert.ok(pdf.includes('(Email: support@leheriya.com)'));
+  assert.equal(pdf.split('(GSTIN: 07AAQCP4784P1ZB)').length - 1, 2);
+});
+
+test('billed to comes from the order customer and a B2B customer GSTIN can be added to the invoice', async () => {
+  const shop = await provisionMerchant({
+    name: 'B2B shop',
+    ownerEmail: `b2b-${Date.now()}@example.com`,
+    ownerName: 'B2B Owner',
+    password: 'Password1',
+    status: 'active',
+  });
+  const tenantId = shop.tenant._id;
+  await ensureDefaultWarehouses(tenantId);
+  await Warehouse.updateOne(
+    { tenantId, code: 'WH-001' },
+    { $set: { 'address.state': 'Delhi', 'address.city': 'New Delhi' } },
+  ).setOptions({ skipTenantFilter: true });
+  await Order.create({
+    tenantId,
+    orderNo: 'SHP-B2B-1',
+    channel: 'Shopify',
+    externalOrderId: '7003',
+    channelOrderNo: '#7003-LEH',
+    status: 'Dispatched',
+    shipState: 'Delhi',
+    customer: 'Indian Farmers Fertilizer Cooperative Limited',
+    address: 'C-1, DISTRICT CENTRE, SAKET',
+    city: 'NEW DELHI 110017',
+    phone: '+911142592791',
+    total: 1050,
+    items: [{ name: 'Dupatta', sku: 'D1', qty: 1, price: 1050, gst: 5, hsn: '5407' }],
+    source: 'channel_api',
+  });
+  const token = await login(shop.owner.email);
+
+  const bad = await api('POST', '/api/v1/orders/SHP-B2B-1/invoice', { token, json: { email: false, customerGstin: 'NOT-A-GSTIN' } });
+  assert.equal(bad.status, 400, JSON.stringify(bad.body));
+
+  const invoice = await api('POST', '/api/v1/orders/SHP-B2B-1/invoice', { token, json: { email: false, customerGstin: ' 07aaacd1234e1z5 ' } });
+  assert.equal(invoice.status, 200, JSON.stringify(invoice.body));
+  assert.equal(invoice.body.data.customerGstin, '07AAACD1234E1Z5');
+  const pdf = Buffer.from(invoice.body.data.invoicePdf, 'base64').toString('latin1');
+  assert.ok(pdf.includes('(Indian Farmers Fertilizer)'), 'billed to shows the order customer');
+  assert.ok(pdf.includes('(C-1, DISTRICT CENTRE, SAKET)'));
+  assert.ok(pdf.includes('(Tel: +911142592791)'));
+  assert.equal(pdf.split('(GSTIN: 07AAACD1234E1Z5)').length - 1, 1, 'customer GSTIN is printed once, under billed to');
+
+  const again = await api('POST', '/api/v1/orders/SHP-B2B-1/invoice', { token, json: { email: false } });
+  const againPdf = Buffer.from(again.body.data.invoicePdf, 'base64').toString('latin1');
+  assert.ok(againPdf.includes('(GSTIN: 07AAACD1234E1Z5)'), 'the saved customer GSTIN stays on later invoices');
+
+  const cleared = await api('POST', '/api/v1/orders/SHP-B2B-1/invoice', { token, json: { email: false, customerGstin: '' } });
+  assert.equal(cleared.body.data.customerGstin, '');
+  const clearedPdf = Buffer.from(cleared.body.data.invoicePdf, 'base64').toString('latin1');
+  assert.equal(clearedPdf.includes('07AAACD1234E1Z5'), false, 'a B2C invoice has no customer GSTIN');
+});
+
+test('with no warehouse state the seller state comes from the GSTIN: Delhi buyer CGST + SGST, other state IGST', async () => {
+  const Tenant = require('../src/models/Tenant');
+  const shop = await provisionMerchant({
+    name: 'GST rule shop',
+    ownerEmail: `gstrule-${Date.now()}@example.com`,
+    ownerName: 'GST Owner',
+    password: 'Password1',
+    status: 'active',
+  });
+  const tenantId = shop.tenant._id;
+  await Tenant.updateOne({ _id: tenantId }, { $set: { 'legalEntity.gstin': '07AAQCP4784P1ZB' } });
+  await ensureDefaultWarehouses(tenantId);
+  await Warehouse.updateOne(
+    { tenantId, code: 'WH-001' },
+    { $set: { 'address.state': '' } },
+  ).setOptions({ skipTenantFilter: true });
+  const base = { tenantId, channel: 'Shopify', status: 'Dispatched', source: 'channel_api', phone: '+919999999999' };
+  await Order.create({
+    ...base,
+    orderNo: 'SHP-INTRA-1',
+    externalOrderId: '8001',
+    shipState: 'Delhi',
+    customer: 'Praveen Dhiman',
+    address: '315, D Block, Sector 18A Dwarka',
+    city: 'New Delhi 110078',
+    total: 1591,
+    items: [{ name: 'Dress Material', sku: 'LEH-01-300', qty: 1, price: 1591, gst: 5, hsn: '52010011' }],
+  });
+  await Order.create({
+    ...base,
+    orderNo: 'SHP-INTER-1',
+    externalOrderId: '8002',
+    shipState: 'Maharashtra',
+    customer: 'Madhuri Chandanshive',
+    address: 'Nandini Apartment, Sreeram Nagar',
+    city: 'Baramati 413102',
+    total: 1359,
+    items: [{ name: 'Dress Material', sku: 'Leh-ikat-150', qty: 1, price: 1359, gst: 5, hsn: '52010011' }],
+  });
+  const token = await login(shop.owner.email);
+
+  const intra = await api('POST', '/api/v1/orders/SHP-INTRA-1/invoice', { token, json: { email: false } });
+  assert.equal(intra.status, 200, JSON.stringify(intra.body));
+  const intraPdf = Buffer.from(intra.body.data.invoicePdf, 'base64').toString('latin1');
+  assert.ok(intraPdf.includes('(Total CGST:)') && intraPdf.includes('(Total SGST:)'), 'Delhi buyer gets CGST + SGST');
+  assert.equal(intraPdf.split('(Rs. 37.88)').length - 1, 6);
+  assert.ok(!intraPdf.includes('IGST'));
+
+  const inter = await api('POST', '/api/v1/orders/SHP-INTER-1/invoice', { token, json: { email: false } });
+  assert.equal(inter.status, 200, JSON.stringify(inter.body));
+  const interPdf = Buffer.from(inter.body.data.invoicePdf, 'base64').toString('latin1');
+  assert.ok(interPdf.includes('(Total IGST:)') && interPdf.includes('(Rs. 64.71)'), 'Maharashtra buyer gets full IGST');
+  assert.ok(!interPdf.includes('CGST'));
 });

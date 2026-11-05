@@ -44,6 +44,11 @@ export function eventLabel(event, senderName, mine) {
   }
 }
 
+/** Started / marked fixed labels: the message's own status chip already shows this, so the chat leaves them out. */
+export function isHistoryEvent(message) {
+  return ['start', 'complete'].includes(message?.event?.action);
+}
+
 const OPEN = ['pending', 'in_progress'];
 const FIXED = ['done', 'confirmed'];
 
@@ -101,8 +106,8 @@ const DEVELOPER_STATUS = {
 /** The short Hinglish hover of a completed task: what the issue was and what fix was applied. */
 export function summaryHint(summary) {
   const lines = [];
-  if (summary?.issue) lines.push(`Issue kya tha: ${summary.issue}`);
-  if (summary?.fix) lines.push(`Fix kya kiya: ${summary.fix}`);
+  if (summary?.issue) lines.push(`Issue: ${summary.issue}`);
+  if (summary?.fix) lines.push(`Fixed: ${summary.fix}`);
   return lines.join('\n');
 }
 
@@ -133,17 +138,36 @@ export function statusChips(status, local = isLocalApp(), summary = null) {
 export const CHAT_FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'pending', label: 'Pending' },
-  { id: 'fixed', label: 'Fixed' },
+  { id: 'progress', label: 'In progress' },
+  { id: 'fixed', label: 'Complete' },
   { id: 'developer', label: 'Developer' },
   { id: 'client', label: 'Client' },
 ];
 
-/** Developer / Client mean who made the last Pending or Fixed mark. Status labels in the chat only show under All. */
+/** The whole-chat count for a filter chip; null when the server sent none. */
+export function filterCount(counts, id) {
+  return typeof counts?.[id] === 'number' ? counts[id] : null;
+}
+
+/**
+ * Every client message is Pending until work starts on it; Developer / Client mean who made the last mark. Status labels
+ * in the chat only show under All.
+ */
+/** Chat search: every word of the query appears in the message text, sender, file name or task title. */
+export function matchesSearch(message, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [message.text, message.senderName, message.attachment?.name, message.update?.title].filter(Boolean).join(' ').toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
 export function matchesFilter(message, filter) {
   if (!filter || filter === 'all') return true;
   const update = message.update;
-  if (!update || message.event) return false;
-  if (filter === 'pending') return OPEN.includes(update.status);
+  if (message.event || message.deleted) return false;
+  if (filter === 'pending') return update ? update.status === 'pending' : message.side === 'tenant';
+  if (!update) return false;
+  if (filter === 'progress') return update.status === 'in_progress';
   if (filter === 'fixed') return FIXED.includes(update.status);
   if (filter === 'developer') return update.markedBy === 'platform';
   if (filter === 'client') return update.markedBy === 'tenant';

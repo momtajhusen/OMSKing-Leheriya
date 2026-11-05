@@ -141,6 +141,21 @@ const OWN = [
     ],
   },
   {
+    code: 'shree-maruti',
+    name: 'Shree Maruti',
+    capabilities: ['forward'],
+    blurb: 'Email, password, API key, user ID, and tenant ID from the Shree Maruti (Innofulfill) account, same as in Shipway.',
+    fields: [
+      { key: 'email', label: 'Email', type: 'text', required: true, placeholder: 'Innofulfill login email' },
+      { key: 'password', label: 'Password', type: 'password', required: true, placeholder: 'Innofulfill password' },
+      { key: 'apiKey', label: 'API key', type: 'password', required: true, placeholder: 'innofulfill_live_…' },
+      { key: 'userId', label: 'User ID', type: 'text', required: true, placeholder: 'Innofulfill user ID' },
+      { key: 'accountTenantId', label: 'Tenant ID', type: 'text', required: true, placeholder: 'Innofulfill tenant ID' },
+      { key: 'orderType', label: 'Order type', type: 'text', required: false, placeholder: 'Forward' },
+      { key: 'parcelCategory', label: 'Parcel category', type: 'text', required: false, placeholder: 'Ecomm' },
+    ],
+  },
+  {
     code: 'amazon-shipping',
     name: 'Amazon Shipping',
     capabilities: ['forward'],

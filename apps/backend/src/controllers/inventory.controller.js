@@ -3,7 +3,7 @@ const { pageOf } = require('../utils/page');
 const { HttpError } = require('../utils/httpError');
 const { merchantTenant } = require('./products.controller');
 const {
-  listBalances, channelAts, stockIn, stockOut, adjustStock, setReorderPoint,
+  listBalances, attachImages, channelAts, skuDetail, stockIn, stockOut, adjustStock, setReorderPoint,
   reserveStock, releaseReservation, consumeReservation, listLedger, lowStockAlerts, stressReserve,
 } = require('../services/inventory.service');
 const { getInventoryAuthority } = require('../services/warehouse.service');
@@ -13,6 +13,8 @@ async function list(req, res) {
   const all = await listBalances(tenantId, {
     warehouseId: req.query.warehouseId,
     q: req.query.q,
+    sort: req.query.sort,
+    images: false,
   });
   const tab = req.query.tab;
   let rows = all;
@@ -29,6 +31,7 @@ async function list(req, res) {
   }, { totalStock: 0, reserved: 0, available: 0, stockValue: 0, low: 0 });
   const inventoryAuthority = await getInventoryAuthority(tenantId);
   const paged = pageOf(rows, req.query);
+  await attachImages(tenantId, paged.rows);
   return successResponse(res, { rows: paged.rows, kpis, inventoryAuthority }, 'Inventory', 200, {
     page: paged.page,
     limit: paged.limit,
@@ -44,6 +47,12 @@ async function ats(req, res) {
   if (!req.query.masterSkuId) throw new HttpError(400, 'masterSkuId is required');
   const data = await channelAts(tenantId, req.query.masterSkuId);
   return successResponse(res, data, 'Available to sell');
+}
+
+async function skuView(req, res) {
+  const tenantId = merchantTenant(req);
+  const data = await skuDetail(tenantId, req.params.masterSkuId);
+  return successResponse(res, data, 'Product stock');
 }
 
 async function ledger(req, res) {
@@ -112,5 +121,5 @@ async function stress(req, res) {
 }
 
 module.exports = {
-  list, ats, ledger, alerts, inStock, outStock, adjust, threshold, reserve, release, consume, stress,
+  list, ats, skuView, ledger, alerts, inStock, outStock, adjust, threshold, reserve, release, consume, stress,
 };

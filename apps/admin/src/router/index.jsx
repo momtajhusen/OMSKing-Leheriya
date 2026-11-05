@@ -22,6 +22,7 @@ const PlatformSetupPage = lazy(() => import('../pages/platform/PlatformSetupPage
 const PlatformWebsiteImagesPage = lazy(() => import('../pages/platform/PlatformWebsiteImagesPage'));
 const LegalPage = lazy(() => import('../pages/public/LegalPage'));
 const OrderDetailPage = lazy(() => import('../pages/admin/OrderDetailPage'));
+const ProductStockPage = lazy(() => import('../pages/admin/ProductStockPage'));
 const SetupGuidePage = lazy(() => import('../pages/admin/SetupGuidePage'));
 
 // Route definitions - single source of truth for sidebar and router
@@ -106,7 +107,7 @@ export const ROUTE_DEFS = {
     },
     {
       path: '/fulfilment',
-      label: 'Fulfilment',
+      label: 'Assignment',
       icon: 'Truck',
       group: 'Daily',
       component: lazy(() => import('../pages/admin/FulfilmentPage')),
@@ -492,6 +493,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<LoadingFallback />}>
             <OrderDetailPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/inventory/sku/:masterSkuId',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <ProductStockPage />
           </Suspense>
         ),
       },

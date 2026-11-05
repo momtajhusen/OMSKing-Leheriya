@@ -84,6 +84,8 @@ function toDto(row, viewerId, quotes = new Map(), updates = new Map()) {
       markedBy: markedBy(update),
       issue: update.issue || '',
       fix: update.fix || '',
+      area: update.area || '',
+      check: update.check || '',
     } : null,
     event: row.event?.action ? {
       action: row.event.action,
@@ -106,7 +108,7 @@ function markedBy(update) {
 async function updatesFor(tenantId, rows) {
   const ids = [...new Set(rows.filter((r) => r.updateId).map((r) => String(r.updateId)))];
   if (!ids.length) return new Map();
-  const found = await SupportUpdate.find({ tenantId, _id: { $in: ids } }).select('title status issue fix history.action history.side').lean();
+  const found = await SupportUpdate.find({ tenantId, _id: { $in: ids } }).select('title status issue fix area check history.action history.side').lean();
   return new Map(found.map((u) => [String(u._id), u]));
 }
 
@@ -124,6 +126,27 @@ async function quotesFor(tenantId, rows) {
   return new Map(found.map((q) => [String(q._id), q]));
 }
 
+/** Filter counts over the whole chat, matching the admin chat filters: every client message is Pending until work starts. */
+async function messageCounts(tenantId) {
+  const [rows, updates] = await Promise.all([
+    SupportMessage.find({ tenantId, deletedAt: null, 'event.action': null }).select('side updateId').lean(),
+    SupportUpdate.find({ tenantId }).select('status history.action history.side').lean(),
+  ]);
+  const byId = new Map(updates.map((u) => [String(u._id), u]));
+  const counts = { all: rows.length, pending: 0, progress: 0, fixed: 0, developer: 0, client: 0 };
+  for (const row of rows) {
+    const update = row.updateId && byId.get(String(row.updateId));
+    if (update ? update.status === 'pending' : row.side === 'tenant') counts.pending += 1;
+    if (!update) continue;
+    if (update.status === 'in_progress') counts.progress += 1;
+    if (['done', 'confirmed'].includes(update.status)) counts.fixed += 1;
+    const by = markedBy(update);
+    if (by === 'platform') counts.developer += 1;
+    if (by === 'tenant') counts.client += 1;
+  }
+  return counts;
+}
+
 async function listMessages(tenantId, viewerId, query = {}) {
   const limit = Math.min(PAGE_MAX, Math.max(1, parseInt(query.limit, 10) || PAGE_DEFAULT));
   const filter = { tenantId };
@@ -134,7 +157,8 @@ async function listMessages(tenantId, viewerId, query = {}) {
   const rows = await SupportMessage.find(filter).sort({ _id: -1 }).limit(limit + 1).lean();
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit).reverse();
-  return { rows: await dtosFor(tenantId, viewerId, page), hasMore };
+  const [dtos, counts] = await Promise.all([dtosFor(tenantId, viewerId, page), query.before ? null : messageCounts(tenantId)]);
+  return { rows: dtos, hasMore, ...(counts ? { counts } : {}) };
 }
 
 async function senderName(userId, side) {

@@ -17,6 +17,7 @@ const productSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 productSchema.index({ tenantId: 1, name: 1 });
+productSchema.index({ tenantId: 1, createdAt: -1 });
 productSchema.plugin(tenantPlugin);
 
 module.exports = mongoose.model('Product', productSchema);

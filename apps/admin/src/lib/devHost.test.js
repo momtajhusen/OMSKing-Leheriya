@@ -19,7 +19,7 @@ test('the button flags a client reply that is ready to fix and keeps checking wh
   const button = fs.readFileSync(new URL('../components/report/AutoFixButton.jsx', import.meta.url), 'utf8');
   assert.match(button, /const replyReady = next\?\.kind === 'replied';/);
   assert.match(button, /\{replyReady && !running && \(/);
-  assert.match(button, /setInterval\(load, running \? POLL_MS : IDLE_POLL_MS\)/);
+  assert.match(button, /setInterval\(load, running \|\| autoplay \? POLL_MS : IDLE_POLL_MS\)/);
 });
 
 test('a finished Auto-fix offers Apply fix, which copies the change into the main folder', () => {
@@ -30,10 +30,15 @@ test('a finished Auto-fix offers Apply fix, which copies the change into the mai
 
 test('while a finished change waits, Auto-fix is blocked and the change can be applied or discarded with a reason', () => {
   const button = fs.readFileSync(new URL('../components/report/AutoFixButton.jsx', import.meta.url), 'utf8');
-  assert.match(button, /const canApply = Boolean\(run && !run\.running && run\.patchFile && !run\.applied && !run\.discarded\);/);
-  assert.match(button, /disabled=\{running \|\| canApply \|\| Boolean\(busy\)\}/);
+  assert.match(button, /const hasChange = Boolean\(run && !run\.running && run\.patchFile && !run\.applied && !run\.discarded\);/);
+  assert.match(button, /disabled=\{running \|\| hasChange \|\| Boolean\(busy\)\}/);
   assert.match(button, /Apply or discard the last change first/);
   assert.match(button, /window\.prompt\('Why discard this Auto-fix change\?/);
   assert.match(button, /api\.post\('\/dev\/report-autofix\/discard', \{ reason \}\)/);
   assert.match(button, />Discard</);
+});
+
+test('the button says when it will finish a task an interrupted run left In progress', () => {
+  const button = fs.readFileSync(new URL('../components/report/AutoFixButton.jsx', import.meta.url), 'utf8');
+  assert.match(button, /next\.kind === 'resume'\) return `Finishes "\$\{next\.message\}", left In progress by a stopped run`/);
 });

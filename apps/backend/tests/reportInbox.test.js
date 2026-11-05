@@ -8,7 +8,7 @@ const path = require('path');
 const http = require('http');
 const {
   runOnce, markTasks, askClient, attachFound, printHistory, planAutofix, nextTask, clientMessagesAfter, mediaFileName, syncSummaries,
-  completeApplied, discardRun, flagUnapplied,
+  completeApplied, discardRun, flagUnapplied, reconcileApplied, needInput, provideInput, inputRequests, nearbyTasks,
 } = require('../scripts/reportInbox');
 
 const PASSWORD = 'live-secret-pw';
@@ -424,6 +424,24 @@ const typed = (outDir, n, type) => {
   fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(`- Message: message ${n}\n- Type: _to triage_`, `- Message: message ${n}\n- Type: ${type}`));
 };
 
+test('completing with check steps saves them in the task list and on the live update, so the chat can show how to verify', async () => {
+  const messages = [message(1), message(2)];
+  await withLive(messages, async (live, outDir) => {
+    await runOnce({ settings: settings(live), outDir, logger: quiet });
+    typed(outDir, 2, 'Bug (Stock → Inventory)');
+    await markTasks({
+      settings: settings(live), outDir, mark: 'complete', messageIds: [oid(2)], logger: quiet,
+      issue: 'Inventory page atak jaata tha', fix: 'Inventory API halki ki', check: 'Inventory kholo; list 5 second me load hoti hai',
+    });
+    const text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+    assert.match(text, /^- Check: Inventory kholo; list 5 second me load hoti hai$/m);
+    assert.equal(taskSummaries(text)[oid(2)].check, 'Inventory kholo; list 5 second me load hoti hai');
+    assert.deepEqual(summaryWrites(live), [{
+      action: 'summary', issue: 'Inventory page atak jaata tha', fix: 'Inventory API halki ki', area: 'Stock → Inventory', check: 'Inventory kholo; list 5 second me load hoti hai',
+    }]);
+  });
+});
+
 test('completing with an issue and fix also saves them on the live update, so the live chat and side list show the hover', async () => {
   const messages = [message(1), message(2)];
   await withLive(messages, async (live, outDir) => {
@@ -561,5 +579,127 @@ test('the one-time scan flags Complete tasks whose Auto-fix patch never reached 
     assert.equal(fs.readFileSync(path.join(repoDir, 'b.txt'), 'utf8'), 'one\n', 'the scan never applies anything');
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('tasks whose Auto-fix patch is already in the main files are completed, even if Apply fix was cut off by a restart', async () => {
+  const messages = [message(1), message(2)];
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'reconcile-repo-'));
+  const git = (...a) => require('child_process').execFileSync('git', a, { cwd: repoDir, encoding: 'utf8' });
+  try {
+    git('init', '-q');
+    fs.writeFileSync(path.join(repoDir, 'a.txt'), 'one\n');
+    fs.writeFileSync(path.join(repoDir, 'b.txt'), 'one\n');
+    git('add', '.');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'base');
+    await withLive(messages, async (live, outDir) => {
+      await runOnce({ settings: settings(live), outDir, logger: quiet });
+      await markTasks({ settings: settings(live), outDir, mark: 'complete', messageIds: [oid(1)], logger: quiet, fix: 'f1', pendingRun: 'run-a' });
+      await markTasks({ settings: settings(live), outDir, mark: 'complete', messageIds: [oid(2)], logger: quiet, pendingRun: 'run-b' });
+      fs.mkdirSync(path.join(outDir, 'autofix'), { recursive: true });
+      for (const [file, run] of [['a.txt', 'run-a'], ['b.txt', 'run-b']]) {
+        fs.appendFileSync(path.join(repoDir, file), 'two\n');
+        fs.writeFileSync(path.join(outDir, 'autofix', `${run}.patch`), `${git('diff')}\n`);
+        git('checkout', '--', file);
+      }
+      fs.appendFileSync(path.join(repoDir, 'a.txt'), 'two\n');
+
+      const done = await reconcileApplied({ settings: settings(live), outDir, repoDir, logger: quiet });
+      assert.deepEqual(done, [oid(1)]);
+      const tasks = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+      assert.match(tasks, /### \[Complete\] [^\n]*\n- Message: message 1\n/);
+      assert.match(tasks, /### \[Awaiting apply\] [^\n]*\n- Message: message 2\n/, 'a patch not in the files keeps its task waiting');
+      assert.equal(messages[0].update.status, 'done');
+      assert.deepEqual(await reconcileApplied({ settings: settings(live), outDir, repoDir, logger: quiet }), [], 'running it again changes nothing');
+    });
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('a task an interrupted run left In progress is resumed before any new task', () => {
+  const block = (label, n) => `### [${label}] 3 Nov 2026, ${n}:00 pm · Co · Client\n- Message: issue ${n}\n- Message id: ${oid(n)}\n`;
+  const text = [block('Complete', 1), block('In progress', 2), block('Awaiting apply', 3), block('Not started', 4)].join('\n');
+  assert.deepEqual(planAutofix(text), {
+    kind: 'resume', task: { messageId: oid(2), message: 'issue 2' }, next: { messageId: oid(4), message: 'issue 4' },
+  });
+});
+
+const row = (label, n, extra = '') => `### [${label}] 3 Nov 2026, ${n}:00 pm · Co · Client\n- Message: issue ${n}\n${extra}- Message id: ${oid(n)}\n`;
+const tasksDoc = (rows) => `# tasks\n\n<!-- status-overview:start -->\n<!-- status-overview:end -->\n\n${rows.join('\n')}`;
+
+test('the picked task carries the messages around it (2 before, 2 after) for when it alone is not enough', () => {
+  const text = tasksDoc([row('Complete', 1), row('Complete', 2), row('Complete', 3), row('Not started', 4), row('Not started', 5), row('Not started', 6), row('Not started', 7)]);
+  assert.equal(planAutofix(text).task.messageId, oid(4));
+  const nearby = nearbyTasks(text, oid(4));
+  assert.deepEqual(nearby.before.map((m) => m.messageId), [oid(2), oid(3)]);
+  assert.deepEqual(nearby.after.map((m) => m.messageId), [oid(5), oid(6)]);
+  assert.deepEqual(nearby.before[1], { messageId: oid(3), message: 'issue 3', status: 'Complete' });
+});
+
+test('a task still unclear after its nearby messages asks for input, lists options, and never blocks the next task', () => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'needs-input-'));
+  try {
+    fs.writeFileSync(path.join(outDir, 'TASKS.md'), tasksDoc([row('Complete', 1), row('In progress', 2), row('Not started', 3)]));
+    needInput({ outDir, messageId: oid(2), unclear: 'Which tab should the RTO count go on?', options: ['Orders tabs', 'Exceptions card'], from: 'developer' });
+    let text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+    assert.match(text, /### \[Needs input\] [^\n]*\n- Message: issue 2\n- Unclear: Which tab should the RTO count go on\?\n- Options: Orders tabs \| Exceptions card\n- Input from: developer\n/);
+    assert.equal(planAutofix(text).task.messageId, oid(3), 'the next pending task is fixed meanwhile');
+    assert.deepEqual(inputRequests(text), [{
+      messageId: oid(2), message: 'issue 2', kind: 'unclear', unclear: 'Which tab should the RTO count go on?', options: ['Orders tabs', 'Exceptions card'], from: 'developer',
+      nearby: { before: [{ messageId: oid(1), message: 'issue 1', status: 'Complete' }], after: [{ messageId: oid(3), message: 'issue 3', status: 'Not started' }] },
+    }]);
+    assert.throws(() => needInput({ outDir, messageId: oid(3), unclear: ' ', options: [], from: 'developer' }), /what is unclear/);
+
+    provideInput({ outDir, messageId: oid(2), text: 'Put it on the Orders tabs, next to Delivered.' });
+    text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+    assert.match(text, /### \[Input given\] [^\n]*\n- Message: issue 2\n/);
+    assert.match(text, /<details><summary>Developer input · [^<]* · Put it on the Orders tabs[^<]*<\/summary>\n\nPut it on the Orders tabs, next to Delivered\.\n\n<\/details>\n- Message id: /);
+    const plan = planAutofix(text);
+    assert.equal(plan.kind, 'replied', 'the answered task is fixed first');
+    assert.equal(plan.task.messageId, oid(2));
+    assert.deepEqual(inputRequests(text), []);
+    assert.throws(() => provideInput({ outDir, messageId: oid(3), text: 'x' }), /not waiting for input/);
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a category Auto-fix only plans tasks in that chat filter; a message Auto-fix only that message', () => {
+  const text = tasksDoc([
+    row('Not started', 1), row('Complete', 2), row('In progress', 3), row('Waiting for client', 4, '- Waiting for: API docs\n'),
+    row('Needs input', 5, '- Unclear: Which courier?\n'), row('Not started', 6),
+  ]);
+  const pending = planAutofix(text, { scope: 'pending' });
+  assert.equal(pending.kind, 'next');
+  assert.ok([oid(1), oid(6)].includes(pending.task.messageId), 'only Not started tasks');
+  const progress = planAutofix(text, { scope: 'progress' });
+  assert.deepEqual([progress.kind, progress.task.messageId, progress.next], ['resume', oid(3), null], 'no fallback to a pending task');
+  assert.equal(planAutofix(text, { scope: 'developer' }).task.messageId, oid(3));
+  assert.equal(planAutofix(text, { scope: 'client' }).kind, 'next');
+  assert.equal(planAutofix(text, { scope: 'fixed' }), null, 'complete messages have nothing to fix');
+  assert.deepEqual(planAutofix(text, { scope: 'all' }), planAutofix(text), 'All is the header Auto-fix');
+
+  const waiting = planAutofix(text, { messageId: oid(4) });
+  assert.deepEqual([waiting.kind, waiting.waiting.map((w) => w.messageId), waiting.next], ['waiting', [oid(4)], null]);
+  assert.deepEqual([planAutofix(text, { messageId: oid(1) }).task.messageId, planAutofix(text, { messageId: oid(1) }).next], [oid(1), null]);
+  assert.equal(planAutofix(text, { messageId: oid(5) }), null, 'a task needing input waits for it');
+  assert.equal(planAutofix(text, { messageId: oid(2) }), null);
+});
+
+test('waiting-for-client tasks are listed for the paste form too, and pasted data unblocks them', () => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'paste-'));
+  try {
+    fs.writeFileSync(path.join(outDir, 'TASKS.md'), tasksDoc([row('Waiting for client', 1, '- Waiting for: Shree Maruti API docs\n'), row('Not started', 2)]));
+    let text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+    const [request] = inputRequests(text);
+    assert.deepEqual([request.messageId, request.kind, request.unclear, request.from], [oid(1), 'waiting', 'Shree Maruti API docs', 'client']);
+    assert.throws(() => provideInput({ outDir, messageId: oid(1), text: '  ' }), /Write the answer first/);
+    provideInput({ outDir, messageId: oid(1), text: 'Docs: https://example.test/api' });
+    text = fs.readFileSync(path.join(outDir, 'TASKS.md'), 'utf8');
+    assert.match(text, /### \[Input given\] [^\n]*\n- Message: issue 1\n/);
+    assert.deepEqual([planAutofix(text, { messageId: oid(1) }).kind, planAutofix(text).task.messageId], ['replied', oid(1)]);
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
   }
 });

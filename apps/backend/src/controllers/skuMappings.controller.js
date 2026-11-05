@@ -10,6 +10,7 @@ const {
   attachMappingToCode,
   unmapListing,
   retryFailedMapping,
+  explainUnmapped,
   parseCsv,
   importChannel,
   IMPORT_ORDER,
@@ -26,6 +27,15 @@ function paintMapping(row, bySku) {
     || imageForSku(bySku, mapped.channelSku)
     || imageForSku(bySku, mapped.productName);
   return url ? { ...mapped, imageUrl: url } : mapped;
+}
+
+async function withUnmappedReasons(tenantId, rows, data) {
+  const why = await explainUnmapped(tenantId, rows);
+  if (!why.size) return data;
+  return data.map((row) => {
+    const hit = why.get(row.id);
+    return hit ? { ...row, unmappedReason: hit.reason, suggestedMasterSku: hit.suggestedMasterSku } : row;
+  });
 }
 
 async function listMappings(req, res) {
@@ -61,6 +71,7 @@ async function listMappings(req, res) {
     const bySku = await imagesBySku(tenantId);
     const data = rows.map((row) => paintMapping(row, bySku));
     const paged = pageOf(data, req.query);
+    paged.rows = await withUnmappedReasons(tenantId, rows.filter((row) => paged.rows.some((p) => p.id === String(row._id))), paged.rows);
     return paginatedResponse(res, paged.rows, paged.page, paged.limit, paged.total, 'SKU mappings');
   }
   const [total, rows] = await Promise.all([
@@ -76,7 +87,7 @@ async function listMappings(req, res) {
     const master = row.masterSkuId && row.masterSkuId.code ? row.masterSkuId : null;
     return [master?.code, row.channelSkuCode, master?.name || row.channelTitle];
   }));
-  const data = rows.map((row) => paintMapping(row, bySku));
+  const data = await withUnmappedReasons(tenantId, rows, rows.map((row) => paintMapping(row, bySku)));
   return paginatedResponse(res, data, paging.page, paging.limit, total, 'SKU mappings');
 }
 

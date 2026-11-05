@@ -31,12 +31,17 @@ function attrsObject(mapLike) {
   return { ...mapLike };
 }
 
+function variantPhoto(mappings) {
+  const ordered = [...mappings].sort((a, b) => Number(b.channel === 'shopify') - Number(a.channel === 'shopify'));
+  return firstImage(ordered.map((m) => m.imageUrl));
+}
+
 function mapMaster(row, mappings = []) {
   return {
     id: String(row._id),
     productId: row.productId ? String(row.productId._id || row.productId) : null,
     productName: row.productId?.name || row.name,
-    imageUrl: firstImage(row.productId?.images),
+    imageUrl: variantPhoto(mappings) || firstImage(row.productId?.images),
     code: row.code,
     name: row.name,
     variantAttributes: attrsObject(row.variantAttributes),
@@ -44,6 +49,12 @@ function mapMaster(row, mappings = []) {
     costPrice: row.costPrice,
     mrp: row.mrp,
     sellingPrice: row.sellingPrice,
+    weightKg: row.weightKg || 0,
+    dimensionsCm: {
+      l: row.dimensionsCm?.l || 0,
+      w: row.dimensionsCm?.w || 0,
+      h: row.dimensionsCm?.h || 0,
+    },
     hsnCode: row.hsnCode || row.productId?.hsnCode || '',
     gstRatePercent: row.gstRatePercent ?? row.productId?.gstRatePercent ?? null,
     status: row.status,
@@ -58,7 +69,7 @@ function mapMaster(row, mappings = []) {
   };
 }
 
-function mapProduct(row, variants = []) {
+function mapProduct(row, variants = [], mappingsByMaster = {}) {
   return {
     id: String(row._id),
     name: row.name,
@@ -71,7 +82,7 @@ function mapProduct(row, variants = []) {
     status: row.status,
     tags: row.tags,
     variantCount: variants.length,
-    variants: variants.map((v) => mapMaster(v)),
+    variants: variants.map((v) => mapMaster(v, mappingsByMaster[String(v._id)] || [])),
     createdAt: row.createdAt,
   };
 }
@@ -84,7 +95,7 @@ function mapMapping(row) {
     masterSku: master?.code || null,
     masterBarcode: master?.barcode || row.barcode || '',
     productName: master?.name || row.channelTitle,
-    imageUrl: firstImage(master?.productId?.images),
+    imageUrl: firstImage([row.imageUrl]) || firstImage(master?.productId?.images),
     channel: row.channel,
     channelSku: row.channelSkuCode,
     channelProductId: row.channelProductId,
@@ -170,6 +181,7 @@ async function findAutoMaster(tenantId, { channelSkuCode, barcode }) {
 function listingExtras(row) {
   return {
     name: row.productName || row.channelTitle || row.title || '',
+    brand: row.vendor || row.brand || '',
     category: row.category || '',
     hsnCode: row.hsnCode || row.hsn || '',
     gstRatePercent: row.gstRatePercent != null && row.gstRatePercent !== '' ? Number(row.gstRatePercent) : undefined,
@@ -180,6 +192,7 @@ function listingExtras(row) {
     },
     barcode: row.barcode,
     image: row.image || row.imageUrl || '',
+    productImage: row.productImage || '',
     sellingPrice: row.price != null && row.price !== '' ? Number(row.price) : undefined,
     mrp: row.mrp != null && row.mrp !== '' ? Number(row.mrp) : undefined,
   };
@@ -210,6 +223,10 @@ async function ingestListing(tenantId, userId, row, options = {}) {
     if (existing.masterSkuId) {
       master = await MasterSku.findById(existing.masterSkuId).setOptions({ skipTenantFilter: true });
       if (master) await rememberBarcode(master, row.barcode);
+      if (master?.productId && channel === 'shopify') {
+        const product = await Product.findOne({ _id: master.productId, tenantId }).setOptions({ skipTenantFilter: true });
+        await rememberShopifyFields(product, listingExtras(row));
+      }
       await linkOpenOrders(tenantId, existing);
     }
     return { action: 'exists', mapping: existing, master };
@@ -248,6 +265,7 @@ async function ingestListing(tenantId, userId, row, options = {}) {
 }
 
 async function findOrCreateProduct(tenantId, userId, mapping, extras = {}) {
+  const refresh = (product) => (mapping.channel === 'shopify' ? rememberShopifyFields(product, extras) : product);
   if (mapping.channelProductId) {
     const sibling = await SkuMapping.findOne({
       tenantId,
@@ -260,17 +278,18 @@ async function findOrCreateProduct(tenantId, userId, mapping, extras = {}) {
       const siblingMaster = await MasterSku.findById(sibling.masterSkuId).setOptions({ skipTenantFilter: true });
       if (siblingMaster?.productId) {
         const shared = await Product.findById(siblingMaster.productId).setOptions({ skipTenantFilter: true });
-        if (shared) return rememberImage(shared, extras.image);
+        if (shared) return rememberImage(await refresh(shared), extras.image);
       }
     }
   }
   const name = extras.name || mapping.channelTitle || mapping.channelSkuCode;
   const existing = await Product.findOne({ tenantId, name }).setOptions({ skipTenantFilter: true });
-  if (existing) return rememberImage(existing, extras.image);
+  if (existing) return rememberImage(await refresh(existing), extras.image);
   const image = firstImage([extras.image]);
   return Product.create({
     tenantId,
     name,
+    brand: extras.brand || '',
     category: extras.category || '',
     hsnCode: extras.hsnCode || '',
     gstRatePercent: extras.gstRatePercent ?? 5,
@@ -278,6 +297,26 @@ async function findOrCreateProduct(tenantId, userId, mapping, extras = {}) {
     status: 'active',
     createdBy: userId,
   });
+}
+
+async function rememberShopifyFields(product, extras = {}) {
+  if (!product) return product;
+  let changed = false;
+  [['brand', extras.brand], ['category', extras.category], ['hsnCode', extras.hsnCode]].forEach(([field, value]) => {
+    const next = String(value || '').trim();
+    if (next && product[field] !== next) {
+      product[field] = next;
+      changed = true;
+    }
+  });
+  const photo = firstImage([extras.productImage]);
+  const current = firstImage(product.images);
+  if (photo && current !== photo && !current.startsWith('/uploads/')) {
+    product.images = [photo, ...(product.images || []).filter((url) => url !== current && url !== photo)];
+    changed = true;
+  }
+  if (changed) await product.save();
+  return product;
 }
 
 async function rememberImage(product, image) {
@@ -338,6 +377,28 @@ async function attachMappingToCode(tenantId, userId, mapping, masterCode) {
   }
   await linkOpenOrders(tenantId, mapping);
   return { master, mapping };
+}
+
+async function mapOrderItem(tenantId, userId, order, sku, masterCode) {
+  const code = String(masterCode || '').trim();
+  if (!code) throw new HttpError(400, 'Master SKU code is required');
+  const want = normalizeSkuCode(sku);
+  const item = want && (order.items || []).find((row) => normalizeSkuCode(row.sku) === want);
+  if (!item) throw new HttpError(404, `${sku || 'That SKU'} is not on this order`);
+  const master = await MasterSku.findOne({ tenantId, code: normalizeSkuCode(code) }).setOptions({ skipTenantFilter: true });
+  if (!master) throw new HttpError(404, 'Master SKU not found');
+  const channel = normalizeChannel(order.channel);
+  let mapping = await SkuMapping.findOne({ tenantId, channel, channelSkuCodeNorm: want }).setOptions({ skipTenantFilter: true });
+  if (!mapping) {
+    const out = await ingestListing(tenantId, userId, {
+      channel,
+      channelSkuCode: item.sku,
+      title: item.name,
+      imageUrl: item.imageUrl,
+    });
+    mapping = out.mapping;
+  }
+  return attachMappingToCode(tenantId, userId, mapping, master.code);
 }
 
 function splitCsvLine(line) {
@@ -476,6 +537,60 @@ async function retryFailedMapping(tenantId, userId, mapping) {
   return { action: 'unmapped', mapping };
 }
 
+async function explainUnmapped(tenantId, rows) {
+  const out = new Map();
+  const list = rows.filter((row) => row.syncStatus === 'unmapped' && !row.masterSkuId);
+  if (!list.length) return out;
+  const norms = [...new Set(list.map((row) => row.channelSkuCodeNorm || normalizeSkuCode(row.channelSkuCode)).filter(Boolean))];
+  const bars = [...new Set(list.map((row) => normalizeBarcode(row.barcode)).filter(Boolean))];
+  const [siblings, byCode, byBar] = await Promise.all([
+    SkuMapping.find({ tenantId, channelSkuCodeNorm: { $in: norms }, masterSkuId: { $ne: null }, isActive: true })
+      .select('channelSkuCodeNorm masterSkuId').setOptions({ skipTenantFilter: true }).lean(),
+    MasterSku.find({ tenantId, code: { $in: norms } })
+      .select('code status').setOptions({ skipTenantFilter: true }).lean(),
+    bars.length
+      ? MasterSku.find({ tenantId, barcode: { $in: bars }, status: 'active' })
+        .select('code barcode').setOptions({ skipTenantFilter: true }).lean()
+      : [],
+  ]);
+  const siblingMasters = siblings.length
+    ? await MasterSku.find({ tenantId, _id: { $in: siblings.map((row) => row.masterSkuId) }, status: 'active' })
+      .select('code').setOptions({ skipTenantFilter: true }).lean()
+    : [];
+  const codeOfId = new Map(siblingMasters.map((row) => [String(row._id), row.code]));
+  const siblingByNorm = new Map();
+  siblings.forEach((row) => {
+    const code = codeOfId.get(String(row.masterSkuId));
+    if (code && !siblingByNorm.has(row.channelSkuCodeNorm)) siblingByNorm.set(row.channelSkuCodeNorm, code);
+  });
+  const masterByCode = new Map(byCode.map((row) => [row.code, row]));
+  const masterByBar = new Map(byBar.map((row) => [row.barcode, row.code]));
+
+  list.forEach((row) => {
+    const norm = row.channelSkuCodeNorm || normalizeSkuCode(row.channelSkuCode);
+    const bar = normalizeBarcode(row.barcode);
+    const sameCode = masterByCode.get(norm);
+    let reason;
+    let suggestedMasterSku = null;
+    if (sameCode && sameCode.status === 'active') {
+      suggestedMasterSku = sameCode.code;
+      reason = `Master SKU ${sameCode.code} has the same code but is not linked to this listing. Press Map to link it.`;
+    } else if (siblingByNorm.has(norm)) {
+      suggestedMasterSku = siblingByNorm.get(norm);
+      reason = `Another listing with SKU ${row.channelSkuCode} is mapped to Master SKU ${suggestedMasterSku}. Press Map to link this one too.`;
+    } else if (bar && masterByBar.has(bar)) {
+      suggestedMasterSku = masterByBar.get(bar);
+      reason = `Master SKU ${suggestedMasterSku} has the same barcode ${bar}. Press Map to link it.`;
+    } else if (sameCode) {
+      reason = `Master SKU ${sameCode.code} is discontinued, so it is not auto-matched. Reactivate it or map to another code.`;
+    } else {
+      reason = `No Master SKU has code ${norm}${bar ? ` or barcode ${bar}` : `, and ${row.channel} sent no barcode`}. Type an existing Master SKU code or Create as new.`;
+    }
+    out.set(String(row._id), { reason, suggestedMasterSku });
+  });
+  return out;
+}
+
 module.exports = {
   IMPORT_ORDER,
   shopifyOwnsCatalog,
@@ -486,8 +601,10 @@ module.exports = {
   ingestListing,
   createMasterForListing,
   attachMappingToCode,
+  mapOrderItem,
   unmapListing,
   retryFailedMapping,
+  explainUnmapped,
   parseCsv,
   importChannel,
 };

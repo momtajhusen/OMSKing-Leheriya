@@ -3,6 +3,7 @@ import { ROLES } from '../constants/roles';
 import { attachPermissions } from '../constants/permissions';
 import useUIStore from './uiStore';
 import api from '../lib/api';
+import { sessionRejected } from '../lib/authErrors';
 import { resetCompanyData } from './companyMemory';
 
 const STORAGE_USER = 'user';
@@ -68,12 +69,17 @@ const useAuthStore = create((set, get) => ({
     try {
       const { data } = await api.get('/auth/me');
       get().persist(token, data.data);
-    } catch {
+    } catch (err) {
+      if (!sessionRejected(err)) {
+        set({ loading: false });
+        return;
+      }
       try {
         const { data } = await api.post('/auth/refresh');
         get().persist(data.data.accessToken, data.data.user);
-      } catch {
-        get().logoutLocal();
+      } catch (refreshErr) {
+        if (sessionRejected(refreshErr)) get().logoutLocal();
+        else set({ loading: false });
       }
     }
   },

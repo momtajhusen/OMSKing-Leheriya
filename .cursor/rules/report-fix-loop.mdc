@@ -28,6 +28,9 @@ The user never sets labels.
   `npm run report-inbox -- --ask <messageId> --need "<what is needed>" --question "<one short polite question>"`.
   It asks the client as a reply to their message, shows In progress on it in the live chat and sets `[Waiting for client]`.
   Never ask the client for passwords, API keys or other secrets: mark those `blocked` instead.
+- The task message alone is clear: fix it directly, ask nothing. Not clear: read the 2 tasks before and after it.
+  Still unclear: `npm run report-inbox -- --unclear <messageId> --need "<what is unclear>" --options "a | b" --from <developer|client>`
+  sets `[Needs input]` and shows a form under Auto-fix; the developer's answer sets `[Input given]` (fixed first, like Client replied).
 - A waiting task never blocks the rest: after asking, go on with the next pending task.
 - When the client replies to the question, the inbox check folds the reply into the task as a collapsed
   "Client reply" block and sets `[Client replied]`: that task is ready to fix and comes first.
@@ -41,14 +44,16 @@ The user never sets labels.
    b) else each `[Waiting for client]` task, oldest first: if the client answered or the requirement is found anywhere
       in the history, attach it (`--attach`) and fix that task;
    c) else (nothing answered or found) leave them waiting, do not ask again, and fix the first `[Not started]` entry
-      after the last `[Complete]` one.
+      after the last `[Complete]` one (none after it: the first `[Not started]` from the top).
    Mark the picked task `in-progress`.
 2. Fix only that task, following omsking-qa: failing test first, smallest fix, no unrelated changes.
 3. Verify: re-run the new test plus the affected suites (and the admin build for UI changes);
    for UI work also check the screen locally in the browser. Live integrations: mocks only.
 4. Verification passed → mark it `complete` with `--issue "<issue kya tha>" --fix "<fix kya kiya>"`: one short
    Hinglish line each (Hindi words in English letters, not Devanagari). They are also saved on the live update, so the
-   hover shows on the chat chip and the side list module on the live site too. Then add
+   hover shows on the chat chip and the side list module on the live site too. Also pass
+   `--check "<page kholo; kya dabao; kya dikhna chahiye>"`: 2-4 short Hinglish steps to verify the fix, shown under the
+   message's open-page icon. Then add
    `- Status: Fixed and verified <date> — <what was checked>; local only, not deployed`.
 5. Verification failed → retry once with a different approach. Still failing → undo your own changes for
    this task, mark it `failed`, add `- Status: <date> — <reason>`, and move on. The live chat keeps showing

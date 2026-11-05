@@ -5,6 +5,7 @@ const tenantSchema = new mongoose.Schema({
   slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
   kind: { type: String, enum: ['platform', 'merchant'], default: 'merchant' },
   legalEntity: {
+    legalName: String,
     email: String,
     phone: String,
     gstin: String,
@@ -23,6 +24,12 @@ const tenantSchema = new mongoose.Schema({
     skuPrefix: { type: String, default: '' },
     storefrontUrl: { type: String, default: '' },
     inventoryAuthority: { type: String, enum: ['oms', 'shopify'], default: 'oms' },
+    packageDefaults: {
+      weightKg: { type: Number, default: 0 },
+      lengthCm: { type: Number, default: 0 },
+      breadthCm: { type: Number, default: 0 },
+      heightCm: { type: Number, default: 0 },
+    },
     taxGst: {
       configured: { type: Boolean, default: false },
       defaultGstRate: { type: Number, default: 18 },

@@ -151,6 +151,7 @@ function orderRows(payloadOrders) {
       status: ORDER_STATUS[order.OrderStatus] || 'Processing',
       total: amount,
       orderDate: order.PurchaseDate ? new Date(order.PurchaseDate) : undefined,
+      shipByTime: order.LatestShipDate ? new Date(order.LatestShipDate) : undefined,
       items: [{
         name: order.OrderStatus ? `Amazon ${order.OrderStatus}` : 'Amazon item',
         sku: String(order.AmazonOrderId || ''),
@@ -159,6 +160,43 @@ function orderRows(payloadOrders) {
       }],
     };
   }).filter((order) => order.externalOrderId);
+}
+
+function orderItemRows(payloadItems) {
+  return (payloadItems || []).flatMap((item) => {
+    const sku = String(item.SellerSKU || '').trim();
+    if (!sku) return [];
+    const qty = Number(item.QuantityOrdered) || 1;
+    return [{
+      name: String(item.Title || sku),
+      sku,
+      qty,
+      price: Number(item.ItemPrice?.Amount || 0),
+    }];
+  });
+}
+
+async function withOrderItems(rows, creds, request, token) {
+  let throttled = false;
+  for (const row of rows) {
+    row.itemsKnown = false;
+    if (throttled) continue;
+    try {
+      const res = await request('GET', `${amazonHost(creds)}/orders/v0/orders/${encodeURIComponent(row.externalOrderId)}/orderItems`, {
+        headers: { 'x-amz-access-token': token, Accept: 'application/json' },
+      });
+      if (res?.status === 429) throttled = true;
+      if (!res || res.status < 200 || res.status >= 300) continue;
+      const body = JSON.parse(res.text || '{}');
+      const items = orderItemRows(body.payload?.OrderItems || body.OrderItems);
+      if (!items.length) continue;
+      row.items = items;
+      row.itemsKnown = true;
+    } catch {
+      continue;
+    }
+  }
+  return rows;
 }
 
 function listingRows(items) {
@@ -263,7 +301,7 @@ async function pullOrders(creds, opts = {}) {
     throw err;
   }
   const body = JSON.parse(res.text || '{}');
-  return orderRows(body.payload?.Orders || body.Orders || []);
+  return withOrderItems(orderRows(body.payload?.Orders || body.Orders || []), creds, request, token);
 }
 
 function returnRows(list) {

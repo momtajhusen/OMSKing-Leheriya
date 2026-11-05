@@ -7,6 +7,7 @@ const { successResponse } = require('../utils/response');
 const { sessionTenantId } = require('../lib/tenantAccess');
 const couriers = require('../services/courierAccount.service');
 const taxSettings = require('../services/taxSettings.service');
+const packageDefaults = require('../services/packageDefaults.service');
 const { recordFromReq } = require('../services/auditLog.service');
 const { encryptObject } = require('../lib/secretBox');
 
@@ -20,6 +21,7 @@ function mapCompany(tenant) {
   const legal = tenant.legalEntity || {};
   return {
     companyName: tenant.name || '',
+    legalName: legal.legalName || '',
     gstin: legal.gstin || '',
     pan: legal.pan || '',
     address: legal.address || '',
@@ -45,6 +47,7 @@ async function patchCompany(req, res) {
   const body = req.body || {};
   if (body.companyName != null) tenant.name = String(body.companyName).trim();
   tenant.legalEntity = tenant.legalEntity || {};
+  if (body.legalName != null) tenant.legalEntity.legalName = String(body.legalName).trim();
   if (body.gstin != null) tenant.legalEntity.gstin = String(body.gstin).trim().toUpperCase();
   if (body.pan != null) tenant.legalEntity.pan = String(body.pan).trim().toUpperCase();
   if (body.address != null) tenant.legalEntity.address = String(body.address).trim();
@@ -266,7 +269,28 @@ async function removeCourier(req, res) {
   return successResponse(res, row, 'Courier removed');
 }
 
+async function getPackageDefaults(req, res) {
+  return successResponse(res, await packageDefaults.getPackageDefaults(merchantTenant(req)), 'Default package');
+}
+
+async function patchPackageDefaults(req, res) {
+  const tenantId = merchantTenant(req);
+  const result = await packageDefaults.savePackageDefaults(tenantId, req.body || {});
+  await recordFromReq(req, {
+    tenantId,
+    action: 'package_defaults.updated',
+    resourceType: 'package_defaults',
+    resourceId: tenantId,
+    resourceDisplay: 'Default package',
+    before: result.before,
+    after: { ...result.defaults, appliedCount: result.appliedCount },
+  });
+  return successResponse(res, { defaults: result.defaults, appliedCount: result.appliedCount }, 'Default package saved');
+}
+
 module.exports = {
+  getPackageDefaults,
+  patchPackageDefaults,
   getCompany,
   patchCompany,
   getTax,

@@ -4,6 +4,7 @@ import { toast } from 'react-hot-toast';
 import useVendorStore from '../../stores/vendorStore';
 import useOrderStore from '../../stores/orderStore';
 import { ordersForVendor } from '../../lib/orderSubOrders';
+import { sharedContactWarning, VENDOR_RENAME_NOTE } from '../../lib/vendorContacts';
 import api, { apiError } from '../../lib/api';
 import { statusBadgeVariant } from '../../utils/format';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
@@ -19,9 +20,9 @@ import EmptyState from '../../components/ui/EmptyState';
 import { PasswordHints } from '../../components/ui/FormBanner';
 import { useAuth } from '../../hooks/useAuth';
 import { ROLES } from '../../constants/roles';
-import { Store, Plus, MessageCircle, MapPin, Package, Search, Trash2, RefreshCw, Eye } from 'lucide-react';
+import { Store, Plus, MessageCircle, MapPin, Package, Search, Trash2, RefreshCw, Eye, AlertTriangle } from 'lucide-react';
 
-const emptyVendor = { name: '', location: '', phone: '', email: '', telegramGroup: '' };
+const emptyVendor = { name: '', location: '', phone: '', email: '', telegramGroup: '', shopifyVendors: '' };
 
 function passwordProblem(password, confirm) {
   if (!password && !confirm) return '';
@@ -83,8 +84,10 @@ export default function VendorsPage() {
 
   const vendorOrders = ordersForVendor(allOrders, ordersVendor?.name);
 
-  const sharedPhone = (phone, skipId) =>
-    vendorList.filter((v) => v.id !== skipId && v.phone.replace(/\s/g, '') === phone.replace(/\s/g, '')).map((v) => v.name);
+  const warnShared = (saved) => {
+    const warning = sharedContactWarning(saved?.sharedContacts);
+    if (warning) toast(warning, { icon: <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />, duration: 6000 });
+  };
 
   const saveVendor = async () => {
     if (!form.name.trim() || (!form.phone.trim() && editing?.source !== 'shopify')) {
@@ -103,20 +106,21 @@ export default function VendorsPage() {
     setSaving(true);
     try {
       if (editing) {
-        await saveVendorRecord(form, editing.id);
+        const saved = await saveVendorRecord(form, editing.id);
         if (canSetPassword && password) {
           await api.post(`/vendors/${editing.id}/password`, { password });
           toast.success(`${form.name} updated. Login password saved for ${form.email.trim()}`);
         } else {
           toast.success(`${form.name} updated`);
         }
+        warnShared(saved);
       } else {
-        const others = sharedPhone(form.phone);
         const created = await saveVendorRecord(form);
         if (canSetPassword && password && created?.id) {
           await api.post(`/vendors/${created.id}/password`, { password });
         }
-        toast.success(others.length ? `${form.name} added. Same phone already used by ${others.join(', ')}.` : `${form.name} added`);
+        toast.success(`${form.name} added`);
+        warnShared(created);
       }
       setForm(emptyVendor);
       setPassword('');
@@ -175,6 +179,7 @@ export default function VendorsPage() {
       phone: vendor.phone,
       email: vendor.email || '',
       telegramGroup: vendor.telegramGroup || '',
+      shopifyVendors: (vendor.shopifyVendors || []).join(', '),
     });
     setOpen(true);
   };
@@ -217,7 +222,7 @@ export default function VendorsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="font-medium">Auto assignment</p>
-          <p className="text-sm text-muted-foreground">When on, fulfilment assigns the Shopify vendor name automatically if that vendor is still on this list.</p>
+          <p className="text-sm text-muted-foreground">When on, Assignment picks the Shopify vendor name automatically if that vendor is still on this list.</p>
         </div>
         <button
           type="button"
@@ -269,7 +274,7 @@ export default function VendorsPage() {
       {filtered.length === 0 ? (
         <EmptyState
           title={vendorList.length ? 'No vendors in this view' : 'No vendors yet'}
-          description={vendorList.length ? 'Clear search or change the tab.' : 'Add a vendor or fetch vendor names from Shopify. Fulfilment can only assign saved vendors.'}
+          description={vendorList.length ? 'Clear search or change the tab.' : 'Add a vendor or fetch vendor names from Shopify. Assignment can only assign saved vendors.'}
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
@@ -388,7 +393,7 @@ export default function VendorsPage() {
         className="max-w-5xl"
       >
         {vendorOrders.length === 0 ? (
-          <EmptyState title="No assigned orders yet" description="Fulfilment assignments will show here." />
+          <EmptyState title="No assigned orders yet" description="Assignments will show here." />
         ) : (
           <div className="overflow-x-auto">
           <Table>
@@ -497,7 +502,7 @@ export default function VendorsPage() {
         title={confirmDelete ? 'Delete vendor' : editing ? 'Edit Vendor' : 'Add Vendor'}
         description={confirmDelete
           ? `${editing?.name || 'This vendor'} will be removed from the vendor list. Orders already assigned to them stay on those orders.`
-          : 'Phone numbers are not unique — the same number can belong to more than one vendor.'}
+          : 'Phone and email are not unique — more than one vendor can use the same one. You get a warning when you save.'}
         footer={
           confirmDelete ? (
             <>
@@ -529,6 +534,7 @@ export default function VendorsPage() {
           <div>
             <label className="text-sm font-medium">Vendor name</label>
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            {editing && <p className="text-xs text-muted-foreground">{VENDOR_RENAME_NOTE}</p>}
           </div>
           <div>
             <label className="text-sm font-medium">Phone</label>
@@ -546,6 +552,11 @@ export default function VendorsPage() {
             <label className="text-sm font-medium">Telegram group chat id</label>
             <Input value={form.telegramGroup} onChange={(e) => setForm({ ...form, telegramGroup: e.target.value })} placeholder="-1001234567890 or @vendor_group" />
             <p className="text-xs text-muted-foreground">The bot must already be in this group. Vendor assign sends the order id, SKU, qty, and ship-by date here.</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Shopify vendor names</label>
+            <Input value={form.shopifyVendors} onChange={(e) => setForm({ ...form, shopifyVendors: e.target.value })} placeholder="Leheriya Jaipur, JP Studio" />
+            <p className="text-xs text-muted-foreground">Comma separated. Orders with these Shopify vendors show this vendor in the order&apos;s vendor dropdown. You can still change it before Assign.</p>
           </div>
           {canSetPassword && !confirmDelete && (
             <div className="space-y-3 rounded-xl border border-[hsl(var(--color-border-premium))] p-3">

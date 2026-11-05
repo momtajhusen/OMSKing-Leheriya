@@ -1,9 +1,12 @@
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const Inventory = require('../models/Inventory');
 const InventoryLedger = require('../models/InventoryLedger');
 const InventoryReservation = require('../models/InventoryReservation');
 const Warehouse = require('../models/Warehouse');
 const MasterSku = require('../models/MasterSku');
+const Product = require('../models/Product');
+const SkuMapping = require('../models/SkuMapping');
 const { HttpError } = require('../utils/httpError');
 const { withTransaction } = require('../lib/withTransaction');
 const { firstImage } = require('../lib/catalogImages');
@@ -204,11 +207,40 @@ function atsForSku(warehouses, rowsByWarehouse) {
   return ats;
 }
 
-async function listBalances(tenantId, { warehouseId, q, tab } = {}) {
+const QTY_SORTS = { qty_desc: -1, qty_asc: 1 };
+
+async function attachImages(tenantId, rows) {
+  const skuIds = [...new Set(rows.map((row) => row.masterSkuId))];
+  if (!skuIds.length) return rows;
+  const skus = await exec(MasterSku.find({ tenantId, _id: { $in: skuIds } }, 'productId').lean(), null);
+  const productIds = [...new Set(skus.map((sku) => sku.productId).filter(Boolean).map(String))];
+  const products = productIds.length
+    ? await exec(Product.find({ tenantId, _id: { $in: productIds } }, 'images').lean(), null)
+    : [];
+  const imageByProduct = new Map(products.map((product) => [String(product._id), firstImage(product.images)]));
+  const imageBySku = new Map(skus.map((sku) => [String(sku._id), imageByProduct.get(String(sku.productId)) || '']));
+  rows.forEach((row) => { row.imageUrl = imageBySku.get(row.masterSkuId) || ''; });
+  return rows;
+}
+
+async function listBalances(tenantId, { warehouseId, q, tab, sort, images = true } = {}) {
   await ensureDefaultWarehouses(tenantId);
   const warehouses = await exec(Warehouse.find({ tenantId, status: 'active' }).sort({ code: 1 }), null);
-  const skus = await exec(MasterSku.find({ tenantId, status: 'active' }).populate('productId', 'name images').sort({ code: 1 }), null);
-  const stored = await exec(Inventory.find({ tenantId }).populate('masterSkuId').populate('warehouseId'), null);
+  const skuQuery = MasterSku.find({ tenantId, status: 'active' });
+  if (images) skuQuery.populate('productId', 'name images');
+  const skus = await exec(skuQuery.sort({ code: 1 }).lean(), null);
+  const stored = await exec(Inventory.find({ tenantId }).lean(), null);
+  const shopifyMaps = await exec(SkuMapping.find(
+    { tenantId, channel: 'shopify', isActive: true, masterSkuId: { $ne: null } },
+    'masterSkuId channelSkuCode',
+  ).lean(), null);
+  const shopifyBySku = new Map();
+  shopifyMaps.forEach((map) => {
+    const skuId = String(map.masterSkuId);
+    const codes = shopifyBySku.get(skuId) || [];
+    if (map.channelSkuCode && !codes.includes(map.channelSkuCode)) codes.push(map.channelSkuCode);
+    shopifyBySku.set(skuId, codes);
+  });
   const byKey = new Map();
   const qtyBySku = new Map();
   stored.forEach((row) => {
@@ -227,19 +259,24 @@ async function listBalances(tenantId, { warehouseId, q, tab } = {}) {
     visible.forEach((wh) => {
       const hit = byKey.get(`${sku._id}:${wh._id}`);
       const row = hit
-        ? mapBalance(hit, hit.warehouseId || wh, hit.masterSkuId || sku, sku)
+        ? mapBalance(hit, wh, sku)
         : emptyBalance(sku, wh);
       row.ats = ats;
+      row.shopifySku = (shopifyBySku.get(String(sku._id)) || []).join(', ');
       data.push(row);
     });
   });
   if (q) {
     const needle = String(q).toLowerCase();
-    data = data.filter((row) => row.sku.toLowerCase().includes(needle) || row.productName.toLowerCase().includes(needle));
+    data = data.filter((row) => row.sku.toLowerCase().includes(needle)
+      || row.productName.toLowerCase().includes(needle)
+      || row.shopifySku.toLowerCase().includes(needle));
   }
   if (tab === 'low') data = data.filter((row) => row.low);
   if (tab === 'reserved') data = data.filter((row) => row.reserved > 0);
   if (tab === 'available') data = data.filter((row) => row.available > 0 && !row.low);
+  const direction = QTY_SORTS[sort];
+  if (direction) data.sort((a, b) => direction * (a.stock - b.stock));
   return data;
 }
 
@@ -248,6 +285,131 @@ async function channelAts(tenantId, masterSkuId) {
   const balances = await exec(Inventory.find({ tenantId, masterSkuId }), null);
   const byWh = new Map(balances.map((row) => [String(row.warehouseId), row]));
   return atsForSku(warehouses, byWh);
+}
+
+function emptyCounts() {
+  return { purchased: 0, manualAdjustments: 0, shipped: 0, returned: 0, lastSoldAt: null, lastMovementAt: null };
+}
+
+async function skuDetail(tenantId, masterSkuId) {
+  if (!mongoose.isValidObjectId(masterSkuId)) throw new HttpError(404, 'Master SKU not found');
+  const sku = await exec(MasterSku.findOne({ _id: masterSkuId, tenantId }).populate('productId', 'name category images').lean(), null);
+  if (!sku) throw new HttpError(404, 'Master SKU not found');
+  await ensureDefaultWarehouses(tenantId);
+  const [warehouses, balances, ledger, mappings] = await Promise.all([
+    exec(Warehouse.find({ tenantId, status: 'active' }).sort({ code: 1 }), null),
+    exec(Inventory.find({ tenantId, masterSkuId: sku._id }).lean(), null),
+    exec(InventoryLedger.find({ tenantId, masterSkuId: sku._id }, 'warehouseId movementType qtyDelta recordedAt').lean(), null),
+    exec(SkuMapping.find({ tenantId, masterSkuId: sku._id, isActive: true }).sort({ createdAt: 1 }).lean(), null),
+  ]);
+  const byWh = new Map(balances.map((row) => [String(row.warehouseId), row]));
+  const counts = new Map();
+  ledger.forEach((row) => {
+    const whId = String(row.warehouseId);
+    const c = counts.get(whId) || emptyCounts();
+    const qty = row.qtyDelta || 0;
+    if (row.movementType === 'purchase_receipt') c.purchased += qty;
+    if (row.movementType === 'adjustment_plus' || row.movementType === 'adjustment_minus') c.manualAdjustments += qty;
+    if (row.movementType === 'fulfilment_deduct') {
+      c.shipped += Math.abs(qty);
+      if (!c.lastSoldAt || row.recordedAt > c.lastSoldAt) c.lastSoldAt = row.recordedAt;
+    }
+    if (row.movementType === 'return_restock' || row.movementType === 'rto_restock') c.returned += qty;
+    if (!c.lastMovementAt || row.recordedAt > c.lastMovementAt) c.lastMovementAt = row.recordedAt;
+    counts.set(whId, c);
+  });
+  const product = sku.productId && typeof sku.productId === 'object' ? sku.productId : null;
+  return {
+    sku: {
+      id: String(sku._id),
+      code: sku.code,
+      name: sku.name,
+      productId: product ? String(product._id) : (sku.productId ? String(sku.productId) : null),
+      productName: product?.name || '',
+      category: product?.category || '',
+      imageUrl: imageFromSku(sku),
+      barcode: sku.barcode || '',
+      hsnCode: sku.hsnCode || '',
+      gstRatePercent: sku.gstRatePercent ?? null,
+      mrp: sku.mrp || 0,
+      sellingPrice: sku.sellingPrice || 0,
+      costPrice: sku.costPrice || 0,
+      weightKg: sku.weightKg || 0,
+      dimensionsCm: {
+        l: sku.dimensionsCm?.l || 0,
+        w: sku.dimensionsCm?.w || 0,
+        h: sku.dimensionsCm?.h || 0,
+      },
+      variantAttributes: sku.variantAttributes || {},
+      status: sku.status,
+      createdAt: sku.createdAt,
+    },
+    warehouses: warehouses.map((wh) => {
+      const hit = byWh.get(String(wh._id));
+      const row = hit ? mapBalance(hit, wh, sku) : emptyBalance(sku, wh);
+      row.warehouseName = wh.name || '';
+      row.counts = counts.get(String(wh._id)) || emptyCounts();
+      return row;
+    }),
+    ats: atsForSku(warehouses, byWh),
+    listings: channelListings(mappings, warehouses, byWh, sku),
+  };
+}
+
+const LISTING_GROUP_ORDER = { marketplace: 0, shopify_offline: 1, shopify_virtual: 2 };
+
+function listingGroup(channel, warehouse) {
+  if (channel !== 'shopify') return 'marketplace';
+  return warehouse.type === 'virtual' ? 'shopify_virtual' : 'shopify_offline';
+}
+
+const LISTING_URL = {
+  amazon: (id) => `https://www.amazon.in/dp/${id}`,
+  myntra: (id) => `https://www.myntra.com/${id}`,
+};
+
+function listingUrl(channel, channelProductId) {
+  const id = String(channelProductId || '').trim();
+  const build = LISTING_URL[channel];
+  return id && build ? build(encodeURIComponent(id)) : '';
+}
+
+function channelListings(mappings, warehouses, byWh, sku) {
+  const order = new Map(CHANNELS.map((id, index) => [id, index]));
+  const rows = [];
+  mappings.forEach((map) => {
+    const channelName = channelById(map.channel)?.name || map.channel;
+    warehouses.filter((wh) => sellsOn(wh, map.channel)).forEach((wh) => {
+      const group = listingGroup(map.channel, wh);
+      rows.push({
+        id: `${map._id}:${wh._id}`,
+        mappingId: String(map._id),
+        channel: map.channel,
+        channelName,
+        group,
+        label: group === 'shopify_offline' ? 'Shopify Offline' : group === 'shopify_virtual' ? 'Shopify Virtual' : channelName,
+        channelProductId: map.channelProductId || '',
+        listingUrl: listingUrl(map.channel, map.channelProductId),
+        channelVariantId: map.channelVariantId,
+        channelSkuCode: map.channelSkuCode,
+        title: map.channelTitle || '',
+        imageUrl: map.imageUrl || '',
+        sellingPrice: map.channelSellingPrice ?? null,
+        mrp: sku.mrp || 0,
+        syncStatus: map.syncStatus,
+        lastSyncedAt: map.lastSyncedAt || null,
+        mappedAt: map.createdAt,
+        warehouseId: String(wh._id),
+        warehouse: wh.code,
+        warehouseName: wh.name || '',
+        warehouseType: wh.type,
+        listedQty: channelSellable(byWh.get(String(wh._id)), map.channel),
+      });
+    });
+  });
+  return rows.sort((a, b) => (LISTING_GROUP_ORDER[a.group] - LISTING_GROUP_ORDER[b.group])
+    || ((order.get(a.channel) ?? 99) - (order.get(b.channel) ?? 99))
+    || a.warehouse.localeCompare(b.warehouse));
 }
 
 async function bumpQty(tenantId, sku, warehouse, delta, session) {
@@ -1114,9 +1276,13 @@ async function stressReserve(tenantId, userId, { masterSkuId, channel, qty = 1, 
 
 module.exports = {
   availableOf,
+  onHandOf,
   channelSellable,
   listBalances,
+  attachImages,
   channelAts,
+  skuDetail,
+  listingUrl,
   stockIn,
   importOpeningStock,
   restockReturn,

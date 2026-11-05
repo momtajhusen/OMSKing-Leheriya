@@ -335,6 +335,45 @@ test('NOT-003 on and NOT-004 off: dispatch sends one message and shipping sends 
   assert.equal(recent.some((row) => row.channel === 'in_app' && row.eventKey === 'NOT-005'), true);
 });
 
+test('owner alert on vendor assignment can be switched off and back on per channel', async () => {
+  const { tenant, order } = await shop();
+  await saveNotificationSettings(tenant._id, {
+    ownerChatId: '-100333',
+    events: { 'NOT-009': { email: false, telegram: false, whatsapp: false, other: false } },
+  });
+  const saved = publicSettings(await loadTenant(tenant._id)).events.find((row) => row.id === 'NOT-009');
+  assert.equal(saved.locked, false);
+  assert.deepEqual(
+    { email: saved.email, telegram: saved.telegram, whatsapp: saved.whatsapp, other: saved.other },
+    { email: false, telegram: false, whatsapp: false, other: false },
+  );
+
+  const chats = [];
+  const mails = [];
+  const deps = {
+    telegram: async ({ chatId }) => {
+      chats.push(chatId);
+      return `tg-${chats.length}`;
+    },
+    mailer: async ({ to }) => {
+      mails.push(to);
+      return { messageId: `mail-${mails.length}` };
+    },
+  };
+  const off = await notifyVendorAssigned(tenant._id, order, order.subOrders[0], deps);
+  assert.equal(off.ownerTelegram, 'skipped');
+  assert.equal(chats.includes('-100333'), false);
+  assert.equal(mails.length, 0);
+
+  await saveNotificationSettings(tenant._id, {
+    events: { 'NOT-009': { email: false, telegram: true, whatsapp: false, other: false } },
+  });
+  const on = await notifyVendorAssigned(tenant._id, order, order.subOrders[0], deps);
+  assert.equal(on.ownerTelegram, 'sent');
+  assert.deepEqual(chats, ['-100333']);
+  assert.equal(mails.length, 0);
+});
+
 test('job failure stays with the company and each later event uses only its own switch', async () => {
   const { tenant, order } = await shop();
   await saveNotificationSettings(tenant._id, {
@@ -348,13 +387,12 @@ test('job failure stays with the company and each later event uses only its own 
       'NOT-006': { email: false, telegram: false, whatsapp: true, other: false },
       'NOT-007': { email: true, telegram: false, whatsapp: false, other: false },
       'NOT-008': { email: true, telegram: true, whatsapp: true, other: false },
-      'NOT-009': { email: false, telegram: false, whatsapp: false, other: false },
     },
   });
   const fresh = await loadTenant(tenant._id);
   const flags = publicSettings(fresh);
   const owner = flags.events.find((row) => row.id === 'NOT-009');
-  assert.equal(owner.locked, true);
+  assert.equal(owner.locked, false);
   assert.equal(owner.email, true);
   assert.equal(owner.telegram, true);
   assert.equal(owner.whatsapp, true);

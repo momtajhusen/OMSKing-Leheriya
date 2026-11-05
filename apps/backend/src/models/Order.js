@@ -15,6 +15,12 @@ const itemSchema = new mongoose.Schema({
   vendor: { type: String, default: '' },
   fulfilmentSource: { type: String, default: 'Offline' },
   locationId: { type: String, default: '' },
+  pack: {
+    weightKg: { type: Number, default: 0 },
+    lengthCm: { type: Number, default: 0 },
+    breadthCm: { type: Number, default: 0 },
+    heightCm: { type: Number, default: 0 },
+  },
 }, { _id: false });
 
 const subOrderSchema = new mongoose.Schema({
@@ -26,6 +32,7 @@ const subOrderSchema = new mongoose.Schema({
   imageUrl: { type: String, default: '' },
   qty: { type: Number, default: 1 },
   price: { type: Number, default: 0 },
+  cost: { type: Number, default: null },
   assignedVendor: { type: String, default: '' },
   vendorPhone: { type: String, default: '' },
   vendorEmail: { type: String, default: '' },
@@ -56,9 +63,12 @@ const orderSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   address: { type: String, default: '' },
   city: { type: String, default: '' },
+  customerGstin: { type: String, default: '' },
+  notes: { type: String, default: '' },
   channel: { type: String, default: 'Shopify' },
   status: { type: String, default: 'New' },
   paymentMode: { type: String, default: 'COD' },
+  labelPaymentMode: { type: String, default: '' },
   paymentStatus: { type: String, enum: ['', 'paid', 'partially_paid', 'unpaid'], default: '' },
   shipState: { type: String, default: '' },
   fulfilmentSource: { type: String, default: 'Offline' },

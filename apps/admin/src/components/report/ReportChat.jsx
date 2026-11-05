@@ -241,7 +241,7 @@ function PlatformInbox({ onClose, onChanged, initialThread }) {
 }
 
 /** `initialThread` opens the platform inbox on that subscriber (used when a screen recording comes back to its chat). */
-export default function ReportChat({ open, onClose, mode, onChanged, initialThread }) {
+export default function ReportChat({ open, onClose, mode, onChanged, initialThread, focusId }) {
   const { user } = useAuth();
 
   useEffect(() => {
@@ -282,6 +282,8 @@ export default function ReportChat({ open, onClose, mode, onChanged, initialThre
             avatar={<SupportAvatar />}
             onClose={onClose}
             onChanged={onChanged}
+            focusId={focusId}
+            openPages={user?.role !== 'vendor'}
             emptyState={<MerchantEmpty />}
             notice="Messages here go straight to the developer support team. Everyone in your company with access can see this chat."
           />

@@ -7,12 +7,14 @@ import useOrderStore from '../../stores/orderStore';
 import { vendorReportLabel } from '../../stores/vendorStore';
 import { formatINR } from '../../utils/format';
 import { netSales, salesByChannel, isCancelled, downloadCsv } from '../../lib/orderMetrics';
+import { filterReportOrders } from '../../lib/reportFilters';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Select from '../../components/ui/Select';
+import Input from '../../components/ui/Input';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { Download, TrendingUp, Package, Truck, RotateCcw, RefreshCw, Store } from 'lucide-react';
@@ -48,7 +50,15 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState('sales');
   const [vendorFilter, setVendorFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
+  const [channelFilter, setChannelFilter] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [stock, setStock] = useState([]);
+
+  const filtered = useMemo(
+    () => filterReportOrders(orders, { channel: channelFilter, from: fromDate, to: toDate }),
+    [orders, channelFilter, fromDate, toDate],
+  );
 
   useEffect(() => {
     hydrateFromApi();
@@ -56,8 +66,8 @@ export default function ReportsPage() {
   }, [hydrateFromApi]);
 
   const sales = useMemo(() => {
-    const live = orders.filter((order) => !isCancelled(order));
-    const revenue = netSales(orders);
+    const live = filtered.filter((order) => !isCancelled(order));
+    const revenue = netSales(filtered);
     const months = {};
     live.forEach((order) => {
       const key = monthOf(order.createdAt);
@@ -70,11 +80,11 @@ export default function ReportsPage() {
       revenue,
       count: live.length,
       aov: live.length ? Math.round(revenue / live.length) : 0,
-      cancelled: orders.length - live.length,
+      cancelled: filtered.length - live.length,
       byMonth: Object.values(months).sort((a, b) => a.month.localeCompare(b.month)),
-      byChannel: salesByChannel(orders, connected.labels),
+      byChannel: salesByChannel(filtered, channelFilter ? [channelFilter] : connected.labels),
     };
-  }, [orders, connected.labels]);
+  }, [filtered, channelFilter, connected.labels]);
 
   const inventory = useMemo(() => {
     const warehouses = {};
@@ -97,7 +107,7 @@ export default function ReportsPage() {
   }, [stock]);
 
   const shipping = useMemo(() => {
-    const shipped = orders.filter((order) => trackingOf(order));
+    const shipped = filtered.filter((order) => trackingOf(order));
     const couriers = {};
     shipped.forEach((order) => {
       const name = order.courier || `${order.channel} logistics`;
@@ -114,10 +124,10 @@ export default function ReportsPage() {
       rto: shipped.filter((order) => `${order.channelStatus || ''} ${(order.channelLines || []).map((line) => line.status).join(' ')}`.toUpperCase().includes('RTO') || order.reversePickup?.returnId).length,
       couriers: Object.values(couriers).sort((a, b) => b.shipments - a.shipments),
     };
-  }, [orders]);
+  }, [filtered]);
 
   const cancellations = useMemo(() => {
-    const cancelled = orders.filter(isCancelled);
+    const cancelled = filtered.filter(isCancelled);
     const reasons = {};
     cancelled.forEach((order) => {
       const reason = (order.channelLines || []).find((line) => line.cancellationReason)?.cancellationReason || 'No reason given';
@@ -126,11 +136,11 @@ export default function ReportsPage() {
     return {
       count: cancelled.length,
       afterDispatch: cancelled.filter((order) => trackingOf(order)).length,
-      returns: orders.filter((order) => order.reversePickup?.returnId).length,
-      rate: orders.length ? ((cancelled.length / orders.length) * 100).toFixed(1) : '0.0',
+      returns: filtered.filter((order) => order.reversePickup?.returnId).length,
+      rate: filtered.length ? ((cancelled.length / filtered.length) * 100).toFixed(1) : '0.0',
       reasons: Object.entries(reasons).map(([reason, count]) => ({ reason, count, pct: ((count / cancelled.length) * 100).toFixed(1) })).sort((a, b) => b.count - a.count),
     };
-  }, [orders]);
+  }, [filtered]);
 
   const vendorLines = useMemo(() => orders.flatMap((order) => (order.subOrders || [])
     .filter((sub) => sub.assignedVendor)
@@ -179,7 +189,7 @@ export default function ReportsPage() {
   const exportCurrent = () => {
     if (activeTab === 'sales') {
       downloadCsv(`sales-${today()}.csv`, ['Order', 'Date', 'Channel', 'Status', 'Payment', 'Items', 'Total'],
-        orders.map((order) => [order.id, String(order.createdAt || '').slice(0, 10), order.channel, order.status, order.paymentMode, (order.items || []).length, order.total]));
+        filtered.map((order) => [order.id, String(order.createdAt || '').slice(0, 10), order.channel, order.status, order.paymentMode, (order.items || []).length, order.total]));
     } else if (activeTab === 'inventory') {
       downloadCsv(`inventory-${today()}.csv`, ['SKU', 'Product', 'Warehouse', 'Stock', 'Reserved', 'Available'],
         stock.map((row) => [row.sku, row.productName, row.warehouse, row.stock, row.reserved, row.available]));
@@ -228,6 +238,29 @@ export default function ReportsPage() {
           </button>
         ))}
       </div>
+
+      {['sales', 'shipping', 'returns'].includes(activeTab) && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-48">
+            <p className="mb-1 text-sm font-medium">Channel</p>
+            <Select value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)}>
+              <option value="">All channels</option>
+              {connected.labels.map((label) => <option key={label} value={label}>{label}</option>)}
+            </Select>
+          </div>
+          <div className="w-44">
+            <p className="mb-1 text-sm font-medium">From</p>
+            <Input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} />
+          </div>
+          <div className="w-44">
+            <p className="mb-1 text-sm font-medium">To</p>
+            <Input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} />
+          </div>
+          {(channelFilter || fromDate || toDate) && (
+            <Button variant="ghost" onClick={() => { setChannelFilter(''); setFromDate(''); setToDate(''); }}>Clear filters</Button>
+          )}
+        </div>
+      )}
 
       {activeTab === 'sales' && (
         <div className="space-y-3">
@@ -476,7 +509,7 @@ export default function ReportsPage() {
             </CardHeader>
             <CardContent>
               {vendorRows.length === 0 ? (
-                <EmptyState title="No vendor lines yet" description="Assign sub-orders to vendors on Fulfilment." />
+                <EmptyState title="No vendor lines yet" description="Assign sub-orders to vendors on Assignment." />
               ) : (
                 <Table>
                   <TableHeader>

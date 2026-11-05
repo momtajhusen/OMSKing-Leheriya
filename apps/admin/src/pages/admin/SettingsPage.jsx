@@ -14,6 +14,7 @@ import api, { apiError } from '../../lib/api';
 
 const companySchema = z.object({
   companyName: z.string().min(1, 'Company name is required'),
+  legalName: z.string().trim(),
   gstin: z.string().min(15, 'GSTIN must be 15 characters').max(15, 'GSTIN must be 15 characters'),
   pan: z.string().min(10, 'PAN must be 10 characters').max(10, 'PAN must be 10 characters'),
   address: z.string().min(1, 'Address is required'),
@@ -57,6 +58,7 @@ export default function SettingsPage() {
     resolver: zodResolver(companySchema),
     defaultValues: {
       companyName: '',
+      legalName: '',
       gstin: '',
       pan: '',
       address: '',
@@ -77,6 +79,7 @@ export default function SettingsPage() {
       const company = data.data || {};
       reset({
         companyName: company.companyName || '',
+        legalName: company.legalName || '',
         gstin: company.gstin || '',
         pan: company.pan || '',
         address: company.address || '',
@@ -179,6 +182,19 @@ export default function SettingsPage() {
                 {errors.companyName && (
                   <p className="text-sm text-destructive">{errors.companyName.message}</p>
                 )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-foreground">Legal Name (invoice supplier)</label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    {...register('legalName')}
+                    className="premium-input pl-10"
+                    placeholder="Registered name, e.g. PRDOSCO GLOBAL PRIVATE LIMITED"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">Shown in the SUPPLIER block of the invoice. Leave blank to use the company name.</p>
               </div>
 
               <div className="space-y-2">

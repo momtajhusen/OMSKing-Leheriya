@@ -6,8 +6,8 @@ import { pickSummary, summaryHint } from './reportUpdates.js';
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
 test('the Hinglish issue / fix lines are one shared helper', () => {
-  assert.equal(summaryHint({ issue: 'Page atak jaata tha', fix: 'API halki ki' }), 'Issue kya tha: Page atak jaata tha\nFix kya kiya: API halki ki');
-  assert.equal(summaryHint({ issue: 'Page atak jaata tha', fix: '' }), 'Issue kya tha: Page atak jaata tha');
+  assert.equal(summaryHint({ issue: 'Page atak jaata tha', fix: 'API halki ki' }), 'Issue: Page atak jaata tha\nFixed: API halki ki');
+  assert.equal(summaryHint({ issue: 'Page atak jaata tha', fix: '' }), 'Issue: Page atak jaata tha');
   assert.equal(summaryHint(null), '');
 });
 
@@ -20,5 +20,5 @@ test('the summary saved on the live update wins over the local task list one', (
 
 test('the Hinglish hover stays in the Report chat; the side list has no detail icon', () => {
   const sidebar = read('../components/layout/AdminSidebar.jsx');
-  assert.doesNotMatch(sidebar, /ModuleDetailIcon|Summaries|moduleHint|Issue kya tha/);
+  assert.doesNotMatch(sidebar, /ModuleDetailIcon|Summaries|moduleHint|summaryHint/);
 });

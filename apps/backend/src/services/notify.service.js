@@ -14,7 +14,7 @@ const EVENTS = [
   { id: 'NOT-007', email: false, telegram: false, whatsapp: false, other: false },
   { id: 'NOT-008', email: false, telegram: false, whatsapp: false, other: false },
   { id: 'NOT-010', email: false, telegram: false, whatsapp: false, other: false },
-  { id: 'NOT-009', email: true, telegram: true, whatsapp: true, other: false, locked: true },
+  { id: 'NOT-009', email: true, telegram: true, whatsapp: true, other: false },
 ];
 
 function skip(query) {

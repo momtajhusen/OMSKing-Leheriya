@@ -27,6 +27,7 @@ const masterSkuSchema = new mongoose.Schema({
 
 masterSkuSchema.index({ tenantId: 1, code: 1 }, { unique: true });
 masterSkuSchema.index({ tenantId: 1, barcode: 1 });
+masterSkuSchema.index({ tenantId: 1, productId: 1 });
 masterSkuSchema.plugin(tenantPlugin);
 
 module.exports = mongoose.model('MasterSku', masterSkuSchema);

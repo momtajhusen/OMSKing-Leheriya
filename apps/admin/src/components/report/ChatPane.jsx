@@ -1,8 +1,9 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Camera, ChevronDown, ClipboardList, Crop, FileText, Image as ImageIcon, Loader2, Mic, MonitorPlay, Paperclip, Pencil, Play, Reply, SendHorizontal,
-  Trash2, X,
+  ArrowLeft, Camera, ChevronDown, ClipboardList, Crop, FileText, Image as ImageIcon, Loader2, Mic, MonitorPlay, Paperclip, Pause, Pencil, Play, Reply, Search, SendHorizontal,
+  Trash2, Wand2, X,
 } from 'lucide-react';
 import screenRecorder, { canCaptureScreen, canRecordScreen, captureScreenshot, claimClip } from '../../lib/screenRecorder';
 import ScreenshotEditor from './ScreenshotEditor';
@@ -12,8 +13,16 @@ import { copyText } from '../../lib/copyText';
 import {
   clipboardFiles, dayLabel, fileKind, fileSizeLabel, fileTypeLabel, formatDuration, hasGap, mergeMessages, messagePreview, pageSizeFor, recorderMime, MAX_FILE_MB,
 } from '../../lib/reportChat';
-import { ACTION_TOAST, CHAT_FILTERS, markSteps, matchesFilter, pickSummary } from '../../lib/reportUpdates';
+import { ACTION_TOAST, CHAT_FILTERS, filterCount, isHistoryEvent, markSteps, matchesFilter, matchesSearch, pickSummary } from '../../lib/reportUpdates';
 import { useTaskSummaries } from '../../lib/reportSummaries';
+import { autofixTarget, notifyAutofixChanged } from '../../lib/reportFocus';
+import { blockedFor, canScopeFix, SCOPE_LABEL, startedMessage } from '../../lib/autofixScope';
+import { autoplayOn, onAutoplayChanged, onAutoplayStatus, setAutoplay } from '../../lib/autofixAutoplay';
+import AutoplayStatusModal from './AutoplayStatusModal';
+import AutoplayStartModal from './AutoplayStartModal';
+import AutofixScopeModal from './AutofixScopeModal';
+import { taskPage } from '../../lib/taskPage';
+import { ROUTE_DEFS } from '../../router';
 import MessageBubble, { DeletedLabel, EventLabel, srcOf } from './MessageBubble';
 
 const POLL_MS = 4000;
@@ -21,7 +30,8 @@ const MAX_GAP_PAGES = 5;
 const MAX_STAGED = 10;
 const FILTER_EMPTY = {
   pending: 'Nothing pending',
-  fixed: 'Nothing fixed yet',
+  progress: 'Nothing in progress',
+  fixed: 'Nothing complete yet',
   developer: 'Nothing marked by the developer',
   client: 'Nothing marked by the client',
 };
@@ -154,11 +164,17 @@ function RecordingBar({ elapsed, levels, onCancel, onSend }) {
  * `developerUpdatesUrl` (localhost only) also gives the client chat the developer marks.
  */
 export default function ChatPane({
-  listUrl, readUrl, updatesUrl, developerUpdatesUrl, mySide, title, subtitle, avatar, onBack, onClose, onChanged, emptyState, notice, threadKey,
+  listUrl, readUrl, updatesUrl, developerUpdatesUrl, mySide, title, subtitle, avatar, onBack, onClose, onChanged, emptyState, notice, threadKey, focusId, openPages = false,
 }) {
+  const focused = useRef(null);
+  const navigate = useNavigate();
+  const [focus, setFocus] = useState(null);
+  useEffect(() => { if (focusId) setFocus({ id: focusId }); }, [focusId]);
   const [messages, setMessages] = useState([]);
   const summaries = useTaskSummaries();
   const [hasMore, setHasMore] = useState(false);
+  const [counts, setCounts] = useState(null);
+  const [pasteModal, setPasteModal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -176,6 +192,17 @@ export default function ChatPane({
   const [recording, setRecording] = useState(null);
   const [levels, setLevels] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [autoplay, setAutoplayState] = useState(autoplayOn);
+  const [autoplayStatus, setAutoplayStatus] = useState(null);
+  const [playAsk, setPlayAsk] = useState(false);
+  const freshCounts = useRef(false);
+  const autoplaySeen = useRef('');
+  useEffect(() => onAutoplayChanged((on) => {
+    setAutoplayState(on);
+    if (!on) setAutoplayStatus(null);
+  }), []);
   const [trackNext, setTrackNext] = useState(false);
 
   const scroller = useRef(null);
@@ -224,10 +251,16 @@ export default function ChatPane({
   const refresh = useCallback(async (initial = false) => {
     try {
       if (initial) pageSize.current = pageSizeFor(scroller.current?.clientHeight);
-      const { data } = await api.get(listUrl, { params: { limit: pageSize.current } });
+      const params = { limit: pageSize.current };
+      if (freshCounts.current) {
+        params.fresh = 1;
+        freshCounts.current = false;
+      }
+      const { data } = await api.get(listUrl, { params });
       if (!alive.current) return;
       let rows = data.data || [];
       let more = Boolean(data.meta?.hasMore);
+      setCounts(data.meta?.counts || null);
       if (initial) {
         setHasMore(more);
         const firstUnread = rows.find((m) => m.side !== mySide && !m.readAt);
@@ -253,6 +286,16 @@ export default function ChatPane({
       if (alive.current && initial) setLoading(false);
     }
   }, [listUrl, mySide, markRead]);
+
+  useEffect(() => onAutoplayStatus((status) => {
+    setAutoplayStatus(status);
+    const run = status?.run;
+    const seen = run ? `${run.id} ${run.state} ${run.applied} ${(run.tasks || []).map((t) => t.status).join(',')}` : '';
+    if (seen === autoplaySeen.current) return;
+    autoplaySeen.current = seen;
+    freshCounts.current = true;
+    refresh(false);
+  }), [refresh]);
 
   useEffect(() => {
     alive.current = true;
@@ -389,6 +432,12 @@ export default function ChatPane({
     if (!el || loading || loadError || !hasMore || loadingOlder) return;
     if (el.scrollHeight <= el.clientHeight) loadOlder();
   }, [messages, filter, loading, loadError, hasMore, loadingOlder, loadOlder]);
+
+  /** Searching covers the whole chat, not just the pages loaded so far. */
+  useEffect(() => {
+    if (loading || loadError) return;
+    if (search.trim() && hasMore && !loadingOlder) loadOlder();
+  }, [search, messages, loading, loadError, hasMore, loadingOlder, loadOlder]);
 
   const onScroll = () => {
     const el = scroller.current;
@@ -690,6 +739,87 @@ export default function ChatPane({
     setTimeout(() => setHighlightId((cur) => (cur === id ? null : cur)), 1600);
   };
 
+  /** Opened for one message (Auto-fix): page back until it is loaded, then scroll to it. */
+  useEffect(() => {
+    if (!focus || focused.current === focus || loading || loadError || loadingOlder) return;
+    if (autoplay) {
+      focused.current = focus;
+      return;
+    }
+    const target = messages.find((m) => m.id === focus.id);
+    if (target && filter !== 'all' && !matchesFilter(target, filter)) {
+      setFilter('all');
+    } else if (target) {
+      focused.current = focus;
+      stick.current = false;
+      setTimeout(() => jumpTo(focus.id), 50);
+    } else if (hasMore) {
+      loadOlder();
+    } else {
+      focused.current = focus;
+      toast('The message Auto-fix is working on is not in this chat');
+    }
+  }, [focus, messages, loading, loadError, loadingOlder, hasMore, loadOlder, autoplay, filter]);
+
+  const openPage = (page) => {
+    navigate(page);
+    onClose?.();
+  };
+
+  const startAutofix = async (body, label) => {
+    try {
+      const { data } = await api.post('/dev/report-autofix', body);
+      toast.success(`Auto-fix started for ${label}`);
+      const id = startedMessage(data.data, body);
+      if (id) setFocus({ id });
+      setPasteModal(null);
+      notifyAutofixChanged();
+    } catch (err) {
+      const data = err.response?.data;
+      if (data?.needsInput && data.request) {
+        toast.error(data.message, { duration: 8000 });
+        setPasteModal({ scope: null, items: [data.request] });
+        return;
+      }
+      toast.error(apiError(err, 'Could not start Auto-fix'), { duration: 8000 });
+    }
+  };
+
+  const autofixScope = async (scope) => {
+    if (!canScopeFix(scope)) {
+      toast('Auto-fix is only for Pending and In progress messages');
+      return;
+    }
+    const label = `${SCOPE_LABEL[scope]} messages`;
+    try {
+      const { data } = await api.get('/dev/report-autofix/inputs');
+      const blocked = blockedFor(scope, data.data || []);
+      if (blocked.length) {
+        setPasteModal({ scope, items: blocked });
+        return;
+      }
+    } catch {
+      /* no input list: just start */
+    }
+    startAutofix({ scope }, label);
+  };
+
+  const autofixMessage = (m) => startAutofix({ messageId: m.id }, 'this message');
+
+  const showAutofixTask = async () => {
+    try {
+      const { data } = await api.get('/dev/report-autofix');
+      const info = data.data || {};
+      const id = autofixTarget(info);
+      const page = id && taskPage(info.run?.messageId === id ? info.run : info.next, ROUTE_DEFS.admin);
+      if (page) navigate(page);
+      if (id) setFocus({ id });
+      else toast('No report task is waiting for Auto-fix');
+    } catch (err) {
+      toast.error(apiError(err, 'Could not check Auto-fix'));
+    }
+  };
+
   const copyMessage = async (m) => {
     try {
       await copyText(m.text);
@@ -748,12 +878,23 @@ export default function ChatPane({
 
   const canSend = Boolean(text.trim() || staged.length);
   const replyQuote = quoteOf(replyTo);
-  const visible = filter === 'all' ? messages : messages.filter((m) => matchesFilter(m, filter));
+  const visible = messages.filter((m) => !isHistoryEvent(m) && (filter === 'all' || matchesFilter(m, filter)) && matchesSearch(m, search));
   let prev = null;
   let lastDay = null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" {...dragProps}>
+      {autoplay && <AutoplayStatusModal status={autoplayStatus} message={messages.find((m) => m.id === autoplayStatus?.run?.messageId)} onOpenImage={setLightbox} mySide={mySide} />}
+      {playAsk && !autoplay && <AutoplayStartModal pending={filterCount(counts, 'pending')} messages={messages} mySide={mySide} onOpenImage={setLightbox} onClose={() => setPlayAsk(false)} />}
+      {pasteModal && (
+        <AutofixScopeModal
+          scope={pasteModal.scope}
+          items={pasteModal.items}
+          onClose={() => setPasteModal(null)}
+          onStarted={(id) => setFocus({ id })}
+          onRunScope={pasteModal.scope ? () => startAutofix({ scope: pasteModal.scope }, `${SCOPE_LABEL[pasteModal.scope]} messages`) : undefined}
+        />
+      )}
       <div className="flex h-[60px] shrink-0 items-center gap-3 border-b border-black/5 bg-[#f0f2f5] px-3 dark:border-white/5 dark:bg-[#202c33]">
         {onBack && (
           <button type="button" onClick={onBack} aria-label="Back" className="-ml-1 rounded-full p-2 text-foreground/70 hover:bg-black/5 dark:hover:bg-white/10">
@@ -765,6 +906,20 @@ export default function ChatPane({
           <p className="truncate text-[15px] font-semibold leading-tight">{title}</p>
           {subtitle && <p className="truncate text-xs text-foreground/60">{subtitle}</p>}
         </div>
+        <button
+          type="button"
+          onClick={() => { if (searchOpen) setSearch(''); setSearchOpen(!searchOpen); }}
+          title="Search messages"
+          aria-pressed={searchOpen}
+          className={cn('rounded-full p-2 text-foreground/60 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10', searchOpen && 'text-[#00a884]')}
+        >
+          <Search className="h-4 w-4" />
+        </button>
+        {developerUpdatesUrl && (
+          <button type="button" onClick={showAutofixTask} title="Scroll to the message Auto-fix fixes now or next" aria-label="Scroll to the message Auto-fix fixes next" className="rounded-full p-2 text-foreground/60 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10">
+            <Wand2 className="h-4 w-4" />
+          </button>
+        )}
         {onClose && (
           <button type="button" onClick={onClose} aria-label="Close" className="rounded-full p-2 text-foreground/70 hover:bg-black/5 dark:hover:bg-white/10">
             <X className="h-5 w-5" />
@@ -772,11 +927,38 @@ export default function ChatPane({
         )}
       </div>
 
+      {searchOpen && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-black/5 bg-[#f0f2f5] px-3 py-2 dark:border-white/5 dark:bg-[#202c33]">
+          <div className="flex flex-1 items-center gap-2 rounded-lg bg-white px-3 py-1.5 dark:bg-[#2a3942]">
+            <Search className="h-4 w-4 shrink-0 text-foreground/50" />
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); setSearchOpen(false); } }}
+              placeholder="Search messages"
+              aria-label="Search messages"
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-foreground/45"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} aria-label="Clear search" className="rounded-full p-0.5 text-foreground/50 hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {search.trim() && (
+            <span className="shrink-0 text-xs tabular-nums text-foreground/60">
+              {hasMore || loadingOlder ? 'Searching…' : `${visible.length} found`}
+            </span>
+          )}
+        </div>
+      )}
+
       {updatesUrl && (
         <div className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-black/5 bg-[#f0f2f5] px-3 py-2 [scrollbar-width:none] dark:border-white/5 dark:bg-[#202c33] [&::-webkit-scrollbar]:hidden">
           {CHAT_FILTERS.map((f) => (
+            <span key={f.id} className="inline-flex shrink-0 items-center">
             <button
-              key={f.id}
               type="button"
               onClick={() => setFilter(f.id)}
               aria-pressed={filter === f.id}
@@ -788,7 +970,35 @@ export default function ChatPane({
               )}
             >
               {f.label}
+              {filterCount(counts, f.id) !== null && <span className="ml-1 tabular-nums opacity-70">{filterCount(counts, f.id)}</span>}
             </button>
+            {developerUpdatesUrl && canScopeFix(f.id) && (
+              <button
+                type="button"
+                onClick={() => autofixScope(f.id)}
+                title={`Auto-fix only the ${f.label} messages`}
+                aria-label={`Auto-fix ${f.label} messages`}
+                className="-ml-0.5 rounded-full p-1 text-foreground/50 hover:bg-black/5 hover:text-[#00a884] dark:hover:bg-white/10"
+              >
+                <Wand2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {developerUpdatesUrl && f.id === 'pending' && (
+              <button
+                type="button"
+                onClick={() => (autoplay ? setAutoplay(false) : setPlayAsk(true))}
+                title={autoplay ? 'Pause: stop after the message being fixed now' : 'Play: fix the pending messages one by one, applying each fix'}
+                aria-label={autoplay ? 'Pause pending auto-fix' : 'Play pending auto-fix one by one'}
+                aria-pressed={autoplay}
+                className={cn(
+                  'rounded-full p-1 hover:bg-black/5 dark:hover:bg-white/10',
+                  autoplay ? 'text-[#00a884]' : 'text-foreground/50 hover:text-[#00a884]',
+                )}
+              >
+                {autoplay ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              </button>
+            )}
+            </span>
           ))}
         </div>
       )}
@@ -814,7 +1024,7 @@ export default function ChatPane({
         {!loading && !loadError && messages.length === 0 && emptyState}
         {!loading && !loadError && messages.length > 0 && visible.length === 0 && (
           <p className="mx-auto mt-6 w-fit rounded-lg bg-white/90 px-3 py-1.5 text-[12.5px] text-[#54656f] shadow-sm dark:bg-[#182229] dark:text-[#8696a0]">
-            {FILTER_EMPTY[filter] || 'No messages'}
+            {search.trim() ? `No messages match "${search.trim()}"` : FILTER_EMPTY[filter] || 'No messages'}
           </p>
         )}
 
@@ -861,6 +1071,8 @@ export default function ChatPane({
                 onReply={startReply}
                 onCopy={copyMessage}
                 onJump={jumpTo}
+                onOpenPage={openPages ? openPage : undefined}
+                onAutofix={developerUpdatesUrl ? autofixMessage : undefined}
                 onOpenImage={setLightbox}
                 onRetry={retry}
                 onMediaLoad={onMediaLoad}

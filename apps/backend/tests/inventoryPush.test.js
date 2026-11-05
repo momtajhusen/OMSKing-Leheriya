@@ -10,7 +10,7 @@ const WarehouseLocationMap = require('../src/models/WarehouseLocationMap');
 const SkuMapping = require('../src/models/SkuMapping');
 const Inventory = require('../src/models/Inventory');
 const IntegrationJob = require('../src/models/IntegrationJob');
-const { stockIn, reserveStock } = require('../src/services/inventory.service');
+const { stockIn, stockOut, reserveStock } = require('../src/services/inventory.service');
 const { ensureDefaultWarehouses, setInventoryAuthority } = require('../src/services/warehouse.service');
 const { upsertConnection } = require('../src/services/channelConnection.service');
 const { channelQty, runInventoryJob } = require('../src/services/inventoryPush.service');
@@ -141,6 +141,53 @@ test('OMS qty pushes Location A 4, Location B 1000, Amazon 4, Myntra 4, then res
   assert.equal(amz2.calls.find((call) => call.method === 'PATCH').body.patches[0].value[0].quantity, 3);
   assert.deepEqual(myntra2, [{ sku: 'KURTA-RED-L', quantity: 3 }]);
   assert.equal(await Inventory.countDocuments({ tenantId: tenant._id, reservedQty: { $gt: 0 } }), 1);
+});
+
+async function runQueued(tenantId) {
+  const amz = amazonMock();
+  const myntraItems = [];
+  const jobs = await IntegrationJob.find({ tenantId, jobType: 'inventory_push', status: 'queued', channel: { $in: ['amazon', 'myntra'] } });
+  for (const job of jobs) {
+    await runInventoryJob(job, {
+      amazonRequest: amz.request,
+      myntraClient: { updateInventory: async (items) => { myntraItems.push(...items); return []; } },
+    });
+    await IntegrationJob.updateOne({ _id: job._id }, { $set: { status: 'success' } });
+  }
+  const patch = amz.calls.find((call) => call.method === 'PATCH');
+  return { amazon: patch ? patch.body.patches[0].value[0].quantity : null, myntra: myntraItems };
+}
+
+test('Sold out pushes 0 to Amazon and Myntra (listing goes out of stock), restock pushes qty again', async () => {
+  const { tenant, physical, sku } = await seedSeller();
+  const tenantId = String(tenant._id);
+  await runQueued(tenant._id);
+
+  await stockOut(tenantId, null, { masterSkuId: sku._id, warehouseId: physical._id, qty: 4, reason: 'sold out' });
+  const soldOut = await runQueued(tenant._id);
+  assert.equal(soldOut.amazon, 0);
+  assert.deepEqual(soldOut.myntra, [{ sku: 'KURTA-RED-L', quantity: 0 }]);
+
+  await stockIn(tenantId, null, { masterSkuId: sku._id, warehouseId: physical._id, qty: 5, reason: 'restock' });
+  const restocked = await runQueued(tenant._id);
+  assert.equal(restocked.amazon, 5);
+  assert.deepEqual(restocked.myntra, [{ sku: 'KURTA-RED-L', quantity: 5 }]);
+});
+
+test('Stock change while an Amazon push is running queues a fresh push so 0 is not lost', async () => {
+  const { tenant, physical, sku } = await seedSeller();
+  const tenantId = String(tenant._id);
+  await runQueued(tenant._id);
+  await stockOut(tenantId, null, { masterSkuId: sku._id, warehouseId: physical._id, qty: 3, reason: 'sale' });
+  await IntegrationJob.updateMany(
+    { tenantId: tenant._id, jobType: 'inventory_push', status: 'queued', channel: 'amazon' },
+    { $set: { status: 'running' } },
+  );
+  await stockOut(tenantId, null, { masterSkuId: sku._id, warehouseId: physical._id, qty: 1, reason: 'last unit sold' });
+  const queued = await IntegrationJob.find({ tenantId: tenant._id, jobType: 'inventory_push', status: 'queued', channel: 'amazon' });
+  assert.equal(queued.length, 1);
+  const pushed = await runQueued(tenant._id);
+  assert.equal(pushed.amazon, 0);
 });
 
 test('Shopify inventory master reads Location A into WH-001 and does not push Shopify', async () => {

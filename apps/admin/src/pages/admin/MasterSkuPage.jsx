@@ -18,7 +18,55 @@ import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 
-const empty = { name: '', code: '', color: '', size: '', barcode: '', sellingPrice: '', mrp: '', hsnCode: '' };
+const empty = {
+  name: '', code: '', color: '', size: '', barcode: '', sellingPrice: '', mrp: '', hsnCode: '',
+  weightKg: '', dimensionsCm: { l: '', w: '', h: '' },
+};
+
+const PACKAGE_FIELDS = [
+  { key: 'l', label: 'Length (cm)' },
+  { key: 'w', label: 'Breadth (cm)' },
+  { key: 'h', label: 'Height (cm)' },
+];
+
+function dims(value) {
+  const row = value || {};
+  return { l: Number(row.l) || 0, w: Number(row.w) || 0, h: Number(row.h) || 0 };
+}
+
+function packageText(sku) {
+  const d = sku.dimensionsCm || {};
+  if (!sku.weightKg && !d.l && !d.w && !d.h) return 'Default';
+  return `${sku.weightKg || 0} kg · ${d.l || 0}×${d.w || 0}×${d.h || 0} cm`;
+}
+
+function PackageFields({ value, onChange }) {
+  const d = value.dimensionsCm || {};
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium">Courier package</p>
+      <p className="text-xs text-muted-foreground">Leave 0 to use the default package from Settings → Courier.</p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div>
+          <label className="text-xs font-medium">Weight (kg)</label>
+          <Input type="number" min="0" step="0.01" value={value.weightKg ?? ''} onChange={(e) => onChange({ ...value, weightKg: e.target.value })} />
+        </div>
+        {PACKAGE_FIELDS.map((field) => (
+          <div key={field.key}>
+            <label className="text-xs font-medium">{field.label}</label>
+            <Input
+              type="number"
+              min="0"
+              step="0.1"
+              value={d[field.key] ?? ''}
+              onChange={(e) => onChange({ ...value, dimensionsCm: { ...d, [field.key]: e.target.value } })}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function MasterSkuPage() {
   const navigate = useNavigate();
@@ -59,6 +107,8 @@ export default function MasterSkuPage() {
         sellingPrice: Number(form.sellingPrice) || 0,
         mrp: Number(form.mrp) || 0,
         hsnCode: form.hsnCode,
+        weightKg: Number(form.weightKg) || 0,
+        dimensionsCm: dims(form.dimensionsCm),
         variantAttributes: {
           ...(form.color ? { color: form.color } : {}),
           ...(form.size ? { size: form.size } : {}),
@@ -82,6 +132,8 @@ export default function MasterSkuPage() {
         sellingPrice: Number(edit.sellingPrice) || 0,
         mrp: Number(edit.mrp) || 0,
         hsnCode: edit.hsnCode,
+        weightKg: Number(edit.weightKg) || 0,
+        dimensionsCm: dims(edit.dimensionsCm),
         status: edit.status,
         variantAttributes: edit.variantAttributes,
         ...(!edit.codeLocked && edit.code ? { code: edit.code } : {}),
@@ -154,6 +206,7 @@ export default function MasterSkuPage() {
                   <TableHead>Attributes</TableHead>
                   <TableHead>Barcode</TableHead>
                   <TableHead>Price</TableHead>
+                  <TableHead>Weight / size</TableHead>
                   <TableHead>Channels</TableHead>
                   <TableHead>Locked</TableHead>
                   {canCatalogEdit && <TableHead />}
@@ -181,6 +234,7 @@ export default function MasterSkuPage() {
                     </TableCell>
                     <TableCell>{sku.barcode || '—'}</TableCell>
                     <TableCell>{formatINR(sku.sellingPrice || 0)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-sm">{packageText(sku)}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {(sku.channelMappings || []).length === 0
@@ -262,6 +316,7 @@ export default function MasterSkuPage() {
               <Input type="number" value={form.mrp} onChange={(e) => setForm({ ...form, mrp: e.target.value })} />
             </div>
           </div>
+          <PackageFields value={form} onChange={setForm} />
         </div>
       </Modal>
 
@@ -310,6 +365,7 @@ export default function MasterSkuPage() {
                 <Input type="number" value={edit.mrp ?? ''} onChange={(e) => setEdit({ ...edit, mrp: e.target.value })} />
               </div>
             </div>
+            <PackageFields value={edit} onChange={setEdit} />
             <div>
               <label className="text-sm font-medium">Status</label>
               <Select value={edit.status || 'active'} onChange={(e) => setEdit({ ...edit, status: e.target.value })}>

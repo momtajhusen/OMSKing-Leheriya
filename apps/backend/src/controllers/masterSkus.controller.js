@@ -7,6 +7,7 @@ const { generateMasterCode, normalizeSkuCode, assertHsnCode } = require('../serv
 const { mapMaster } = require('../services/catalogMapping.service');
 const { merchantTenant } = require('./products.controller');
 const { recordFromReq } = require('../services/auditLog.service');
+const { skuPackage } = require('../services/packageDefaults.service');
 
 function skuSnap(sku) {
   return {
@@ -17,6 +18,8 @@ function skuSnap(sku) {
     gstRatePercent: sku.gstRatePercent,
     mrp: sku.mrp,
     sellingPrice: sku.sellingPrice,
+    weightKg: sku.weightKg || 0,
+    dimensionsCm: { l: sku.dimensionsCm?.l || 0, w: sku.dimensionsCm?.w || 0, h: sku.dimensionsCm?.h || 0 },
     status: sku.status,
   };
 }
@@ -90,6 +93,7 @@ async function createMasterSku(req, res) {
     sellingPrice: req.body.sellingPrice || 0,
     hsnCode: assertHsnCode(req.body.hsnCode),
     gstRatePercent: req.body.gstRatePercent ?? null,
+    ...skuPackage(req.body),
     status: 'active',
     createdBy: req.user.id,
   });
@@ -118,9 +122,10 @@ async function updateMasterSku(req, res) {
     if (req.body[key] != null) sku[key] = req.body[key];
   });
   if (req.body.hsnCode != null) sku.hsnCode = assertHsnCode(req.body.hsnCode);
-  ['costPrice', 'mrp', 'sellingPrice', 'weightKg', 'gstRatePercent'].forEach((key) => {
+  ['costPrice', 'mrp', 'sellingPrice', 'gstRatePercent'].forEach((key) => {
     if (req.body[key] != null) sku[key] = req.body[key];
   });
+  Object.assign(sku, skuPackage(req.body));
   if (req.body.variantAttributes) sku.variantAttributes = req.body.variantAttributes;
   sku.updatedBy = req.user.id;
   await sku.save();

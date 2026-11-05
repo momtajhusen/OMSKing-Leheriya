@@ -3,6 +3,8 @@ const PERMISSIONS = Object.freeze({
   ORDERS_VIEW: 'orders.view',
   ORDERS_EDIT: 'orders.edit',
   ORDERS_CANCEL: 'orders.cancel',
+  ORDERS_EDIT_DETAILS: 'orders.edit_details',
+  ORDERS_PAYMENT_MODE: 'orders.payment_mode',
   INVENTORY_VIEW: 'inventory.view',
   INVENTORY_ADJUST: 'inventory.adjust',
   SHIPPING_GENERATE: 'shipping.generate',
@@ -29,6 +31,7 @@ const P = PERMISSIONS;
 const ALL_TENANT = [
   P.DASHBOARD_VIEW,
   P.ORDERS_VIEW, P.ORDERS_EDIT, P.ORDERS_CANCEL,
+  P.ORDERS_EDIT_DETAILS, P.ORDERS_PAYMENT_MODE,
   P.INVENTORY_VIEW, P.INVENTORY_ADJUST,
   P.SHIPPING_GENERATE, P.SHIPPING_CANCEL,
   P.RETURNS_APPROVE,
@@ -61,6 +64,8 @@ const ROLE_DEFAULT_PERMISSIONS = Object.freeze({
 /** Keys added after companies already had roles: added once to these role codes, then left to the owner. */
 const PERMISSION_ROLLOUTS = Object.freeze({
   [P.DASHBOARD_VIEW]: ['super_admin', 'operations', 'admin', 'warehouse', 'accounts', 'catalog_manager', 'customer_support'],
+  [P.ORDERS_EDIT_DETAILS]: ['super_admin'],
+  [P.ORDERS_PAYMENT_MODE]: ['super_admin'],
 });
 
 const TENANT_ROLE_SEED = [

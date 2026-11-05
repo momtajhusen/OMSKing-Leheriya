@@ -9,6 +9,7 @@ const vendorSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   email: { type: String, default: '' },
   telegramGroup: { type: String, default: '' },
+  shopifyVendors: { type: [String], default: [] },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
   source: { type: String, enum: ['manual', 'shopify'], default: 'manual' },
   removed: { type: Boolean, default: false },

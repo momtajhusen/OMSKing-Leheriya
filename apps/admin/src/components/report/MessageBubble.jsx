@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, BadgeCheck, Ban, Camera, Check, CheckCheck, ChevronDown, CircleCheck, CirclePlay, Clock, Copy, Download, FileText, Mic, Pause, Play, Reply,
-  RotateCcw, RotateCw, Trash2, Video,
+  RotateCcw, RotateCw, SquareArrowOutUpRight, Trash2, Video, Wand2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import api from '../../lib/api';
 import { fileSizeLabel, fileTypeLabel, formatDuration, mediaSrc, messagePreview, timeLabel } from '../../lib/reportChat';
 import { eventLabel, markOptions, statusChips } from '../../lib/reportUpdates';
+import { checkSteps, fixedPage } from '../../lib/taskPage';
+import { ROUTE_DEFS } from '../../router';
 
 const URL_PATTERN = /(https?:\/\/[^\s<]+)/g;
 const KIND_ICON = { image: Camera, video: Video, audio: Mic, file: FileText };
@@ -318,9 +320,13 @@ export function DeletedLabel({ message }) {
 
 export default function MessageBubble({
   message, summary, showName, grouped, highlighted, onReply, onCopy, onJump, onOpenImage, onRetry, onMediaLoad, mySide, onMark, onDevMark,
-  onDelete,
+  onDelete, onOpenPage, onAutofix,
 }) {
   const { mine, attachment } = message;
+  const page = onOpenPage ? fixedPage(message.update, summary, ROUTE_DEFS.admin) : null;
+  const steps = onOpenPage && ['done', 'confirmed'].includes(message.update?.status)
+    ? checkSteps(message.update.check || summary?.check) : [];
+  const [showCheck, setShowCheck] = useState(false);
   const [dx, setDx] = useState(0);
   const touch = useRef(null);
   const src = srcOf(attachment);
@@ -421,6 +427,37 @@ export default function MessageBubble({
                   </span>
                 );
               })}
+              {onAutofix && message.update.status === 'in_progress' && (
+                <button type="button" onClick={() => onAutofix(message)} title="Auto-fix this message" aria-label="Auto-fix this message" className="inline-flex items-center rounded-full px-1 text-[#667781] hover:text-[#00a884] dark:text-[#8696a0]">
+                  <Wand2 className="h-3 w-3" />
+                </button>
+              )}
+              {(page || steps.length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => (steps.length ? setShowCheck((v) => !v) : onOpenPage(page))}
+                  title={steps.length ? 'Kaise check karein' : `Open the page this was fixed on (${page})`}
+                  aria-label={steps.length ? 'How to check this fix' : 'Open the fixed page'}
+                  aria-expanded={steps.length ? showCheck : undefined}
+                  className="inline-flex items-center rounded-full px-1 text-[#667781] hover:text-foreground dark:text-[#8696a0]"
+                >
+                  <SquareArrowOutUpRight className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {message.update && showCheck && steps.length > 0 && (
+            <div className="mx-1 mb-1 rounded-md bg-black/5 px-2 py-1.5 text-[12px] dark:bg-white/5">
+              <p className="mb-0.5 font-semibold">Kaise check karein</p>
+              <ol className="list-decimal space-y-0.5 pl-4">
+                {steps.map((step) => <li key={step}>{step}</li>)}
+              </ol>
+              {page && (
+                <button type="button" onClick={() => onOpenPage(page)} className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[#00a884] px-2.5 py-0.5 text-[11.5px] font-medium text-white hover:bg-[#008f6f]">
+                  <SquareArrowOutUpRight className="h-3 w-3" /> Page kholo
+                </button>
+              )}
             </div>
           )}
 

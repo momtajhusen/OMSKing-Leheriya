@@ -333,3 +333,83 @@ test('partially paid books as COD and a void order is not sent to Delhivery as C
   assert.equal(delhivery.calls.length, before);
   assert.equal(delhivery.calls.some((call) => String(call.body || '').includes('"payment_mode":"COD"') && call.url.includes('SHP-VOID')), false);
 });
+
+test('the payment mode Delhivery actually booked is saved, so a Prepaid order labelled COD can be flagged', async () => {
+  const { toOrderDto } = require('../src/lib/orderDto');
+  const tenant = await seller();
+  const courierReply = { payment: 'COD', cod_amount: 999 };
+  const delhivery = delhiveryMock();
+  const request = async (method, url, opts) => {
+    if (url.includes('/api/cmu/create.json')) {
+      await delhivery.request(method, url, opts);
+      return { status: 200, text: JSON.stringify({ packages: [{ waybill: 'AWB-COD', status: 'Success', ...courierReply }] }) };
+    }
+    return delhivery.request(method, url, opts);
+  };
+  const deps = {
+    delhiveryCreds,
+    delhiveryRequest: request,
+    shopifyCreds: shopCreds,
+    shopifyRequest: shopifyMock().request,
+  };
+
+  await shopifyOrder(tenant._id, 'SHP-WRONG');
+  await bookShopify(tenant._id, 'SHP-WRONG', deps);
+  const created = delhivery.calls.find((call) => call.url.includes('create.json'));
+  assert.equal(bookedPaymentMode(created), 'Prepaid');
+  const wrong = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-WRONG' });
+  assert.equal(wrong.labelPaymentMode, 'COD');
+  assert.equal(toOrderDto(wrong).labelPaymentMode, 'COD');
+
+  courierReply.payment = 'Pre-paid';
+  courierReply.cod_amount = 0;
+  await shopifyOrder(tenant._id, 'SHP-RIGHT');
+  await bookShopify(tenant._id, 'SHP-RIGHT', deps);
+  const right = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-RIGHT' });
+  assert.equal(right.labelPaymentMode, 'Prepaid');
+
+  delete courierReply.payment;
+  delete courierReply.cod_amount;
+  await shopifyOrder(tenant._id, 'SHP-SILENT');
+  await bookShopify(tenant._id, 'SHP-SILENT', deps);
+  const silent = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-SILENT' });
+  assert.equal(silent.labelPaymentMode, 'Prepaid');
+});
+
+test('a Shopify order can be booked on any other enabled courier with that courier\'s AWB', async () => {
+  const CourierAccount = require('../src/models/CourierAccount');
+  const { bookOtherCourier, shippingReadiness } = require('../src/services/ship.service');
+  const tenant = await seller();
+  await CourierAccount.create({ tenantId: tenant._id, source: 'platform', code: 'bluedart', name: 'Blue Dart', status: 'active' });
+  await CourierAccount.create({ tenantId: tenant._id, source: 'own', code: 'xpressbees', name: 'Xpressbees', status: 'inactive' });
+
+  const readiness = await shippingReadiness(tenant._id);
+  assert.deepEqual(readiness.couriers.map((row) => row.code), ['delhivery', 'bluedart']);
+  assert.equal(readiness.couriers[0].api, true);
+  assert.equal(readiness.couriers[1].api, false);
+
+  const delhivery = delhiveryMock();
+  const shopify = shopifyMock();
+  const deps = { delhiveryRequest: delhivery.request, shopifyCreds: shopCreds, shopifyRequest: shopify.request };
+  await shopifyOrder(tenant._id, 'SHP-BD');
+  const shipment = await bookOtherCourier(tenant._id, 'SHP-BD', { courier: 'bluedart', awb: ' BD123 ' }, deps);
+  assert.equal(shipment.courier, 'bluedart');
+  assert.equal(shipment.awb, 'BD123');
+  assert.equal(shipment.shopifyFulfillmentId, '88');
+  assert.equal(delhivery.calls.length, 0);
+  const fulfill = shopify.calls.find((call) => call.url.endsWith('/fulfillments.json'));
+  assert.equal(fulfill.body.fulfillment.tracking_info.number, 'BD123');
+  assert.equal(fulfill.body.fulfillment.tracking_info.company, 'Blue Dart');
+  const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-BD' });
+  assert.equal(order.courier, 'Blue Dart');
+  assert.equal(order.awb, 'BD123');
+  assert.equal(order.status, 'Dispatched');
+  assert.equal(order.labelPaymentMode, 'Prepaid');
+
+  await shopifyOrder(tenant._id, 'SHP-XB');
+  await assert.rejects(() => bookOtherCourier(tenant._id, 'SHP-XB', { courier: 'xpressbees', awb: 'XB1' }, deps), /not enabled/);
+  await assert.rejects(() => bookOtherCourier(tenant._id, 'SHP-XB', { courier: 'bluedart', awb: '' }, deps), /AWB/);
+  const other = await Tenant.create({ name: 'Other', slug: `other-${Date.now()}`, kind: 'merchant' });
+  await shopifyOrder(other._id, 'SHP-OT');
+  await assert.rejects(() => bookOtherCourier(other._id, 'SHP-OT', { courier: 'bluedart', awb: 'BD9' }, deps), /not enabled/);
+});

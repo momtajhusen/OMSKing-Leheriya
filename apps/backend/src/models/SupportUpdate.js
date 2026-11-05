@@ -29,6 +29,7 @@ const supportUpdateSchema = new mongoose.Schema({
   issue: { type: String, default: '', maxlength: 200 },
   fix: { type: String, default: '', maxlength: 200 },
   area: { type: String, default: '', maxlength: 120 },
+  check: { type: String, default: '', maxlength: 300 },
   history: { type: [historySchema], default: [] },
 }, { timestamps: true });
 

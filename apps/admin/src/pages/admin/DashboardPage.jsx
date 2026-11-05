@@ -9,11 +9,14 @@ import useAuthStore from '../../stores/authStore';
 import useChannelStore from '../../stores/channelStore';
 import { formatINR, statusBadgeVariant } from '../../utils/format';
 import { relativeTime } from '../../lib/orderMetrics';
+import { ordersChannelPath } from '../../lib/ordersChannelLink';
+import { periodParams, periodLabel } from '../../lib/dashboardPeriod';
 import { orderChannelLabel } from '../../constants/channelCatalog';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import KpiCard from '../../components/ui/KpiCard';
 import Button from '../../components/ui/Button';
 import Select from '../../components/ui/Select';
+import Input from '../../components/ui/Input';
 import { FieldLabel } from '../../components/ui/TableToolbar';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
@@ -21,7 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Ca
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
 import ProductThumb from '../../components/ui/ProductThumb';
-import { TrendingUp, Package, ShoppingCart, Truck, RotateCcw, AlertTriangle, Clock } from 'lucide-react';
+import { TrendingUp, Package, ShoppingCart, RotateCcw, AlertTriangle } from 'lucide-react';
 
 const COLORS = ['#7C3AED', '#D97706', '#2563EB', '#10B981', '#F43F5E', '#64748B'];
 const CHANNEL_STROKES = ['#7C3AED', '#D97706', '#2563EB', '#059669', '#DB2777', '#0891B2', '#CA8A04'];
@@ -33,9 +36,10 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
   const [range, setRange] = useState('all');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const tenantName = useAuthStore((s) => s.user?.tenantName || '');
   const statusError = useChannelStore((s) => s.statusError);
-  const [lowStock, setLowStock] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loadError, setLoadError] = useState('');
@@ -48,7 +52,6 @@ export default function DashboardPage() {
   const trendKey = trendChannels.map((channel) => `${channel.id}:${orderChannelLabel(channel)}`).join(',');
 
   useEffect(() => {
-    api.get('/inventory/alerts').then(({ data }) => setLowStock(data.data || [])).catch(() => setLowStock([]));
     api.get('/integrations/jobs').then(({ data }) => setJobs((data.data || []).slice(0, 6))).catch(() => setJobs([]));
   }, []);
 
@@ -61,7 +64,7 @@ export default function DashboardPage() {
         channelIds: trendChannels.map((channel) => channel.id).join(','),
         channelLabels: trendChannels.map((channel) => orderChannelLabel(channel)).join(','),
         channel: channelFilter,
-        days: range,
+        ...periodParams(range, fromDate, toDate),
         tzOffset: new Date().getTimezoneOffset(),
       },
     }).then(({ data }) => {
@@ -72,11 +75,10 @@ export default function DashboardPage() {
       if (!cancel) setLoadError(apiError(err, 'Could not load dashboard'));
     });
     return () => { cancel = true; };
-  }, [connected.loaded, channelKey, trendKey, channelFilter, range, statusError]);
+  }, [connected.loaded, channelKey, trendKey, channelFilter, range, fromDate, toDate, statusError]);
 
   const stats = summary && {
     newOrders: summary.newOrders,
-    shipping: summary.awaitingDispatch,
     returns: summary.returns,
     missingInvoice: summary.missingInvoice,
     revenue: summary.revenue,
@@ -113,10 +115,18 @@ export default function DashboardPage() {
               </Select>
               <Select className="h-9 w-full sm:w-36" value={range} onChange={(event) => setRange(event.target.value)} aria-label="Period">
                 <option value="all">All time</option>
+                <option value="today">Today</option>
                 <option value="7">Last 7 days</option>
                 <option value="14">Last 14 days</option>
                 <option value="30">Last 30 days</option>
+                <option value="custom">Custom range</option>
               </Select>
+              {range === 'custom' && (
+                <>
+                  <Input type="date" className="h-9 w-full sm:w-40" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} aria-label="From date" />
+                  <Input type="date" className="h-9 w-full sm:w-40" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} aria-label="To date" />
+                </>
+              )}
             </div>
           </FieldLabel>
           <Button variant="outline" className="h-9 w-full sm:w-auto" onClick={() => navigate('/orders')}>View all orders</Button>
@@ -143,14 +153,18 @@ export default function DashboardPage() {
 
       <div className="kpi-grid">
         <KpiCard label="New Orders" value={stats.newOrders} icon={ShoppingCart} tone="emerald" onClick={() => setActiveTab('New')} />
-        <KpiCard label="Awaiting dispatch" value={stats.shipping} icon={Truck} tone="sky" onClick={() => navigate('/shipping')} />
-        <KpiCard label="Returns" value={stats.returns} icon={RotateCcw} tone="rose" onClick={() => navigate('/returns')} />
-        <KpiCard label="Shipped, no invoice" value={stats.missingInvoice} icon={AlertTriangle} tone="orange" onClick={() => navigate('/gst-invoice')} />
-        <KpiCard label="Net Sales" value={formatINR(stats.revenue)} icon={TrendingUp} tone="violet" onClick={() => navigate('/reports')} />
         {stats.channels.map((row) => (
-          <KpiCard key={row.channel} label={row.channel} value={formatINR(row.revenue)} icon={Package} onClick={() => navigate('/orders')} />
+          <KpiCard key={`new-${row.channel}`} label={`New Orders · ${row.channel}`} value={row.newOrders || 0} icon={ShoppingCart} tone="emerald" onClick={() => navigate(ordersChannelPath(row.channel))} />
         ))}
-        <KpiCard label="Low Stock" value={lowStock.length} icon={Clock} tone="slate" onClick={() => navigate('/inventory')} />
+        <KpiCard label="Return issues" value={stats.returns} icon={RotateCcw} tone="rose" onClick={() => navigate('/returns')} />
+      </div>
+
+      <div className="kpi-grid">
+        <KpiCard label="Total Sales" value={formatINR(stats.revenue)} icon={TrendingUp} tone="violet" onClick={() => navigate('/reports')} />
+        {stats.channels.map((row) => (
+          <KpiCard key={`sales-${row.channel}`} label={row.channel} value={formatINR(row.revenue)} icon={Package} onClick={() => navigate(ordersChannelPath(row.channel))} />
+        ))}
+        <KpiCard label="Problem invoices" value={stats.missingInvoice} icon={AlertTriangle} tone="orange" onClick={() => navigate('/gst-invoice')} />
       </div>
 
       {orderCount === 0 ? (
@@ -163,7 +177,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader>
-                <CardTitle>Orders Trend ({range === 'all' ? 'Last 14 Days' : `Last ${range} Days`})</CardTitle>
+                <CardTitle>Orders Trend ({periodLabel(range, fromDate, toDate)})</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={250}>

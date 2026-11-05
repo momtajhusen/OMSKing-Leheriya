@@ -61,7 +61,7 @@ async function enqueueChannel(tenantId, userId, channel, masterSkuId) {
     tenantId,
     channel,
     jobType: 'inventory_push',
-    status: { $in: ['queued', 'running'] },
+    status: 'queued',
     'payload.masterSkuId': String(masterSkuId),
   }));
   if (open) return open;

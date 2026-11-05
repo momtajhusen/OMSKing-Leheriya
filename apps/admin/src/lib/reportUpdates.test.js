@@ -6,6 +6,8 @@ import {
   actionsFor,
   CHAT_FILTERS,
   eventLabel,
+  filterCount,
+  isHistoryEvent,
   markOptions,
   markSteps,
   matchesFilter,
@@ -117,17 +119,21 @@ test('on localhost the client chat also gets the developer marks, sent through t
 });
 
 test('the chat filters keep messages by status or by who made the last mark', () => {
-  assert.deepEqual(CHAT_FILTERS.map((f) => f.id), ['all', 'pending', 'fixed', 'developer', 'client']);
-  const plain = { id: '1', text: 'hi', update: null };
-  const open = { id: '2', update: { status: 'in_progress', markedBy: 'platform' } };
-  const fixed = { id: '3', update: { status: 'done', markedBy: 'platform' } };
-  const confirmed = { id: '4', update: { status: 'confirmed', markedBy: 'tenant' } };
-  const reported = { id: '5', update: { status: 'pending', markedBy: 'tenant' } };
-  const event = { id: '6', event: { action: 'complete' }, update: { status: 'done', markedBy: 'platform' } };
-  const rows = [plain, open, fixed, confirmed, reported, event];
+  assert.deepEqual(CHAT_FILTERS.map((f) => f.id), ['all', 'pending', 'progress', 'fixed', 'developer', 'client']);
+  assert.deepEqual(CHAT_FILTERS.map((f) => f.label), ['All', 'Pending', 'In progress', 'Complete', 'Developer', 'Client']);
+  const plain = { id: '1', side: 'tenant', text: 'hi', update: null };
+  const open = { id: '2', side: 'tenant', update: { status: 'in_progress', markedBy: 'platform' } };
+  const fixed = { id: '3', side: 'tenant', update: { status: 'done', markedBy: 'platform' } };
+  const confirmed = { id: '4', side: 'tenant', update: { status: 'confirmed', markedBy: 'tenant' } };
+  const reported = { id: '5', side: 'tenant', update: { status: 'pending', markedBy: 'tenant' } };
+  const event = { id: '6', side: 'platform', event: { action: 'complete' }, update: { status: 'done', markedBy: 'platform' } };
+  const reply = { id: '7', side: 'platform', text: 'dekh raha hoon', update: null };
+  const gone = { id: '8', side: 'tenant', deleted: true, update: null };
+  const rows = [plain, open, fixed, confirmed, reported, event, reply, gone];
   const ids = (filter) => rows.filter((m) => matchesFilter(m, filter)).map((m) => m.id);
-  assert.deepEqual(ids('all'), ['1', '2', '3', '4', '5', '6']);
-  assert.deepEqual(ids('pending'), ['2', '5']);
+  assert.deepEqual(ids('all'), ['1', '2', '3', '4', '5', '6', '7', '8']);
+  assert.deepEqual(ids('pending'), ['1', '5'], 'every client message is pending until work starts on it');
+  assert.deepEqual(ids('progress'), ['2']);
   assert.deepEqual(ids('fixed'), ['3', '4']);
   assert.deepEqual(ids('developer'), ['2', '3']);
   assert.deepEqual(ids('client'), ['4', '5']);
@@ -183,11 +189,11 @@ test('a completed message\'s detail tooltip says in short Hinglish what the issu
   const summary = { issue: 'Vendor dropdown khaali tha', fix: 'Row me Assign button lagaya' };
   for (const status of ['done', 'confirmed']) {
     const [developer] = statusChips(status, true, summary);
-    assert.equal(developer.hint, `${statusChips(status, true)[0].hint}\nIssue kya tha: Vendor dropdown khaali tha\nFix kya kiya: Row me Assign button lagaya`);
+    assert.equal(developer.hint, `${statusChips(status, true)[0].hint}\nIssue: Vendor dropdown khaali tha\nFixed: Row me Assign button lagaya`);
   }
   assert.doesNotMatch(statusChips('done', true, { issue: 'Page slow tha', fix: '' })[0].hint, /Fix kya kiya/);
   assert.doesNotMatch(statusChips('in_progress', true, summary)[0].hint, /Issue kya tha/, 'only completed tasks get the summary');
-  assert.match(statusChips('confirmed', false, summary)[0].hint, /\nIssue kya tha: Vendor dropdown khaali tha\nFix kya kiya: Row me Assign button lagaya$/, 'the live site shows it too');
+  assert.match(statusChips('confirmed', false, summary)[0].hint, /\nIssue: Vendor dropdown khaali tha\nFixed: Row me Assign button lagaya$/, 'the live site shows it too');
 });
 
 test('each message gets the summary saved on its live update, or the local task list one on localhost', () => {
@@ -199,4 +205,43 @@ test('each message gets the summary saved on its live update, or the local task 
   assert.match(bubble, /statusChips\(message\.update\.status, undefined, summary\)/);
   assert.match(hook, /isLocalApp\(\)/);
   assert.match(hook, /'\/dev\/report-autofix\/summaries'/);
+});
+
+test('progress history (started / marked fixed) is not shown in the chat; the status stays on the message chip', () => {
+  assert.equal(isHistoryEvent({ event: { action: 'start', title: 'GST' } }), true);
+  assert.equal(isHistoryEvent({ event: { action: 'complete', title: 'GST' } }), true);
+  assert.equal(isHistoryEvent({ event: { action: 'reopen', title: 'GST', note: 'still broken' } }), false);
+  assert.equal(isHistoryEvent({ text: 'hello', update: { status: 'done' } }), false);
+  const pane = fs.readFileSync(new URL('../components/report/ChatPane.jsx', import.meta.url), 'utf8');
+  assert.match(pane, /!isHistoryEvent\(m\)/);
+});
+
+test('each chat filter shows the count of the whole chat from the server', () => {
+  const counts = { all: 40, pending: 12, progress: 1, fixed: 20, developer: 21, client: 0 };
+  assert.equal(filterCount(counts, 'pending'), 12);
+  assert.equal(filterCount(counts, 'client'), 0);
+  assert.equal(filterCount(null, 'pending'), null, 'an older server sends no counts: no number shown');
+  assert.match(chat, /meta\?\.counts/);
+  assert.match(chat, /filterCount\(counts, f\.id\)/);
+});
+
+test('chat search matches the message text, sender, file name and task title, ignoring case and extra spaces', async () => {
+  const { matchesSearch } = await import('./reportUpdates.js');
+  const m = { text: 'Courier WEIGHT field', senderName: 'OMS Guru', attachment: { name: 'invoice.pdf' }, update: { title: 'Default dimensions' } };
+  assert.equal(matchesSearch(m, ''), true);
+  assert.equal(matchesSearch(m, '   '), true);
+  assert.equal(matchesSearch(m, 'weight'), true);
+  assert.equal(matchesSearch(m, '  courier   weight '), true);
+  assert.equal(matchesSearch(m, 'guru'), true);
+  assert.equal(matchesSearch(m, 'INVOICE'), true);
+  assert.equal(matchesSearch(m, 'dimensions'), true);
+  assert.equal(matchesSearch(m, 'shopify'), false);
+  assert.equal(matchesSearch({}, 'x'), false);
+});
+
+test('the chat has a search box that filters the messages and loads older pages while searching', () => {
+  const pane = fs.readFileSync(new URL('../components/report/ChatPane.jsx', import.meta.url), 'utf8');
+  assert.match(pane, /aria-label="Search messages"/);
+  assert.match(pane, /matchesSearch\(m, search\)/);
+  assert.match(pane, /if \(search\.trim\(\) && hasMore && !loadingOlder\) loadOlder\(\);/);
 });

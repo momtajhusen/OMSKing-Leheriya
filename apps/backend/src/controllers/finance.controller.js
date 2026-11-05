@@ -20,6 +20,10 @@ async function matchSettlement(req, res) {
     id: order.orderNo,
     total: order.total,
   })), csv, { source });
+  const received = rows.filter((row) => row.status === 'matched').map((row) => row.orderNo);
+  if (received.length) {
+    await skip(Order.updateMany({ tenantId: merchantTenant(req), orderNo: { $in: received } }, { $set: { paymentStatus: 'paid' } }));
+  }
   return successResponse(res, { source, rows }, 'Settlement matched against Master Orders');
 }
 

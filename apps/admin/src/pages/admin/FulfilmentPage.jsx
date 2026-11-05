@@ -45,6 +45,65 @@ function Panel({ title, icon: Icon, tone, description, children }) {
   );
 }
 
+function costHint(cost) {
+  if (cost.loading) return 'Reading Shopify cost…';
+  if (cost.error) return cost.error;
+  if (cost.editable) return cost.source === 'shopify' ? 'Blank in Shopify. Save also fills Shopify cost.' : 'Vendor purchase cost';
+  return cost.source === 'shopify' ? 'Purchase cost from Shopify' : 'Purchase cost';
+}
+
+function LineCost({ line }) {
+  const readLineCost = useOrderStore((s) => s.readLineCost);
+  const saveLineCost = useOrderStore((s) => s.saveLineCost);
+  const [cost, setCost] = useState({ loading: true, editable: false, source: '', error: '' });
+  const [costValue, setCostValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    readLineCost(line.masterOrderId, line.vendorOrderId).then((res) => {
+      if (!live) return;
+      setCost({ loading: false, editable: Boolean(res?.editable), source: res?.source || '', error: res?.error || '' });
+      setCostValue(res?.cost != null ? String(res.cost) : '');
+    });
+    return () => { live = false; };
+  }, [readLineCost, line.masterOrderId, line.vendorOrderId]);
+
+  const save = async () => {
+    setSaving(true);
+    const res = await saveLineCost(line.masterOrderId, line.vendorOrderId, costValue);
+    setSaving(false);
+    if (res?.error) {
+      toast.error(res.error);
+      return;
+    }
+    setCost({ loading: false, editable: false, source: res.source, error: '' });
+    setCostValue(String(res.cost));
+    toast.success(res.message || 'Cost saved');
+  };
+
+  return (
+    <div>
+      <div className="flex gap-1">
+        <Input
+          className="h-9"
+          type="number"
+          placeholder="Cost"
+          value={costValue}
+          disabled={!cost.editable || saving}
+          onChange={(e) => setCostValue(e.target.value)}
+        />
+        {cost.editable && (
+          <Button size="sm" variant="outline" className="h-9 shrink-0" disabled={saving || !costValue} onClick={save}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        )}
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">{costHint(cost)}</p>
+    </div>
+  );
+}
+
 function VendorLineCard({ line, current, vendors, busy, onVendor, onPrice, onAssign, onReject, onOpen }) {
   return (
     <article className="rounded-xl border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-muted))]/15 p-3 sm:p-4">
@@ -72,7 +131,7 @@ function VendorLineCard({ line, current, vendors, busy, onVendor, onPrice, onAss
           </div>
         </div>
       </div>
-      <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_8.5rem_auto] lg:items-start">
+      <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_8.5rem_11rem_auto] lg:items-start">
         <div className="min-w-0">
           <Select className="h-9" value={current.vendor} onChange={(e) => onVendor(e.target.value)}>
             <option value="">Select vendor</option>
@@ -101,6 +160,7 @@ function VendorLineCard({ line, current, vendors, busy, onVendor, onPrice, onAss
             <p className="mt-1 text-[11px] text-muted-foreground">Shopify {formatINR(line.shopifyCost)}</p>
           )}
         </div>
+        <LineCost line={line} />
         <div className="flex gap-2">
           <Button size="sm" className="shrink-0" disabled={busy} onClick={onAssign}>
             <Bell className="mr-1 h-4 w-4" />
@@ -310,12 +370,12 @@ export default function FulfilmentPage() {
     { id: 'all', label: 'Open', value: openOrders.length, icon: List, tone: 'blue' },
   ];
 
-  if (loading) return <PageLoader label="Loading fulfilment..." />;
+  if (loading) return <PageLoader label="Loading assignment..." />;
 
   return (
     <div className="min-w-0 space-y-3">
       <div>
-        <h1 className="text-xl font-bold">Fulfilment</h1>
+        <h1 className="text-xl font-bold">Assignment</h1>
         <p className="text-xs text-muted-foreground">One marketplace order stays one master order. The oldest open order takes WH-001 first.</p>
       </div>
 

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { formatINR, formatDateTime } from '../../utils/format';
+import { cn } from '../../lib/utils';
+import { cachedPage, rememberPage } from '../../lib/pageCache';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -38,16 +40,19 @@ export default function InventoryPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const connected = useConnectedChannels();
-  const [warehouses, setWarehouses] = useState([]);
+  const seed = cachedPage('inventory');
+  const [warehouses, setWarehouses] = useState(cachedPage('warehouses') || []);
   const [masters, setMasters] = useState([]);
-  const [rows, setRows] = useState([]);
-  const [kpis, setKpis] = useState({ totalStock: 0, reserved: 0, available: 0, stockValue: 0, low: 0 });
+  const [mastersLoaded, setMastersLoaded] = useState(false);
+  const [rows, setRows] = useState(seed?.rows || []);
+  const [kpis, setKpis] = useState(seed?.kpis || { totalStock: 0, reserved: 0, available: 0, stockValue: 0, low: 0 });
   const [ledger, setLedger] = useState([]);
   const [warehouseId, setWarehouseId] = useState('');
   const [tab, setTab] = useState('all');
   const [q, setQ] = useState('');
+  const [sort, setSort] = useState('');
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(seed?.total || 0);
   const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerTotal, setLedgerTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -61,16 +66,35 @@ export default function InventoryPage() {
   const [reserve, setReserve] = useState({ channel: 'amazon', qty: '1', attempts: '10' });
   const [ats, setAts] = useState(null);
   const [reorderPoint, setReorderPoint] = useState('');
-  const [authority, setAuthority] = useState('oms');
+  const [authority, setAuthority] = useState(seed?.authority || 'oms');
   const omsMaster = authority !== 'shopify';
+
+  const loadMasters = async () => {
+    try {
+      const { data } = await api.get('/master-skus');
+      const list = data.data || [];
+      setMasters(list);
+      setMastersLoaded(true);
+      setStockIn((current) => (current.masterSkuId ? current : { ...current, masterSkuId: list[0]?.id || '' }));
+    } catch (err) {
+      toast.error(apiError(err, 'Could not load Master SKUs'));
+    }
+  };
+
+  const loadWarehouses = async () => {
+    try {
+      const { data } = await api.get('/warehouses');
+      setWarehouses(rememberPage('warehouses', data.data?.warehouses || []));
+    } catch (err) {
+      toast.error(apiError(err, 'Could not load warehouses'));
+    }
+  };
 
   const load = async () => {
     setLoading(true);
     try {
-      const [inv, wh, sku, led] = await Promise.all([
-        api.get('/inventory', { params: { warehouseId: warehouseId || undefined, q: q || undefined, tab: tab === 'ledger' ? 'all' : tab, page, limit: PAGE_SIZE } }),
-        api.get('/warehouses'),
-        api.get('/master-skus'),
+      const [inv, led] = await Promise.all([
+        api.get('/inventory', { params: { warehouseId: warehouseId || undefined, q: q || undefined, tab: tab === 'ledger' ? 'all' : tab, sort: sort || undefined, page, limit: PAGE_SIZE } }),
         tab === 'ledger' ? api.get('/inventory/ledger', { params: { page: ledgerPage, limit: PAGE_SIZE } }) : Promise.resolve({ data: { data: [], meta: { total: 0 } } }),
       ]);
       const nextRows = inv.data.data?.rows || [];
@@ -81,9 +105,10 @@ export default function InventoryPage() {
       });
       setTotal(inv.data.meta?.total || nextRows.length);
       setKpis(inv.data.data?.kpis || kpis);
-      setAuthority(inv.data.data?.inventoryAuthority || wh.data.data?.inventoryAuthority || 'oms');
-      setWarehouses(wh.data.data?.warehouses || []);
-      setMasters(sku.data.data || []);
+      setAuthority(inv.data.data?.inventoryAuthority || 'oms');
+      if (!warehouseId && tab === 'all' && !q && !sort && page === 1) rememberPage('inventory', {
+        rows: nextRows, total: inv.data.meta?.total || nextRows.length, kpis: inv.data.data?.kpis || kpis, authority: inv.data.data?.inventoryAuthority || 'oms',
+      });
       setLedger(led.data.data || []);
       setLedgerTotal(led.data.meta?.total || (led.data.data || []).length);
     } catch (err) {
@@ -93,7 +118,13 @@ export default function InventoryPage() {
     }
   };
 
-  useEffect(() => { load(); }, [warehouseId, tab, page, ledgerPage]);
+  useEffect(() => { loadWarehouses(); }, []);
+
+  useEffect(() => { load(); }, [warehouseId, tab, sort, page, ledgerPage]);
+
+  useEffect(() => {
+    if (inOpen && !mastersLoaded) loadMasters();
+  }, [inOpen]);
 
   useEffect(() => {
     if (!selected) {
@@ -196,7 +227,7 @@ export default function InventoryPage() {
         <div>
           <h1 className="text-xl font-bold">Inventory</h1>
           <p className="text-xs text-muted-foreground">
-            WH-001 sells on every channel. WH-002 is Shopify only. Available = on hand minus reserved. Stock in writes a ledger row.
+            WH-001 sells on every channel. WH-002 is Shopify only. Available = on hand minus reserved. ATS = available to sell on that channel. Stock in writes a ledger row.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -245,6 +276,13 @@ export default function InventoryPage() {
               />
             </div>
             <Button variant="outline" size="sm" onClick={load}>Search</Button>
+            {tab !== 'ledger' && (
+              <Select className="w-auto" aria-label="Sort by" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }}>
+                <option value="">Sort: SKU</option>
+                <option value="qty_desc">Qty: high to low</option>
+                <option value="qty_asc">Qty: low to high</option>
+              </Select>
+            )}
           </div>
         )}
         filters={(
@@ -272,7 +310,7 @@ export default function InventoryPage() {
         <CardHeader>
           <CardTitle>{tab === 'ledger' ? `Immutable movements (${ledgerTotal})` : `Stock by SKU (${total})`}</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent aria-busy={loading} className={cn('transition-opacity', loading && 'pointer-events-none opacity-60')}>
           {tab === 'ledger' ? (
             ledger.length === 0 ? <EmptyState title="No movements yet" description="Stock in or reserve to write the ledger." /> : (
               <Table>
@@ -330,7 +368,7 @@ export default function InventoryPage() {
                   <TableHead>On hand</TableHead>
                   <TableHead>Reserved</TableHead>
                   <TableHead>Available</TableHead>
-                  {connected.channels.map((channel) => <TableHead key={channel.id}>{orderChannelLabel(channel)} ATS</TableHead>)}
+                  {connected.channels.map((channel) => <TableHead key={channel.id} title={`Available to sell on ${orderChannelLabel(channel)}`}>{orderChannelLabel(channel)} ATS</TableHead>)}
                   <TableHead>Status</TableHead>
                   {canInventoryAdjust && omsMaster && <TableHead />}
                 </TableRow>
@@ -341,10 +379,21 @@ export default function InventoryPage() {
                     <TableCell>
                       <div className="flex items-center gap-2 font-medium">
                         <ProductThumb name={item.productName || item.sku} sku={item.sku} src={item.imageUrl} />
-                        {item.sku}
+                        <div>
+                          <div>{item.shopifySku || item.sku}</div>
+                          {item.shopifySku && item.shopifySku !== item.sku && (
+                            <div className="text-xs font-normal text-muted-foreground">Master {item.sku}</div>
+                          )}
+                        </div>
                       </div>
                     </TableCell>
-                    <TableCell>{item.productName}</TableCell>
+                    <TableCell>
+                      <button
+                        type="button"
+                        className="text-left text-primary hover:underline"
+                        onClick={(event) => { event.stopPropagation(); navigate(`/inventory/sku/${item.masterSkuId}`); }}
+                      >{item.productName}</button>
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline">{item.warehouse}</Badge>
                       <div className="text-xs text-muted-foreground mt-1">{item.warehouseType}</div>
@@ -388,6 +437,7 @@ export default function InventoryPage() {
               <ProductThumb name={selected.productName || selected.sku} sku={selected.sku} src={selected.imageUrl} size="lg" />
               <p className="text-lg font-semibold">{selected.productName}</p>
             </div>
+            <Button variant="outline" size="sm" onClick={() => navigate(`/inventory/sku/${selected.masterSkuId}`)}>Open product page</Button>
             <div className="grid grid-cols-2 gap-3">
               <div><p className="text-muted-foreground">Warehouse</p><p className="font-medium">{selected.warehouse} · {selected.warehouseType}</p></div>
               <div><p className="text-muted-foreground">Available</p><p className="font-medium">{selected.available}</p></div>
@@ -396,7 +446,7 @@ export default function InventoryPage() {
             </div>
             {ats && (
               <div>
-                <p className="text-muted-foreground mb-1">ATS for this Master SKU</p>
+                <p className="text-muted-foreground mb-1">ATS (available to sell) for this Master SKU</p>
                 <p>{connected.channels.map((channel) => `${orderChannelLabel(channel)} ${ats[channel.id] ?? 0}`).join(' · ')}</p>
               </div>
             )}
@@ -487,7 +537,7 @@ export default function InventoryPage() {
         <div className="space-y-3">
           {banner && <FormBanner tone="error" title="Could not post">{banner}</FormBanner>}
           <Select value={stockIn.masterSkuId} onChange={(e) => setStockIn({ ...stockIn, masterSkuId: e.target.value })}>
-            <option value="">Master SKU</option>
+            <option value="">{inOpen && !mastersLoaded ? 'Loading Master SKUs…' : 'Master SKU'}</option>
             {masters.map((sku) => <option key={sku.id} value={sku.id}>{sku.code} — {sku.name}</option>)}
           </Select>
           <Select value={stockIn.warehouseId} onChange={(e) => setStockIn({ ...stockIn, warehouseId: e.target.value })}>

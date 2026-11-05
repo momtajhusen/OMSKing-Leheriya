@@ -8,6 +8,10 @@ const AS_DEVELOPER = /^\/as-developer\/updates(\/[^/?]+)?(\?.*)?$/;
 const REQUEST_HEADERS = ['content-type', 'content-length', 'accept', 'range'];
 const RESPONSE_HEADERS = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'etag', 'last-modified', 'content-disposition'];
 const RENEW_BEFORE_MS = 60 * 1000;
+const MESSAGE_LIST = /^\/(threads\/[^/?]+\/)?messages(\?|$)/;
+const COUNTS_TTL_MS = 30 * 1000;
+const COUNT_PAGE = 100;
+const COUNT_PAGES_MAX = 100;
 
 class ProxyError extends Error {
   constructor(status, message) {
@@ -40,6 +44,23 @@ function readJson(res) {
     });
     res.on('error', () => resolve(null));
   });
+}
+
+/** The chat filter counts from message DTOs, the same rules as supportChat.service messageCounts. */
+function countMessages(rows) {
+  const counts = { all: 0, pending: 0, progress: 0, fixed: 0, developer: 0, client: 0 };
+  for (const m of rows) {
+    if (m.event || m.deleted) continue;
+    counts.all += 1;
+    const update = m.update;
+    if (update ? update.status === 'pending' : m.side === 'tenant') counts.pending += 1;
+    if (!update) continue;
+    if (update.status === 'in_progress') counts.progress += 1;
+    if (['done', 'confirmed'].includes(update.status)) counts.fixed += 1;
+    if (update.markedBy === 'platform') counts.developer += 1;
+    if (update.markedBy === 'tenant') counts.client += 1;
+  }
+  return counts;
 }
 
 function tokenClaims(token) {
@@ -162,8 +183,51 @@ function createSupportLiveProxy(settings, guards = {}) {
     return upstream;
   }
 
+  const countCache = new Map();
+
+  async function getLive(account, url) {
+    const upstream = await upstreamRequest(url, { method: 'GET', headers: { authorization: `Bearer ${await liveToken(account, false)}` } });
+    const json = await readJson(upstream);
+    if (upstream.statusCode !== 200 || !Array.isArray(json?.data)) throw new ProxyError(502, 'Live chat page could not be read');
+    return json;
+  }
+
+  /** A live server without filter counts yet: read the whole chat page by page and count it (cached briefly). */
+  async function liveCounts(account, path, fresh = false) {
+    const key = `${account} ${path}`;
+    const hit = countCache.get(key);
+    if (!fresh && hit && hit.at > Date.now() - COUNTS_TTL_MS) return hit.counts;
+    const rows = [];
+    let before = '';
+    for (let page = 0; page < COUNT_PAGES_MAX; page += 1) {
+      const json = await getLive(account, `${settings.url}/support${path}?limit=${COUNT_PAGE}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+      rows.push(...json.data);
+      if (!json.meta?.hasMore || !json.data.length) break;
+      before = json.data[0].id;
+    }
+    const counts = countMessages(rows);
+    countCache.set(key, { at: Date.now(), counts });
+    return counts;
+  }
+
+  const withCounts = async (req, res, account) => {
+    const upstream = await send(req, account);
+    const json = await readJson(upstream);
+    if (!json) return fail(res, 502, 'Live Developer Support request failed');
+    if (upstream.statusCode === 200 && Array.isArray(json.data) && !json.meta?.counts) {
+      try {
+        json.meta = { ...json.meta, counts: await liveCounts(account, req.url.split('?')[0], /[?&]fresh=1(&|$)/.test(req.url)) };
+      } catch {
+        /* the chat still shows; the filters just have no numbers */
+      }
+    }
+    return res.status(upstream.statusCode).json(json);
+  };
+
   const forward = (account) => async (req, res) => {
+    if (req.method !== 'GET') countCache.clear();
     try {
+      if (account && req.method === 'GET' && MESSAGE_LIST.test(req.url) && !/[?&]before=/.test(req.url)) return await withCounts(req, res, account);
       const upstream = await send(req, account);
       res.status(upstream.statusCode);
       RESPONSE_HEADERS.forEach((name) => { if (upstream.headers[name]) res.setHeader(name, upstream.headers[name]); });

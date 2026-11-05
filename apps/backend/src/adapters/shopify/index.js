@@ -215,7 +215,7 @@ function shopifyImage(product, variant) {
   return matched?.src || product?.image?.src || images[0]?.src || '';
 }
 
-function variantRows(product) {
+function variantRows(product, hsnByItem = new Map()) {
   return (product?.variants || []).flatMap((variant) => {
     const sku = String(variant?.sku || '').trim();
     if (!sku) return [];
@@ -228,8 +228,30 @@ function variantRows(product) {
       barcode: variant.barcode || '',
       price: variant.price,
       image: shopifyImage(product, variant),
+      productImage: shopifyImage(product),
+      vendor: String(product.vendor || '').trim(),
+      category: String(product.product_type || '').trim(),
+      hsnCode: hsnByItem.get(String(variant.inventory_item_id)) || '',
     }];
   });
+}
+
+async function hsnByInventoryItem(shop, request, headers, products) {
+  const ids = products.flatMap((product) => (product.variants || [])
+    .filter((variant) => variant?.sku && variant.inventory_item_id)
+    .map((variant) => String(variant.inventory_item_id)));
+  const out = new Map();
+  for (let i = 0; i < ids.length; i += 100) {
+    const batch = ids.slice(i, i + 100).join(',');
+    const res = await request(`https://${shop}/admin/api/2024-10/inventory_items.json?ids=${batch}&limit=100`, headers);
+    if (!res || res.status < 200 || res.status >= 300) continue;
+    const body = JSON.parse(res.text || '{}');
+    (body.inventory_items || []).forEach((item) => {
+      const hsn = String(item.harmonized_system_code || '').trim();
+      if (hsn) out.set(String(item.id), hsn);
+    });
+  }
+  return out;
 }
 
 async function pullCatalog(creds, opts = {}) {
@@ -271,7 +293,8 @@ async function pullCatalog(creds, opts = {}) {
       active: loc.active !== false,
     }));
   }
-  return { rows: products.flatMap(variantRows), locations };
+  const hsnByItem = await hsnByInventoryItem(shop, request, headers, products);
+  return { rows: products.flatMap((product) => variantRows(product, hsnByItem)), locations };
 }
 
 const LOCATION_ON_HAND_QUERY = `query LocationOnHand($id: ID!, $after: String) {
@@ -415,6 +438,42 @@ async function pushInventory(creds, opts = {}) {
   return { sent };
 }
 
+async function readVariantCost(creds, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
+  const itemId = await inventoryItemId(shop, token, opts.variantId, request);
+  const res = await request('GET', `https://${shop}/admin/api/2024-10/inventory_items/${encodeURIComponent(itemId)}.json`, {
+    headers: shopifyHeaders(token),
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Shopify inventory item returned ${res.status}. Cost was not read.`);
+    err.statusCode = res.status === 401 || res.status === 403 || res.status === 404 ? 400 : 502;
+    throw err;
+  }
+  const raw = JSON.parse(res.text || '{}').inventory_item?.cost;
+  const cost = raw == null || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(cost) ? cost : null;
+}
+
+async function pushVariantCost(creds, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
+  const itemId = await inventoryItemId(shop, token, opts.variantId, request);
+  const cost = Number(opts.cost);
+  const res = await request('PUT', `https://${shop}/admin/api/2024-10/inventory_items/${encodeURIComponent(itemId)}.json`, {
+    headers: shopifyHeaders(token),
+    body: { inventory_item: { id: itemId, cost: cost.toFixed(2) } },
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Shopify inventory item returned ${res.status}. Cost was not saved to Shopify.`);
+    err.statusCode = res.status === 401 || res.status === 403 || res.status === 404 || res.status === 422 ? 400 : 502;
+    throw err;
+  }
+  return { cost };
+}
+
 async function readLocationAvailable(creds, opts = {}) {
   const { variantId, locationId } = opts;
   const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
@@ -468,7 +527,7 @@ async function fulfillOrder(creds, opts = {}) {
     body: {
       fulfillment: {
         notify_customer: false,
-        tracking_info: { number: trackingNumber, company: 'Delhivery' },
+        tracking_info: { number: trackingNumber, company: opts.company || 'Delhivery' },
         line_items_by_fulfillment_order: [{ fulfillment_order_id: fulfillmentOrderId }],
       },
     },
@@ -496,6 +555,42 @@ async function cancelFulfillment(creds, opts = {}) {
     throw err;
   }
   return { fulfillmentId };
+}
+
+async function updateOrderAddress(creds, opts = {}) {
+  const { orderId, changes = {} } = opts;
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
+  const [firstName, ...rest] = String(changes.customer || '').trim().split(/\s+/);
+  const cityLine = String(changes.city || '').trim();
+  const zip = (cityLine.match(/\b\d{6}\b/) || [''])[0];
+  const city = zip ? cityLine.replace(zip, '').replace(/[\s,]+$/, '').trim() : cityLine;
+  const res = await request('PUT', `https://${shop}/admin/api/2024-10/orders/${encodeURIComponent(orderId)}.json`, {
+    headers: shopifyHeaders(token),
+    body: {
+      order: {
+        id: String(orderId),
+        email: String(changes.email || ''),
+        shipping_address: {
+          first_name: firstName || '',
+          last_name: rest.join(' '),
+          address1: String(changes.address || ''),
+          address2: '',
+          city,
+          zip,
+          province: String(changes.shipState || ''),
+          phone: String(changes.phone || ''),
+        },
+      },
+    },
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Shopify did not accept the order edit (${res.status}). Nothing was changed.`);
+    err.statusCode = 502;
+    throw err;
+  }
+  return { orderId: String(orderId) };
 }
 
 function codGateways(creds) {
@@ -530,6 +625,18 @@ function shippingDestination(address) {
   };
 }
 
+function shopifyTracking(order) {
+  const live = (order?.fulfillments || []).filter((row) => {
+    const status = String(row?.status || '').toLowerCase();
+    return status !== 'cancelled' && status !== 'error' && status !== 'failure';
+  });
+  for (let i = live.length - 1; i >= 0; i -= 1) {
+    const awb = String(live[i].tracking_number || live[i].tracking_numbers?.[0] || '').trim();
+    if (awb) return { courier: String(live[i].tracking_company || '').trim(), awb };
+  }
+  return { courier: '', awb: '' };
+}
+
 function mapShopifyOrder(order, creds) {
   const externalOrderId = String(order?.id || '').trim();
   if (!externalOrderId || !Array.isArray(order?.line_items)) return null;
@@ -553,9 +660,10 @@ function mapShopifyOrder(order, creds) {
     total: Number(order.total_price) || 0,
     orderDate: order.created_at ? new Date(order.created_at) : new Date(),
     customer: String(order.shipping_address?.name || ''),
-    email: String(order.email || ''),
+    email: String(order.email || order.contact_email || order.customer?.email || '').trim(),
     phone: String(order.shipping_address?.phone || order.phone || ''),
     ...shippingDestination(order.shipping_address),
+    ...shopifyTracking(order),
     items,
     sourceOrderData: {
       id: externalOrderId,
@@ -690,7 +798,10 @@ module.exports = {
   pullReturns,
   pushInventory,
   readLocationAvailable,
+  readVariantCost,
+  pushVariantCost,
   pullLocationOnHand,
   fulfillOrder,
   cancelFulfillment,
+  updateOrderAddress,
 };

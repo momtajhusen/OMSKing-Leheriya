@@ -40,6 +40,25 @@ function sameState(a, b) {
   return Boolean(clean(a)) && clean(a) === clean(b);
 }
 
+const STATE_ALIASES = {
+  '01': ['JK'], '02': ['HP'], '03': ['PB'], '04': ['CH'], '05': ['UK', 'UT', 'Uttaranchal'], '06': ['HR'],
+  '07': ['DL', 'New Delhi', 'NCT of Delhi', 'National Capital Territory of Delhi'], '08': ['RJ'], '09': ['UP'],
+  10: ['BR'], 11: ['SK'], 12: ['AR'], 13: ['NL'], 14: ['MN'], 15: ['MZ'], 16: ['TR'], 17: ['ML'], 18: ['AS'],
+  19: ['WB'], 20: ['JH'], 21: ['OR', 'OD', 'Orissa'], 22: ['CG', 'CT'], 23: ['MP'], 24: ['GJ'],
+  26: ['DH', 'DN', 'DD', 'Daman and Diu', 'Dadra and Nagar Haveli'], 27: ['MH'], 29: ['KA'], 30: ['GA'],
+  31: ['LD'], 32: ['KL'], 33: ['TN'], 34: ['PY', 'Pondicherry'], 35: ['AN'], 36: ['TS', 'TG'], 37: ['AP'], 38: ['LA'],
+};
+
+function gstStateCode(state) {
+  const code = Object.keys(GST_STATES).find((key) => [GST_STATES[key], ...(STATE_ALIASES[key] || [])]
+    .some((name) => sameState(name, state)));
+  return code ? String(code).padStart(2, '0') : '';
+}
+
+function stateKey(state) {
+  return gstStateCode(state) || normState(state);
+}
+
 function invoiceNumber(order) {
   if (String(order.channel || '') === 'Shopify') {
     return String(order.channelOrderNo || '').replace(/^#/, '').trim() || order.externalOrderId || order.orderNo || '';
@@ -64,8 +83,8 @@ function lineTax(item, { warehouseState = '', shipState = '' } = {}) {
   const grossPaise = toPaise(item.price) * qty;
   const taxablePaise = rate ? Math.round((grossPaise * 100) / (100 + rate)) : grossPaise;
   const taxPaise = grossPaise - taxablePaise;
-  const from = normState(warehouseState);
-  const to = normState(shipState);
+  const from = stateKey(warehouseState);
+  const to = stateKey(shipState);
   const intra = Boolean(from) && from === to;
   const cgstPaise = intra ? Math.floor(taxPaise / 2) : 0;
   const sgstPaise = intra ? taxPaise - cgstPaise : 0;
@@ -232,6 +251,7 @@ module.exports = {
   invoiceNumber,
   creditNoteNumber,
   gstinState,
+  gstStateCode,
   sameState,
   shipToState,
   lineTax,

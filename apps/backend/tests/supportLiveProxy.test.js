@@ -16,7 +16,7 @@ function fakeJwt(expSec, extra = {}) {
 }
 
 /** Stands in for the live API: records every request, answers like the real routes. */
-function startFakeLive({ expiresInSec = 900, rejectFirstToken = false } = {}) {
+function startFakeLive({ expiresInSec = 900, rejectFirstToken = false, chat = null } = {}) {
   const seen = [];
   let logins = 0;
   const server = http.createServer((req, res) => {
@@ -39,6 +39,12 @@ function startFakeLive({ expiresInSec = 900, rejectFirstToken = false } = {}) {
         return res.end(Buffer.from([1, 2, 3, 4]));
       }
       if (rejectFirstToken && req.headers.authorization?.endsWith('1')) return json(401, { success: false, message: 'Session expired' });
+      if (chat && req.url.startsWith('/api/v1/support/messages')) {
+        const q = new URL(req.url, 'http://x').searchParams;
+        const older = q.get('before') ? chat.filter((m) => m.id < q.get('before')) : chat;
+        const limit = Number(q.get('limit')) || 50;
+        return json(200, { success: true, data: older.slice(-limit), meta: { hasMore: older.length > limit } });
+      }
       const who = /client\d+$/.test(req.headers.authorization || '') ? 'client' : 'dev';
       return json(200, { success: true, data: { path: req.url, auth: Boolean(req.headers.authorization), who } });
     });
@@ -238,4 +244,35 @@ test('/support uses the live proxy only in development; the live server keeps it
   assert.match(src, /config\.nodeEnv === 'development' \? supportLive : supportRoutes/);
   const config = require('../src/config');
   assert.equal(config.supportLive.url, process.env.SUPPORT_LIVE_API_URL || 'https://omskingapi.codersalpha.com/api/v1');
+});
+
+test('the localhost client chat adds whole-chat filter counts when the live server does not send them yet', async () => {
+  const chat = [
+    { id: 'm01', side: 'tenant', update: null },
+    { id: 'm02', side: 'platform', update: null },
+    { id: 'm03', side: 'tenant', update: { status: 'in_progress', markedBy: 'platform' } },
+    { id: 'm04', side: 'tenant', update: { status: 'done', markedBy: 'platform' } },
+    { id: 'm05', side: 'platform', event: { action: 'complete' }, update: { status: 'done', markedBy: 'platform' } },
+    { id: 'm06', side: 'tenant', deleted: true, update: null },
+    { id: 'm07', side: 'tenant', update: { status: 'confirmed', markedBy: 'tenant' } },
+    { id: 'm08', side: 'tenant', update: { status: 'pending', markedBy: 'tenant' } },
+  ];
+  await withServers({ chat }, creds, async (live, local) => {
+    const first = await (await fetch(`${local.url}/messages?limit=2`)).json();
+    assert.deepEqual(first.data.map((m) => m.id), ['m07', 'm08'], 'the page itself is unchanged');
+    assert.equal(first.meta.hasMore, true);
+    assert.deepEqual(first.meta.counts, { all: 6, pending: 2, progress: 1, fixed: 2, developer: 2, client: 2 });
+
+    const pages = live.seen.filter((r) => r.url.startsWith('/api/v1/support/messages')).length;
+    await fetch(`${local.url}/messages?limit=2`);
+    assert.equal(live.seen.filter((r) => r.url.startsWith('/api/v1/support/messages')).length, pages + 1, 'counts are cached for a short while');
+
+    const cached = live.seen.filter((r) => r.url.startsWith('/api/v1/support/messages')).length;
+    const fresh = await (await fetch(`${local.url}/messages?limit=2&fresh=1`)).json();
+    assert.equal(fresh.meta.counts.pending, 2);
+    assert.ok(live.seen.filter((r) => r.url.startsWith('/api/v1/support/messages')).length > cached + 1, 'fresh=1 (play mode) recounts instead of using the cache');
+
+    const older = await (await fetch(`${local.url}/messages?limit=2&before=m07`)).json();
+    assert.equal(older.meta.counts, undefined, 'older pages are not recounted');
+  });
 });

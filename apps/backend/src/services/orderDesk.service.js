@@ -125,7 +125,27 @@ function openedAt(order) {
   return Number.isFinite(time) ? time : 0;
 }
 
+/**
+ * Order ready: the order has vendor (Virtual) lines and each live one is Delivered by its vendor
+ * or covered by offline store stock left after routing. Oldest open orders claim that stock first.
+ */
+function markReady(order, leftover, stock) {
+  const skuIds = new Map((order.items || []).filter((item) => item.masterSkuId).map((item) => [item.sku, String(item.masterSkuId)]));
+  const subOrders = (order.subOrders || []).map((sub) => ({ ...sub, offlineQty: stock.get(skuIds.get(sub.sku)) || 0 }));
+  const vendorLines = subOrders.filter((sub) => sub.status !== 'Cancelled' && (sub.assignedVendor || sub.fulfilmentSource === 'Virtual'));
+  if (!OPEN.has(order.status) || !vendorLines.length) return { ...order, subOrders, orderReady: false };
+  const need = new Map();
+  vendorLines.filter((sub) => sub.vendorStatus !== 'Delivered').forEach((sub) => {
+    const id = skuIds.get(sub.sku) || '';
+    need.set(id, (need.get(id) || 0) + Math.max(1, Number(sub.qty) || 1));
+  });
+  const orderReady = !need.has('') && [...need].every(([id, qty]) => (leftover.get(id) || 0) >= qty);
+  if (orderReady) need.forEach((qty, id) => take(leftover, id, qty));
+  return { ...order, subOrders, orderReady };
+}
+
 function applyDeskRules(orders, pools = {}) {
+  const stock = new Map(pools.physical || []);
   const physical = new Map(pools.physical || []);
   const virtual = new Map(pools.virtual || []);
   const { channelIds } = require('../channels/registry');
@@ -138,12 +158,13 @@ function applyDeskRules(orders, pools = {}) {
   open.forEach(({ order, index }) => {
     routed.set(index, routeOrder(order, physical, virtual, channelPools));
   });
-  return orders.map((order, index) => routed.get(index) || {
+  open.forEach(({ index }) => routed.set(index, markReady(routed.get(index), physical, stock)));
+  return orders.map((order, index) => routed.get(index) || markReady({
     ...order,
     ...paymentView(order.paymentMode),
     mappingFailed: false,
     routeNote: closedNote(order),
-  });
+  }, physical, stock));
 }
 
 async function stockPools(tenantId) {

@@ -489,10 +489,6 @@ export default function NotificationsPage() {
               <div className="w-6 h-3 bg-input rounded-full" />
               <span className="text-muted-foreground">Disabled</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Lock className="w-4 h-4 text-muted-foreground" />
-              <span className="text-muted-foreground">Owner Alert (Always On)</span>
-            </div>
           </div>
         </CardContent>
       </Card>

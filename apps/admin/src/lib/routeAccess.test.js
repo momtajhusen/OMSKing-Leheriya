@@ -94,6 +94,16 @@ test('Dashboard Access is its own option, and staff without it land on Orders', 
   assert.equal(homePathFor('vendor', ROLE_PERMISSIONS.vendor), '/vendor/orders');
 });
 
+test('Order editing and Change mode of payment are their own Access options, owner only by default', () => {
+  for (const key of ['orders.edit_details', 'orders.payment_mode']) {
+    assert.equal(PERMISSION_CATALOG.some((item) => item.key === key), true, key);
+    assert.equal(ROLE_PERMISSIONS.super_admin.includes(key), true, key);
+    for (const role of [...TENANT_STAFF_ROLES.filter((code) => code !== 'super_admin'), 'vendor']) {
+      assert.equal((ROLE_PERMISSIONS[role] || []).includes(key), false, `${role} ${key}`);
+    }
+  }
+});
+
 test('a list loaded for Leheriya is dropped after Back to platform', () => {
   const started = { generation: 1, tenantId: 'leheriya' };
   assert.equal(sameCompanySnapshot(started, { generation: 1, tenantId: 'leheriya' }), true);
