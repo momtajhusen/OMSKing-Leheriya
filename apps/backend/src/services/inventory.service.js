@@ -653,8 +653,9 @@ async function offlineWarehouse(tenantId, warehouseCode) {
     ? await exec(Warehouse.findOne({ tenantId, code: warehouseCode, status: 'active', type: 'physical' }), null)
     : null;
   if (requested) return requested;
-  const offline = await exec(Warehouse.findOne({ tenantId, code: 'WH-001', status: 'active' }), null);
-  if (!offline) throw new HttpError(404, 'WH-001 warehouse not found');
+  const offline = await exec(Warehouse.findOne({ tenantId, code: 'WH-001', status: 'active' }), null)
+    || await exec(Warehouse.findOne({ tenantId, status: 'active', type: 'physical' }).sort({ isDefault: -1, isPickup: -1, code: 1 }), null);
+  if (!offline) throw new HttpError(404, 'No active physical warehouse found');
   return offline;
 }
 

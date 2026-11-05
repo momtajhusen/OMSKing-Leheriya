@@ -234,6 +234,9 @@ async function cancelShopifyLabel(tenantId, orderNo, { releaseReserve = false, d
   await shipment.save();
   order.awb = '';
   order.labelGeneratedAt = null;
+  order.handoverAt = null;
+  order.manifestNo = '';
+  order.pickedUpAt = null;
   order.status = 'New';
   await order.save();
   return shipment;
@@ -321,7 +324,7 @@ function kolkataDayStart(now = new Date()) {
     month: '2-digit',
     day: '2-digit',
   }).format(now);
-  return new Date(`${day}T00:00:00+05:45`);
+  return new Date(`${day}T00:00:00+05:30`);
 }
 
 async function markPickedUp(rows) {

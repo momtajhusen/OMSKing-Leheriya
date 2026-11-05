@@ -38,12 +38,12 @@ async function bindShopifyLocations(tenantId, locations) {
   const { physical, virtual } = await ensureDefaultWarehouses(tenantId);
   const active = (locations || []).filter((loc) => loc && loc.id && loc.active !== false);
   const slots = [
-    [physical._id, active[0], 'shopify-location-a', 'Shopify Location A (Offline)', true],
-    [virtual._id, active[1], 'shopify-location-b', 'Shopify Location B (Virtual)', false],
+    [physical?._id, active[0], 'shopify-location-a', 'Shopify Location A (Offline)', true],
+    [virtual?._id, active[1], 'shopify-location-b', 'Shopify Location B (Virtual)', false],
   ];
   let bound = 0;
   for (const [warehouseId, loc, placeholder, label, primary] of slots) {
-    if (!loc) continue;
+    if (!loc || !warehouseId) continue;
     const externalLocationId = String(loc.id);
     const named = loc.name ? `${label} — ${loc.name}` : label;
     const current = await WarehouseLocationMap.findOne({

@@ -11,9 +11,12 @@ import Modal from '../../components/ui/Modal';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { FormBanner } from '../../components/ui/FormBanner';
-import { Building, MapPin } from 'lucide-react';
+import { Building, MapPin, Trash2 } from 'lucide-react';
+import DeleteWarehouseDialog from '../../components/settings/DeleteWarehouseDialog';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
+
+const STILL = 'hover:translate-y-0';
 
 const empty = {
   code: '',
@@ -44,6 +47,7 @@ export default function WarehousesPage() {
   const [pickup, setPickup] = useState(null);
   const [pickupForm, setPickupForm] = useState(emptyPickup);
   const [banner, setBanner] = useState('');
+  const [deleting, setDeleting] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -123,22 +127,25 @@ export default function WarehousesPage() {
     }
   };
 
-  if (loading) return <PageLoader label="Loading warehouses..." />;
-
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-xl font-bold">Warehouses</h1>
           <p className="text-muted-foreground">
-            WH-001 is physical and sells on every channel. WH-002 is virtual and sells on Shopify only. Inventory authority: {authority === 'oms' ? 'OMS is master' : 'Shopify is master'}.
+            Inventory authority: {authority === 'oms' ? 'OMS is master' : 'Shopify is master'}.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => navigate('/inventory')}>Open inventory</Button>
-          {canInventoryAdjust && (
-            <Button onClick={() => { setForm(empty); setBanner(''); setOpen(true); }}>Add warehouse</Button>
-          )}
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" className={STILL} onClick={() => navigate('/inventory')}>Open inventory</Button>
+          <Button
+            className={STILL}
+            disabled={!canInventoryAdjust}
+            title={canInventoryAdjust ? undefined : 'You need stock adjust permission'}
+            onClick={() => { setForm(empty); setBanner(''); setOpen(true); }}
+          >
+            Add warehouse
+          </Button>
         </div>
       </div>
 
@@ -146,12 +153,15 @@ export default function WarehousesPage() {
         <CardContent className="p-3">
           <div className="flex items-start gap-3">
             <Building className="w-5 h-5 text-primary mt-0.5" />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-medium">Channel visibility</p>
               <p className="text-sm text-muted-foreground">
-                Offline stock is sellable on every channel. Virtual stock is Shopify only. Flipkart, Meesho, AJIO, Nykaa, Amazon and Myntra never see WH-002.
+                Each channel sees stock only from the warehouses linked to it. Virtual stock can be linked to Shopify only.
               </p>
             </div>
+            <Button size="sm" variant="outline" className={`shrink-0 ${STILL}`} onClick={() => navigate('/settings?tab=links')}>
+              Manage links
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -160,8 +170,8 @@ export default function WarehousesPage() {
         <CardHeader>
           <CardTitle>Logical warehouses ({rows.length})</CardTitle>
         </CardHeader>
-        <CardContent>
-          {rows.length === 0 ? <EmptyState title="No warehouses" /> : (
+        <CardContent className="min-h-[160px]">
+          {loading && rows.length === 0 ? <PageLoader label="Loading warehouses..." /> : rows.length === 0 ? <EmptyState title="No warehouses" /> : (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -171,12 +181,12 @@ export default function WarehousesPage() {
                   <TableHead>Visible on</TableHead>
                   <TableHead>Pickup</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Action</TableHead>
+                  <TableHead className="w-[220px] text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((wh) => (
-                  <TableRow key={wh.id}>
+                  <TableRow key={wh.id} className="h-14">
                     <TableCell className="font-medium">{wh.code}</TableCell>
                     <TableCell>{wh.name}</TableCell>
                     <TableCell>
@@ -185,10 +195,22 @@ export default function WarehousesPage() {
                     <TableCell>{wh.channels.join(', ') || '—'}</TableCell>
                     <TableCell>{wh.isPickup ? 'Yes' : 'No'}</TableCell>
                     <TableCell>{wh.status}</TableCell>
-                    <TableCell>
-                      {wh.type === 'physical' && (
-                        <Button size="sm" variant="outline" onClick={() => openPickup(wh)}>Pickup address</Button>
-                      )}
+                    <TableCell className="w-[220px]">
+                      <div className="flex items-center justify-end gap-2">
+                        {wh.type === 'physical' && (
+                          <Button size="sm" variant="outline" className={STILL} onClick={() => openPickup(wh)}>Pickup address</Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className={`text-destructive ${STILL}`}
+                          disabled={!canInventoryAdjust}
+                          aria-label={`Delete ${wh.code}`}
+                          onClick={() => setDeleting(wh)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -226,6 +248,8 @@ export default function WarehousesPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <DeleteWarehouseDialog warehouse={deleting} onClose={() => setDeleting(null)} onDeleted={load} />
 
       <Modal
         open={open}

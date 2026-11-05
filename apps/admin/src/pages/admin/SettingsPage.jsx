@@ -10,6 +10,7 @@ import { Building, Link, Truck, FileText, Save, CheckCircle, Settings as Setting
 import ChannelSetup from '../../components/channels/ChannelSetup';
 import CourierSettings from '../../components/settings/CourierSettings';
 import TaxSettings from '../../components/settings/TaxSettings';
+import ChannelWarehouseSettings from '../../components/settings/ChannelWarehouseSettings';
 import api, { apiError } from '../../lib/api';
 
 const companySchema = z.object({
@@ -40,7 +41,7 @@ export default function SettingsPage() {
     ['company', 'channels', 'couriers', 'tax', 'inventory'].includes(requestedTab) ? requestedTab : 'company'
   );
   useEffect(() => {
-    if (['company', 'channels', 'couriers', 'tax', 'inventory'].includes(requestedTab)) setActiveTab(requestedTab);
+    if (['company', 'channels', 'couriers', 'tax', 'inventory', 'links'].includes(requestedTab)) setActiveTab(requestedTab);
   }, [requestedTab]);
   const [saveStatus, setSaveStatus] = useState(null);
   const [inventoryAuthority, setInventoryAuthority] = useState('oms');
@@ -119,6 +120,7 @@ export default function SettingsPage() {
     { id: 'couriers', label: 'Courier Settings', icon: Truck },
     { id: 'tax', label: 'Tax & GST', icon: FileText },
     { id: 'inventory', label: 'Inventory source', icon: Warehouse },
+    { id: 'links', label: 'Channel & warehouse', icon: Link },
   ];
 
   return (
@@ -354,6 +356,12 @@ export default function SettingsPage() {
             </p>
           </div>
           <ChannelSetup />
+        </div>
+      )}
+
+      {activeTab === 'links' && (
+        <div className="premium-card p-4">
+          <ChannelWarehouseSettings />
         </div>
       )}
 

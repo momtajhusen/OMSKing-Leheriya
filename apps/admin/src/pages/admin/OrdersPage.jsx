@@ -20,6 +20,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import { isChannelManaged, packetIdOf, openMyntraDocument, pullMyntraOrders } from '../../lib/channelOrders';
 import { downloadCsv } from '../../lib/orderMetrics';
+import { shipWarehouseTag } from '../../lib/channelWarehouse';
 import api, { apiError } from '../../lib/api';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
 import TableToolbar from '../../components/ui/TableToolbar';
@@ -547,6 +548,11 @@ export default function OrdersPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">{order.channel}</Badge>
+                      {shipWarehouseTag(order) && (
+                        <div className="mt-1 text-[11px] text-muted-foreground" title={shipWarehouseTag(order).title}>
+                          from {shipWarehouseTag(order).code}
+                        </div>
+                      )}
                       {isChannelManaged(order) && (
                         <div className="text-[11px] text-emerald-600 mt-1" title={`Myntra status ${order.channelStatus || '—'}`}>
                           Live · {order.channelStatus || '—'}

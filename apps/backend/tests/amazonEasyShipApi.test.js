@@ -83,10 +83,28 @@ test.after(async () => {
 });
 
 test('the Easy Ship endpoints need a login', async () => {
-  for (const [method, path] of [['POST', '/api/v1/orders/labels/amazon'], ['GET', '/api/v1/orders/X/amazon-label'], ['POST', '/api/v1/orders/X/ship'], ['POST', '/api/v1/orders/X/label/cancel']]) {
+  for (const [method, path] of [['POST', '/api/v1/orders/labels/amazon'], ['GET', '/api/v1/orders/X/amazon-label'], ['POST', '/api/v1/orders/X/ship'], ['POST', '/api/v1/orders/X/label'], ['POST', '/api/v1/orders/X/label/cancel']]) {
     const res = await api(method, path, { json: method === 'POST' ? {} : undefined });
     assert.equal(res.status, 401, `${method} ${path}`);
   }
+});
+
+test('Generate label on an Amazon order goes to Easy Ship instead of refusing with the old Delhivery message', async () => {
+  const { tenant, token } = await company('generate');
+  await amazonOrder(tenant._id, 'AMZ-API-G1');
+  const nopack = await api('POST', '/api/v1/orders/AMZ-API-G1/label', { token, json: {} });
+  assert.equal(nopack.status, 400);
+  assert.doesNotMatch(nopack.body.message, /Print the channel label/);
+  assert.match(nopack.body.message, /Package weight and size are missing/);
+
+  await amazonOrder(tenant._id, 'AMZ-API-G2', { awb: 'AWB-AMZ-API-G2', labelGeneratedAt: new Date() });
+  await bookedLabel(tenant._id, 'AMZ-API-G2', Buffer.from('%PDF-1.4 g2'));
+  const res = await api('POST', '/api/v1/orders/AMZ-API-G2/label', { token, json: {} });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.data.awb, 'AWB-AMZ-API-G2');
+  assert.match(res.body.message, /Easy Ship/);
+  assert.equal(await Shipment.countDocuments({ tenantId: tenant._id, orderNo: 'AMZ-API-G2', status: 'booked' }), 1);
+  assert.equal(amazonCalls, 0);
 });
 
 test('Easy Ship label on an order without package size is refused with a clear reason and Amazon is not called', async () => {
@@ -148,7 +166,7 @@ test('another company cannot label, print or cancel this company\'s Amazon order
   const other = await company('other');
   await amazonOrder(owner.tenant._id, 'AMZ-API-X1', { awb: 'AWB-AMZ-API-X1', labelGeneratedAt: new Date() });
   await bookedLabel(owner.tenant._id, 'AMZ-API-X1', Buffer.from('%PDF-1.4 private'));
-  for (const [method, path] of [['GET', '/api/v1/orders/AMZ-API-X1/amazon-label'], ['POST', '/api/v1/orders/AMZ-API-X1/ship'], ['POST', '/api/v1/orders/AMZ-API-X1/label/cancel']]) {
+  for (const [method, path] of [['GET', '/api/v1/orders/AMZ-API-X1/amazon-label'], ['POST', '/api/v1/orders/AMZ-API-X1/ship'], ['POST', '/api/v1/orders/AMZ-API-X1/label'], ['POST', '/api/v1/orders/AMZ-API-X1/label/cancel']]) {
     const res = await api(method, path, { token: other.token, json: method === 'POST' ? {} : undefined });
     assert.equal(res.status, 404, `${method} ${path}`);
   }

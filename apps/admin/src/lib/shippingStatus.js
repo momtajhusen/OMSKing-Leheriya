@@ -7,15 +7,39 @@ function isCourierRto(order) {
   return codes.includes('RTO');
 }
 
-/** Shipping tab of an order; Label generated = OMSKing made the label and the courier has not picked it up yet. */
+function pickedUp(order) {
+  return Boolean(order.pickedUpAt || order.trackingScan?.status || order.trackingScan?.deliveryStatus);
+}
+
+/**
+ * Shipping tab of an order. A parcel OMSKing labelled stays in Label generated until it is put on a handover
+ * manifest (Ready to hand over), and leaves both once the courier scans it or it is marked dispatched.
+ * Booking a Shopify label sets the order to Dispatched, so the status alone cannot tell this.
+ */
 export function shipmentStatus(order) {
   if (isCourierRto(order)) return 'RTO';
   if (order.reversePickup?.returnId) return 'Exception';
   if (order.status === 'Delivered') return 'Delivered';
+  if (order.labelGeneratedAt && trackingOf(order) && !pickedUp(order)) return order.handoverAt ? 'Ready' : 'Label generated';
   if (order.status === 'Dispatched') return 'In Transit';
-  if (order.labelGeneratedAt && trackingOf(order)) return 'Label generated';
   if (trackingOf(order)) return 'Ready';
   return 'Label Pending';
+}
+
+/** Parcels that can go on a handover manifest: labelled by OMSKing, not on a manifest yet, not picked up. */
+export function canHandOver(row) {
+  return row?.shipStatus === 'Label generated' && !row.handoverAt;
+}
+
+export const MANIFEST_COLUMNS = ['S.No', 'Manifest no', 'Date', 'Courier', 'Pickup warehouse', 'Order no', 'Channel order no', 'Channel', 'AWB', 'Customer', 'City', 'Pincode', 'Payment', 'COD amount', 'Qty', 'Weight (kg)'];
+
+/** CSV for a saved handover manifest; the columns change once the client shares their manifest format. */
+export function manifestFile(manifest) {
+  const rows = (manifest?.rows || []).map((row, index) => [
+    index + 1, manifest.manifestNo, manifest.day, manifest.courier, manifest.warehouseCode || '', row.orderNo, row.channelOrderNo || '',
+    row.channel, row.awb, row.customer, row.city, row.pincode || '', row.paymentMode, row.codAmount || 0, row.qty || 0, row.weightKg || 0,
+  ]);
+  return { name: `${manifest?.manifestNo || 'manifest'}.csv`, header: MANIFEST_COLUMNS, rows };
 }
 
 /** Amazon label button on the order page: 'make' an Easy Ship label, 'print' the stored one, or null (not Amazon / nothing to do). */

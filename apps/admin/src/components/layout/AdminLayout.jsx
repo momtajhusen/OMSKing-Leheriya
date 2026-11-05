@@ -21,6 +21,16 @@ const TABS = [
 ];
 
 const BILL_NOTICE_KEY = 'oms-bill-notice';
+const BILL_CACHE_KEY = 'oms-bill-cache';
+
+/** Last bill notice for this company, so the banner is there on first paint instead of pushing the page down later. */
+function readBillCache(key) {
+  try {
+    return JSON.parse(sessionStorage.getItem(key) || 'null');
+  } catch {
+    return null;
+  }
+}
 
 function noticeStamp(billing) {
   if (!billing?.message) return '';
@@ -91,7 +101,8 @@ function AdminLayout() {
   const { user, exitImpersonation } = useAuth();
   const { canOpenPath } = usePermissions();
   const setMobileOpen = useUIStore((state) => state.setMobileOpen);
-  const [billing, setBilling] = useState(null);
+  const cacheKey = `${BILL_CACHE_KEY}:${user?.tenantId || ''}`;
+  const [billing, setBilling] = useState(() => readBillCache(cacheKey));
   const [closedStamp, setClosedStamp] = useState(() => sessionStorage.getItem(BILL_NOTICE_KEY) || '');
 
   useEffect(() => {
@@ -100,8 +111,13 @@ function AdminLayout() {
       return undefined;
     }
     let alive = true;
+    setBilling(readBillCache(cacheKey));
     api.get('/pricing/mine')
-      .then(({ data }) => { if (alive) setBilling(data.data || null); })
+      .then(({ data }) => {
+        if (!alive) return;
+        setBilling(data.data || null);
+        sessionStorage.setItem(cacheKey, JSON.stringify(data.data || null));
+      })
       .catch(() => { if (alive) setBilling(null); });
     return () => { alive = false; };
   }, [user?.tenantId, user?.role, user?.impersonating, user?.tenantStatus]);

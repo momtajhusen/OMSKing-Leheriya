@@ -18,6 +18,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle, Pencil } from 'lucide-react';
 import { isChannelManaged, packetIdOf, openMyntraDocument, openAmazonLabel } from '../../lib/channelOrders';
+import { shipWarehouseTag } from '../../lib/channelWarehouse';
 import { amazonLabelStep, courierChoice, courierOptionText, labelRequest, pickupSlotText, rateNote } from '../../lib/shippingStatus';
 import { shortOrderId, shortSubOrderId } from '../../lib/orderIds';
 import { vendorPick, mappedVendor, pendingAssigns, vendorSaveAction } from '../../lib/vendorLines';
@@ -389,6 +390,11 @@ export default function OrderDetailPage() {
             <h1 className="text-xl font-bold">{displayId}</h1>
             <Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge>
             <Badge variant="outline">{order.channel}</Badge>
+            {shipWarehouseTag(order) && (
+              <span className="text-xs text-muted-foreground" title={shipWarehouseTag(order).title}>
+                Ships from {shipWarehouseTag(order).code}
+              </span>
+            )}
             <Badge variant="secondary">{order.paymentMode}</Badge>
             {order.paymentDetail === 'Partially paid' && (
               <span className="text-xs text-muted-foreground">Partially paid, handled as COD</span>

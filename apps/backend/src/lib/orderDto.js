@@ -23,6 +23,7 @@ function toOrderDto(doc) {
     customerGstin: order.customerGstin || '',
     notes: order.notes || '',
     channel: order.channel,
+    warehouseCode: order.warehouseCode || '',
     status: order.status,
     paymentMode: order.paymentMode,
     labelPaymentMode: order.labelPaymentMode || '',
@@ -79,6 +80,9 @@ function toOrderDto(doc) {
     awb: order.awb || '',
     invoiceNo: order.channel === 'Shopify' ? invoiceNumber(order) : (order.invoiceNo || ''),
     labelGeneratedAt: order.labelGeneratedAt || null,
+    handoverAt: order.handoverAt || null,
+    manifestNo: order.manifestNo || '',
+    pickedUpAt: order.pickedUpAt || null,
     easyShip: order.easyShip?.packageId ? {
       packageId: order.easyShip.packageId,
       status: order.easyShip.status || '',

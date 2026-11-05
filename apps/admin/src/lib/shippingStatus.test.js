@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { amazonLabelStep, courierChoice, courierOptionText, labelRequest, rateNote, pickupSlotText, shipmentStatus, splitLabelOrders } from './shippingStatus.js';
+import {
+  amazonLabelStep, courierChoice, courierOptionText, labelRequest, rateNote, pickupSlotText, shipmentStatus, splitLabelOrders, canHandOver, manifestFile, MANIFEST_COLUMNS,
+} from './shippingStatus.js';
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
@@ -9,9 +11,36 @@ test('an order with a label and AWB that is not picked up yet is Label generated
   const at = '2026-11-05T10:00:00Z';
   assert.equal(shipmentStatus({ channel: 'Amazon', status: 'Ready to Ship', awb: 'AMZ-1', labelGeneratedAt: at }), 'Label generated');
   assert.equal(shipmentStatus({ channel: 'Amazon', status: 'Ready to Ship' }), 'Label Pending');
-  assert.equal(shipmentStatus({ channel: 'Amazon', status: 'Dispatched', awb: 'AMZ-1', labelGeneratedAt: at }), 'In Transit');
+  assert.equal(shipmentStatus({ channel: 'Amazon', status: 'Dispatched', awb: 'AMZ-1', labelGeneratedAt: at, pickedUpAt: at }), 'In Transit');
   assert.equal(shipmentStatus({ channel: 'Myntra', status: 'Packed', channelLines: [{ trackingNumber: 'MYN-1' }] }), 'Ready', 'tracking without an OMSKing label');
   assert.equal(shipmentStatus({ channel: 'Shopify', status: 'Delivered', awb: 'D1' }), 'Delivered');
+});
+
+test('a booked Shopify label (order set to Dispatched) waits in Label generated, moves to Ready on a manifest, then In Transit on the first scan', () => {
+  const at = '2026-11-05T10:00:00Z';
+  const booked = { channel: 'Shopify', status: 'Dispatched', awb: 'DL1', labelGeneratedAt: at };
+  assert.equal(shipmentStatus(booked), 'Label generated');
+  assert.equal(canHandOver({ ...booked, shipStatus: shipmentStatus(booked) }), true);
+  const onManifest = { ...booked, handoverAt: at, manifestNo: 'MF-20261105-DELHIVERY-01' };
+  assert.equal(shipmentStatus(onManifest), 'Ready');
+  assert.equal(canHandOver({ ...onManifest, shipStatus: 'Ready' }), false);
+  assert.equal(shipmentStatus({ ...onManifest, trackingScan: { status: 'Picked up' } }), 'In Transit');
+  assert.equal(shipmentStatus({ channel: 'Shopify', status: 'Dispatched', awb: 'X1' }), 'In Transit', 'fulfilled outside OMSKing (no OMSKing label) stays In Transit');
+});
+
+test('handover manifest CSV has one numbered row per parcel with the courier, warehouse and COD', () => {
+  const file = manifestFile({
+    manifestNo: 'MF-20261105-DELHIVERY-01', day: '2026-11-05', courier: 'Delhivery', warehouseCode: 'WH-001',
+    rows: [{ orderNo: 'SHP-1', channel: 'Shopify', awb: 'DL1', customer: 'Asha', city: 'Jaipur', pincode: '302001', paymentMode: 'COD', codAmount: 999, qty: 2, weightKg: 0.5 }],
+  });
+  assert.equal(file.name, 'MF-20261105-DELHIVERY-01.csv');
+  assert.deepEqual(file.header, MANIFEST_COLUMNS);
+  assert.deepEqual(file.rows[0].slice(0, 9), [1, 'MF-20261105-DELHIVERY-01', '2026-11-05', 'Delhivery', 'WH-001', 'SHP-1', '', 'Shopify', 'DL1']);
+  assert.equal(file.rows[0][13], 999);
+  const page = read('../pages/admin/ShippingPage.jsx');
+  assert.match(page, /\/orders\/handover/);
+  assert.match(page, /Move to Ready to hand over/);
+  assert.match(page, /canHandOver\(row\)/);
 });
 
 test('the Easy Ship pickup slot reads as one short line', () => {

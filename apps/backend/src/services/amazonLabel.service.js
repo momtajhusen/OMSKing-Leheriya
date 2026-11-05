@@ -134,6 +134,9 @@ async function cancelAmazonLabel(tenantId, orderNo) {
   await shipment.save();
   order.awb = '';
   order.labelGeneratedAt = null;
+  order.handoverAt = null;
+  order.manifestNo = '';
+  order.pickedUpAt = null;
   await order.save();
   return shipment;
 }

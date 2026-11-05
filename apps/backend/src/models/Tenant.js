@@ -24,6 +24,7 @@ const tenantSchema = new mongoose.Schema({
     skuPrefix: { type: String, default: '' },
     storefrontUrl: { type: String, default: '' },
     inventoryAuthority: { type: String, enum: ['oms', 'shopify'], default: 'oms' },
+    warehouseLinksCustom: { type: Boolean, default: false },
     packageDefaults: {
       weightKg: { type: Number, default: 0 },
       lengthCm: { type: Number, default: 0 },

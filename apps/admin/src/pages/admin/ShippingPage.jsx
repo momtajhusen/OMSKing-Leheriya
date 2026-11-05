@@ -4,7 +4,7 @@ import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
 import { formatDate, statusBadgeVariant } from '../../utils/format';
 import { isChannelManaged, packetIdOf, openMyntraDocument, openAmazonLabel } from '../../lib/channelOrders';
-import { pickupSlotText, shipmentStatus, splitLabelOrders, trackingOf } from '../../lib/shippingStatus';
+import { canHandOver, manifestFile, pickupSlotText, shipmentStatus, splitLabelOrders, trackingOf } from '../../lib/shippingStatus';
 import { downloadCsv } from '../../lib/orderMetrics';
 import { paymentModeOf, prepaidLabelledCod } from '../../lib/labelPayment';
 import api, { apiError } from '../../lib/api';
@@ -19,7 +19,7 @@ import { ItemThumbs } from '../../components/ui/ProductThumb';
 import Modal from '../../components/ui/Modal';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
-import { Truck, Package, Download, RefreshCw, CheckCircle, AlertTriangle, CheckCircle2, RotateCcw } from 'lucide-react';
+import { Truck, Package, PackageCheck, Download, RefreshCw, CheckCircle, AlertTriangle, CheckCircle2, RotateCcw } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import Pagination, { useClientPage } from '../../components/ui/Pagination';
@@ -187,6 +187,49 @@ export default function ShippingPage() {
     toast.success(`WH-001 pickup requested for ${manifest.count} AWB${manifest.count === 1 ? '' : 's'}`);
   };
 
+  const handoverIds = shipments.filter((row) => canHandOver(row) && selectedIds.includes(row.id)).map((row) => row.id);
+
+  const handOver = async () => {
+    if (!handoverIds.length) {
+      toast.error('Select parcels in Label generated to hand over');
+      return;
+    }
+    setBusy('handover');
+    try {
+      const { data } = await api.post('/orders/handover', { orderIds: handoverIds });
+      const result = data.data || {};
+      (result.manifests || []).forEach((manifest) => {
+        const file = manifestFile(manifest);
+        downloadCsv(file.name, file.header, file.rows);
+      });
+      setSelectedIds((prev) => prev.filter((id) => !handoverIds.includes(id)));
+      await hydrateFromApi();
+      const names = (result.manifests || []).map((row) => row.manifestNo).join(', ');
+      toast.success(`${data.message}. Manifest ${names} downloaded.`);
+      if (result.skipped?.length) toast(`${result.skipped.length} skipped: ${result.skipped.map((row) => `${row.orderNo} (${row.reason})`).join(', ')}`);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not hand over'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const downloadManifest = async (manifestNo) => {
+    try {
+      const { data } = await api.get(`/orders/handover-manifests/${encodeURIComponent(manifestNo)}`);
+      const file = manifestFile(data.data);
+      downloadCsv(file.name, file.header, file.rows);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not download the manifest'));
+    }
+  };
+
+  const tabCount = (id) => {
+    if (id === 'all') return shipments.length;
+    if (id === 'exceptions') return count('Exception');
+    return count(id);
+  };
+
   const bookSelected = async () => {
     const { shopify, amazon } = splitLabelOrders(shipments, selectedIds);
     if (!shopify.length && !amazon.length) {
@@ -239,6 +282,12 @@ export default function ShippingPage() {
               Book selected labels
             </Button>
           )}
+          {can(PERMISSIONS.SHIPPING_GENERATE) && (
+            <Button variant="outline" onClick={handOver} disabled={busy === 'handover' || handoverIds.length === 0}>
+              <PackageCheck className="w-4 h-4 mr-2" />
+              Move to Ready to hand over{handoverIds.length ? ` (${handoverIds.length})` : ''}
+            </Button>
+          )}
           <Button variant="outline" onClick={exportManifest} disabled={busy === 'manifest'}>
             <Download className="w-4 h-4 mr-2" />
             Download Manifest
@@ -259,8 +308,9 @@ export default function ShippingPage() {
 
       <div className="flex items-center gap-2 flex-wrap">
         {TABS.map((tab) => (
-          <Button key={tab.id} variant={activeTab === tab.id ? 'default' : 'outline'} size="sm" onClick={() => setActiveTab(tab.id)}>
+          <Button key={tab.id} variant={activeTab === tab.id ? 'default' : 'outline'} size="sm" className="hover:translate-y-0" onClick={() => setActiveTab(tab.id)}>
             {tab.label}
+            <span className="ml-1.5 tabular-nums opacity-70">{tabCount(tab.id)}</span>
           </Button>
         ))}
       </div>
@@ -295,7 +345,7 @@ export default function ShippingPage() {
                   {paged.rows.map((row) => (
                     <TableRow key={row.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(row.id)}`)}>
                       <TableCell onClick={(event) => event.stopPropagation()}>
-                        {canLabel(row) && (
+                        {(canLabel(row) || canHandOver(row)) && (
                           <input
                             type="checkbox"
                             aria-label={`Select ${row.id}`}
@@ -336,6 +386,16 @@ export default function ShippingPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={['Exception', 'RTO'].includes(row.shipStatus) ? 'destructive' : statusBadgeVariant(row.status)}>{row.shipStatus}</Badge>
+                        {row.manifestNo && (
+                          <button
+                            type="button"
+                            className="mt-1 block font-mono text-[11px] text-primary hover:underline"
+                            title="Download this manifest again"
+                            onClick={(event) => { event.stopPropagation(); downloadManifest(row.manifestNo); }}
+                          >
+                            {row.manifestNo}
+                          </button>
+                        )}
                       </TableCell>
                       <TableCell>{row.createdAt ? formatDate(row.createdAt) : '—'}</TableCell>
                       <TableCell onClick={(event) => event.stopPropagation()}>

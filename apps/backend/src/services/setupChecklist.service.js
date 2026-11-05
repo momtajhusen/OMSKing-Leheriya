@@ -114,7 +114,7 @@ async function tenantChecklist(tenantId) {
     companyStep(tenant, legal),
     authorityStep(authority),
     taxStep(tenant),
-    warehouseStep(physical, virtual),
+    warehouseStep(physical, virtual, Boolean(tenant?.settings?.warehouseLinksCustom)),
     pickupStep(physical),
     shopifyStep(byChannel.shopify),
     locationStep(physical, virtual, maps),
@@ -250,7 +250,24 @@ function taxStep(tenant) {
   });
 }
 
-function warehouseStep(physical, virtual) {
+function warehouseStep(physical, virtual, custom = false) {
+  if (custom) {
+    const ready = Boolean(physical && physical.status === 'active' && virtual);
+    return step({
+      id: 'warehouses',
+      phase: '2',
+      phaseLabel: 'Warehouses',
+      title: 'Warehouse architecture',
+      why: 'Channel ↔ warehouse links were set by hand in Settings › Channel & warehouse, so each channel reads only the warehouses linked to it.',
+      impact: 'A channel with no linked warehouse shows no stock and reserves nothing.',
+      detail: ready ? 'Links are managed in Settings › Channel & warehouse.' : 'WH-001 must exist and be Active.',
+      clicks: ['Settings → Channel & warehouse.', 'Check every selling channel has at least one warehouse and one main warehouse.'],
+      sources: ['Links are chosen by the company admin.'],
+      done: ready,
+      actionLabel: 'Open channel & warehouse',
+      actionPath: '/settings?tab=links',
+    });
+  }
   const physicalOk = Boolean(
     physical
     && physical.type === 'physical'

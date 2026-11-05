@@ -7,6 +7,7 @@ const { successResponse, paginatedResponse } = require('../utils/response');
 const { pageOf } = require('../utils/page');
 const { merchantTenant } = require('./products.controller');
 const { toOrderDto } = require('../lib/orderDto');
+const { warehouseResolver } = require('../services/channelWarehouse.service');
 const { imagesBySku, imageForSku, paintOrder } = require('../lib/catalogImages');
 const { applyDeskRules, stockPools, OPEN } = require('../services/orderDesk.service');
 const { buildOrderSummary, customRange, dayKey } = require('../services/orderSummary.service');
@@ -107,8 +108,8 @@ function imageKeys(orders) {
 }
 
 async function presentOrders(tenantId, orders) {
-  const bySku = await imagesBySku(tenantId, imageKeys(orders));
-  const painted = (orders || []).map((order) => paintOrder(order, bySku));
+  const [bySku, shipFrom] = await Promise.all([imagesBySku(tenantId, imageKeys(orders)), warehouseResolver(tenantId)]);
+  const painted = (orders || []).map((order) => ({ ...paintOrder(order, bySku), shipWarehouse: shipFrom(order) }));
   return withScans(tenantId, painted);
 }
 
@@ -339,8 +340,14 @@ async function generateLabel(req, res) {
   const tenantId = merchantTenant(req);
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
-  if (order.channel === 'Amazon' || order.channel === 'Myntra') {
+  if (order.channel === 'Myntra') {
     throw new HttpError(400, `${order.channel} uses the marketplace courier. Print the channel label instead of a Delhivery AWB.`);
+  }
+  if (order.channel === 'Amazon') {
+    const { amazonEasyShipLabel } = require('../services/amazonLabel.service');
+    await amazonEasyShipLabel(tenantId, order.orderNo);
+    const labelled = await findMaster(tenantId, order.orderNo);
+    return successResponse(res, await decorateOne(tenantId, labelled), 'Amazon Easy Ship label made');
   }
   const subOrderId = req.body?.subOrderId || req.query.subOrderId;
   const { bookShopify, bookOtherCourier } = require('../services/ship.service');
@@ -665,6 +672,7 @@ async function patchStatus(req, res) {
     throw new HttpError(400, 'Map the SKU before this order can be packed.');
   }
   order.status = status;
+  if (status === 'Dispatched' && !order.pickedUpAt) order.pickedUpAt = new Date();
   if (status === 'Cancelled') {
     const { releaseOrderReserve } = require('../services/ship.service');
     await releaseOrderReserve(tenantId, order);
@@ -878,6 +886,35 @@ async function closeManifest(req, res) {
   return successResponse(res, manifest, `Pickup requested for ${manifest.count} AWB${manifest.count === 1 ? '' : 's'} at WH-001`);
 }
 
+async function handOver(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const { handOver: run } = require('../services/handover.service');
+  const data = await run(tenantId, req.user?.id, req.body?.orderIds);
+  const moved = data.manifests.reduce((sum, row) => sum + row.count, 0);
+  await recordFromReq(req, {
+    tenantId,
+    action: 'order.handover',
+    resourceType: 'orders',
+    resourceDisplay: data.manifests.map((row) => row.manifestNo).join(', '),
+    before: null,
+    after: { manifests: data.manifests.map((row) => ({ manifestNo: row.manifestNo, count: row.count })) },
+  });
+  return successResponse(res, data, `${moved} parcel${moved === 1 ? '' : 's'} moved to Ready to hand over`);
+}
+
+async function handoverManifests(req, res) {
+  staffOnly(req);
+  const { listManifests } = require('../services/handover.service');
+  return successResponse(res, await listManifests(merchantTenant(req), { limit: req.query.limit }), 'Handover manifests');
+}
+
+async function handoverManifest(req, res) {
+  staffOnly(req);
+  const { getManifest } = require('../services/handover.service');
+  return successResponse(res, await getManifest(merchantTenant(req), req.params.manifestNo), 'Handover manifest');
+}
+
 function manifestDay(raw) {
   const text = String(raw || '');
   const day = /^\d{4}-\d{2}-\d{2}$/.test(text)
@@ -966,5 +1003,5 @@ async function amazonLabel(req, res) {
 }
 
 module.exports = {
-  listOrders, orderSummary, getOrder, getCustomerHistory, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, lineCost, saveLineCost, vendorUpdate, patchStatus, editOrderDetails, updateNotes, updateItemPackage, mapItemSku, bookReverse, bookBulkLabels, bookAmazonLabels, amazonLabel, shipOrder, closeManifest, courierManifests, shippingReadiness, courierRates,
+  listOrders, orderSummary, getOrder, getCustomerHistory, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, lineCost, saveLineCost, vendorUpdate, patchStatus, editOrderDetails, updateNotes, updateItemPackage, mapItemSku, bookReverse, bookBulkLabels, bookAmazonLabels, amazonLabel, shipOrder, closeManifest, courierManifests, shippingReadiness, courierRates, handOver, handoverManifests, handoverManifest,
 };

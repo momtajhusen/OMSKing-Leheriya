@@ -18,7 +18,8 @@ function channelsOf(warehouse) {
   return channelIds().filter((id) => sellsOn(warehouse, id));
 }
 
-function mapWarehouse(row, locations = []) {
+function mapWarehouse(row, locations = [], custom = false) {
+  const linked = channelIds().filter((id) => locations.some((loc) => loc.channel === id));
   return {
     id: String(row._id),
     code: row.code,
@@ -28,7 +29,7 @@ function mapWarehouse(row, locations = []) {
     sellOnShopify: row.sellOnShopify,
     sellOnAmazon: row.sellOnAmazon,
     sellOnMyntra: row.sellOnMyntra,
-    channels: channelsOf(row),
+    channels: custom ? (row.status === 'inactive' ? [] : linked) : channelsOf(row),
     isPickup: row.isPickup,
     address: row.address || {},
     contactPerson: row.contactPerson || '',
@@ -57,7 +58,17 @@ async function findOrCreate(Model, filter, doc) {
   }
 }
 
+/** True once an admin has edited channel ↔ warehouse links in Settings; the WH-001/WH-002 defaults are then no longer forced. */
+async function linksCustom(tenantId) {
+  const tenant = await Tenant.findById(tenantId).select('settings.warehouseLinksCustom').lean();
+  return Boolean(tenant?.settings?.warehouseLinksCustom);
+}
+
 async function ensureDefaultWarehouses(tenantId) {
+  if (await linksCustom(tenantId)) {
+    const [physical, virtual] = await Promise.all(['WH-001', 'WH-002'].map((code) => Warehouse.findOne({ tenantId, code }).setOptions({ skipTenantFilter: true })));
+    return { physical, virtual };
+  }
   const physical = await findOrCreate(
     Warehouse,
     { tenantId, code: 'WH-001' },
@@ -149,7 +160,8 @@ async function listWarehouses(tenantId) {
     byWh[key] = byWh[key] || [];
     byWh[key].push(loc);
   });
-  return rows.map((row) => mapWarehouse(row, byWh[String(row._id)] || []));
+  const custom = await linksCustom(tenantId);
+  return rows.map((row) => mapWarehouse(row, byWh[String(row._id)] || [], custom));
 }
 
 async function createWarehouse(tenantId, body) {
@@ -195,13 +207,16 @@ async function updateWarehouse(tenantId, id, body) {
   }
   await row.save();
   const locations = await WarehouseLocationMap.find({ tenantId, warehouseId: row._id }).setOptions({ skipTenantFilter: true });
-  return mapWarehouse(row, locations);
+  return mapWarehouse(row, locations, await linksCustom(tenantId));
 }
 
 async function warehousesForChannel(tenantId, channel) {
   await ensureDefaultWarehouses(tenantId);
   const rows = await Warehouse.find({ tenantId, status: 'active' }).sort({ isDefault: -1, code: 1 }).setOptions({ skipTenantFilter: true });
-  return rows.filter((row) => sellsOn(row, channel));
+  if (!(await linksCustom(tenantId))) return rows.filter((row) => sellsOn(row, channel));
+  const linked = await WarehouseLocationMap.distinct('warehouseId', { tenantId, channel }).setOptions({ skipTenantFilter: true });
+  const ids = new Set(linked.map(String));
+  return rows.filter((row) => ids.has(String(row._id)));
 }
 
 async function getInventoryAuthority(tenantId) {
@@ -228,6 +243,7 @@ module.exports = {
   sellsOn,
   mapWarehouse,
   ensureDefaultWarehouses,
+  linksCustom,
   listWarehouses,
   createWarehouse,
   updateWarehouse,
