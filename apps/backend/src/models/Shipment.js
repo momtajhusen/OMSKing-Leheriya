@@ -15,6 +15,7 @@ const shipmentSchema = new mongoose.Schema({
   reserveReleased: { type: Boolean, default: false },
   bookedAt: { type: Date },
   cancelledAt: { type: Date },
+  courierCancelledAt: { type: Date, default: null },
   pickupRequestedAt: { type: Date, default: null },
   deliveryStatus: { type: String, default: '' },
   trackingEvents: {

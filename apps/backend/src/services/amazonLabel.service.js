@@ -126,7 +126,7 @@ async function amazonBulkLabels(tenantId, orderNos, deps = {}) {
  */
 async function cancelAmazonLabel(tenantId, orderNo) {
   const order = await amazonOrder(tenantId, orderNo);
-  if (['Dispatched', 'Delivered'].includes(order.status)) throw refuse('Amazon already picked up this order. The label cannot be cancelled.');
+  if (['Dispatched', 'Delivered'].includes(order.status) || order.pickedUpAt) throw refuse('Amazon already picked up this order. The label cannot be cancelled.');
   const shipment = await bookedLabel(tenantId, order.orderNo);
   if (!shipment) throw new HttpError(400, 'This order has no Amazon label to cancel.');
   shipment.status = 'cancelled';

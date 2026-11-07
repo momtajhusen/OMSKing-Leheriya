@@ -20,16 +20,143 @@ export function dayKey(value) {
   return local.toISOString().slice(0, 10);
 }
 
-/** Order value excluding cancelled orders. */
-export function netSales(orders) {
-  return orders.filter((order) => !isCancelled(order)).reduce((sum, order) => sum + (Number(order.total) || 0), 0);
+const IST_MS = 330 * 60 * 1000;
+const ON_THE_WAY = ['Dispatched', 'In transit'];
+
+/** YYYY-MM-DD of the instant on the Asia/Kolkata calendar; a plain YYYY-MM-DD is kept as it is. */
+export function istDate(value) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return String(value);
+  const time = value ? new Date(value).getTime() : NaN;
+  return Number.isFinite(time) ? new Date(time + IST_MS).toISOString().slice(0, 10) : '';
 }
 
-export function salesByChannel(orders, channels = CHANNELS) {
+export function istMonth(value) {
+  return istDate(value).slice(0, 7);
+}
+
+/** Same rule as the backend (lib/orderTabs.js): an RTO status, or an RTO code on the order or a channel line. */
+export function isRto(order) {
+  if (/^rto\b|returned to origin/i.test(String(order?.status || ''))) return true;
+  const codes = `${order?.channelStatus || ''} ${(order?.channelLines || []).map((line) => line.status || '').join(' ')}`;
+  return codes.toUpperCase().includes('RTO');
+}
+
+/** Pickup & Manifest plus In Transit on the Orders list. */
+export function onTheWay(order) {
+  return ON_THE_WAY.includes(order.status) && !isRto(order);
+}
+
+function paise(value) {
+  return Math.round((Number(value) || 0) * 100);
+}
+
+/** Money total summed in paise and rounded once. */
+export function sumMoney(values) {
+  return (values || []).reduce((sum, value) => sum + paise(value), 0) / 100;
+}
+
+/** order id -> refunded amount, from GET /returns rows with refundStatus 'refunded'. */
+export function refundsByOrder(returns) {
+  const refunds = new Map();
+  (returns || [])
+    .filter((row) => row.refundStatus === 'refunded')
+    .forEach((row) => refunds.set(row.orderId, sumMoney([refunds.get(row.orderId), row.refundAmount])));
+  return refunds;
+}
+
+/** Booked order value excluding cancelled orders. */
+export function grossSales(orders) {
+  return sumMoney(orders.filter((order) => !isCancelled(order)).map((order) => order.total));
+}
+
+/** Same rule as the backend summary: order value excluding Cancelled and RTO orders, minus refunded returns. */
+export function netSales(orders, refunds = new Map()) {
+  return orders
+    .filter((order) => !isCancelled(order) && !isRto(order))
+    .reduce((sum, order) => {
+      const total = paise(order.total);
+      return sum + total - Math.min(paise(refunds.get(order.id)), Math.max(total, 0));
+    }, 0) / 100;
+}
+
+export function salesByChannel(orders, channels = CHANNELS, refunds = new Map()) {
   return channels.map((channel) => {
     const rows = orders.filter((order) => order.channel === channel);
-    return { channel, orders: rows.length, revenue: netSales(rows) };
+    return { channel, orders: rows.length, revenue: netSales(rows, refunds) };
   });
+}
+
+function trackingOf(order) {
+  return order.awb || (order.channelLines || []).find((line) => line.trackingNumber)?.trackingNumber || '';
+}
+
+/** Shipping report over orders with a tracking number, using the Orders list shipping tabs. */
+export function shippingStats(orders) {
+  const shipped = orders.filter((order) => trackingOf(order));
+  const couriers = {};
+  shipped.forEach((order) => {
+    const name = order.courier || `${order.channel} logistics`;
+    couriers[name] = couriers[name] || { courier: name, shipments: 0, delivered: 0, cancelled: 0 };
+    couriers[name].shipments += 1;
+    if (order.status === 'Delivered' && !isRto(order)) couriers[name].delivered += 1;
+    if (order.status === 'Cancelled') couriers[name].cancelled += 1;
+  });
+  return {
+    total: shipped.length,
+    delivered: shipped.filter((order) => order.status === 'Delivered' && !isRto(order)).length,
+    inTransit: shipped.filter(onTheWay).length,
+    cancelledAfterDispatch: shipped.filter(isCancelled).length,
+    rto: shipped.filter(isRto).length,
+    couriers: Object.values(couriers).sort((a, b) => b.shipments - a.shipments),
+  };
+}
+
+const DEAD_LINE = /^(cancel+ed|rejected)$/i;
+
+/** Vendor sub-order lines for reports, without cancelled / rejected lines or lines of cancelled orders. */
+export function vendorReportLines(orders, labelOf = (name) => name) {
+  return orders
+    .filter((order) => !isCancelled(order))
+    .flatMap((order) => (order.subOrders || [])
+      .filter((sub) => sub.assignedVendor && !DEAD_LINE.test(sub.status || '') && !DEAD_LINE.test(sub.vendorStatus || ''))
+      .map((sub) => ({ order, sub, vendor: labelOf(sub.assignedVendor), month: istMonth(sub.assignedDate || order.createdAt) })));
+}
+
+/** Refund for a customer return: refundAmount, else the return line value, else the order value. */
+function customerRefund(order, returns) {
+  const mine = (returns || []).filter((row) => row.orderId === order.id && row.kind !== 'rto');
+  const refunded = sumMoney(mine.map((row) => row.refundAmount));
+  if (refunded > 0) return refunded;
+  const value = sumMoney(mine.map((row) => row.amount));
+  return value > 0 ? value : Number(order.total) || 0;
+}
+
+/** Returns & refunds reconciliation rows: customer returns, cancellations and RTO orders (even still on Dispatched). */
+export function refundRows(orders, workflow, returns) {
+  return orders.flatMap((order) => {
+    if (order.reversePickup?.returnId) {
+      const state = workflow[order.reversePickup.returnId] || {};
+      return [{
+        key: order.reversePickup.returnId,
+        order,
+        kind: 'Customer return',
+        shipped: true,
+        received: state.status === 'Completed',
+        refund: customerRefund(order, returns),
+      }];
+    }
+    if (!isCancelled(order) && !isRto(order)) return [];
+    const shipped = Boolean(trackingOf(order)) || isRto(order);
+    const state = workflow[`RTO-${order.id}`] || {};
+    return [{
+      key: order.id,
+      order,
+      kind: shipped ? 'Cancelled after dispatch (RTO)' : 'Cancelled before dispatch',
+      shipped,
+      received: !shipped || state.status === 'QC Complete',
+      refund: order.paymentMode === 'COD' ? 0 : Number(order.total) || 0,
+    }];
+  }).sort((a, b) => orderTime(b.order) - orderTime(a.order));
 }
 
 export function statusCounts(orders) {

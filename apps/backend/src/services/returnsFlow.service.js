@@ -80,9 +80,25 @@ function withReturnImage(item, bySku) {
   return imageUrl ? { ...plain, imageUrl } : plain;
 }
 
+/** Each returned unit is priced from the order line it came from; two lines with one SKU keep their own prices. */
 function returnAmount(row, order) {
-  const priceBySku = new Map((order?.items || []).map((item) => [item.sku, Number(item.price) || 0]));
-  return (row.items || []).reduce((sum, item) => sum + (priceBySku.get(item.sku) || 0) * (Number(item.qty) || 1), 0);
+  const left = (order?.items || []).map((item) => ({
+    sku: item.sku, pricePaise: Math.round((Number(item.price) || 0) * 100), qty: Math.max(0, Number(item.qty) || 1),
+  }));
+  const paise = (row.items || []).reduce((sum, item) => {
+    let want = Math.max(0, Number(item.qty) || 1);
+    let value = 0;
+    for (const line of left) {
+      if (!want) break;
+      if (line.sku !== item.sku || !line.qty) continue;
+      const take = Math.min(want, line.qty);
+      value += take * line.pricePaise;
+      line.qty -= take;
+      want -= take;
+    }
+    return sum + value;
+  }, 0);
+  return paise / 100;
 }
 
 async function listReturns(tenantId) {
@@ -92,7 +108,7 @@ async function listReturns(tenantId) {
   ]);
   const orderNos = [...new Set(rows.map((row) => row.orderNo).filter(Boolean))];
   const orders = orderNos.length
-    ? await skip(Order.find({ tenantId, orderNo: { $in: orderNos } }).select('orderNo items.sku items.price').lean())
+    ? await skip(Order.find({ tenantId, orderNo: { $in: orderNos } }).select('orderNo items.sku items.price items.qty').lean())
     : [];
   const orderByNo = new Map(orders.map((order) => [order.orderNo, order]));
   return rows.map((row) => ({
@@ -157,23 +173,51 @@ async function approveReturn(tenantId, returnNo, deps = {}) {
   return row;
 }
 
-async function receiveReturn(tenantId, userId, returnNo, { destination = 'All', action = 'restock', qcNote = '' } = {}) {
-  const row = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
-  if (!row) throw new HttpError(404, 'Return not found');
-  if (row.status === 'Pending') throw new HttpError(400, 'Approve the return before receiving it');
-  if (row.status === 'Completed') return { row, restock: null };
-  const order = row.orderNo ? await skip(Order.findOne({ tenantId, orderNo: row.orderNo })) : null;
-  let restock = null;
-  // RTO already put the piece back. A later Return Received must not add it again.
-  if (!order?.rtoRestockedAt && action === 'restock' && String(destination).toLowerCase() !== 'none') {
-    restock = await restockReturn(tenantId, userId, {
-      items: row.items,
-      referenceId: row.returnNo,
-      reason: `Return ${row.returnNo} received`,
-      destination,
-      movementType: 'return_restock',
-    });
+const RECEIVE_LOCK_MS = 5 * 60 * 1000;
+
+async function restockAgainstOrder(tenantId, userId, order, { items, referenceId, reason, destination, warehouseCode }) {
+  const { restockRoom, capToRoom } = require('./orderReserve.service');
+  const room = order ? await restockRoom(tenantId, order, [referenceId]) : new Map();
+  const capped = await capToRoom(tenantId, items, room);
+  if (capped.unmapped.length) {
+    throw new HttpError(400, `Map ${capped.unmapped.join(', ')} on SKU Mapping before restocking this return.`);
   }
+  if (!capped.items.length) return { warehouse: '', channels: [], posted: [], skipped: [], nothingLeft: true };
+  return restockReturn(tenantId, userId, {
+    items: capped.items, referenceId, reason, destination, warehouseCode, movementType: 'return_restock',
+  });
+}
+
+async function receiveReturn(tenantId, userId, returnNo, { destination = 'All', action = 'restock', qcNote = '' } = {}) {
+  const found = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
+  if (!found) throw new HttpError(404, 'Return not found');
+  if (found.status === 'Completed') return { row: found, restock: null };
+  if (found.status === 'Pending') throw new HttpError(400, 'Approve the return before receiving it');
+  if (found.status !== 'Approved') throw new HttpError(400, 'This return was rejected and cannot be received');
+  const now = new Date();
+  const row = await skip(CustomerReturn.findOneAndUpdate(
+    { tenantId, returnNo, status: 'Approved', $or: [{ receivingAt: null }, { receivingAt: { $lt: new Date(now.getTime() - RECEIVE_LOCK_MS) } }] },
+    { $set: { receivingAt: now } },
+    { new: true },
+  ));
+  if (!row) {
+    const fresh = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
+    if (fresh?.status === 'Completed') return { row: fresh, restock: null };
+    throw new HttpError(409, 'This return is already being received');
+  }
+  let restock = null;
+  try {
+    if (action === 'restock' && String(destination).toLowerCase() !== 'none') {
+      const order = row.orderNo ? await skip(Order.findOne({ tenantId, orderNo: row.orderNo })) : null;
+      restock = await restockAgainstOrder(tenantId, userId, order, {
+        items: row.items, referenceId: row.returnNo, reason: `Return ${row.returnNo} received`, destination,
+      });
+    }
+  } catch (err) {
+    await skip(CustomerReturn.updateOne({ tenantId, returnNo, receivingAt: now }, { $set: { receivingAt: null } }));
+    throw err;
+  }
+  row.receivingAt = null;
   row.status = 'Completed';
   row.restockDestination = destination;
   row.qcStatus = action === 'damaged' ? 'fail' : action === 'hold' ? 'hold' : 'pass';
@@ -219,10 +263,44 @@ async function updateRefund(tenantId, returnNo, { status, amount } = {}) {
   const row = await skip(CustomerReturn.findOne({ tenantId, returnNo }));
   if (!row) throw new HttpError(404, 'Return not found');
   if (!REFUND_STATUSES.includes(status)) throw new HttpError(400, 'Unknown refund status');
+  if (row.refundStatus === 'refunded' && status !== 'refunded') throw new HttpError(400, 'This return is already refunded.');
+  if (amount !== undefined || status === 'refunded') {
+    const value = amount !== undefined ? Math.max(0, Number(amount) || 0) : Number(row.refundAmount) || 0;
+    const order = row.orderNo ? await skip(Order.findOne({ tenantId, orderNo: row.orderNo }).lean()) : null;
+    const orderTotal = returnAmount({ items: order?.items || [] }, order);
+    if (orderTotal > 0) {
+      const others = await skip(CustomerReturn.find({
+        tenantId, orderNo: row.orderNo, returnNo: { $ne: returnNo }, refundStatus: { $ne: 'rejected' }, status: { $ne: 'Rejected' },
+      }).lean());
+      const promisedPaise = others.reduce((sum, other) => sum + Math.round((Number(other.refundAmount) || 0) * 100), 0);
+      const limit = Math.max(0, Math.min(returnAmount(row, order), (Math.round(orderTotal * 100) - promisedPaise) / 100));
+      if (value > limit) throw new HttpError(400, `Refund can't be more than ₹${limit} for this return.`);
+    }
+    if (amount !== undefined) row.refundAmount = value;
+  }
   row.refundStatus = status;
-  if (amount !== undefined) row.refundAmount = Math.max(0, Number(amount) || 0);
   await row.save();
   return row;
+}
+
+/** Manual restock from the RTO and reverse-pickup screens: always tied to an order and capped by what left. */
+async function restockOrderReturn(tenantId, userId, { orderNo, referenceId, items, destination, movementType, warehouseCode, reason } = {}) {
+  const no = String(orderNo || '').trim();
+  if (!no) throw new HttpError(400, 'Pick the order this restock belongs to.');
+  const order = await skip(Order.findOne({ tenantId, orderNo: no }));
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (movementType === 'rto_restock') {
+    const { restockRtoOnce } = require('./orderReserve.service');
+    const result = await restockRtoOnce(tenantId, order, { destination: destination || 'All', userId });
+    return result || { warehouse: '', channels: [], posted: [], skipped: [], nothingLeft: true };
+  }
+  const ref = String(referenceId || '').trim() || no;
+  if (await skip(CustomerReturn.exists({ tenantId, returnNo: ref }))) {
+    throw new HttpError(400, 'Receive this return from the Returns page.');
+  }
+  return restockAgainstOrder(tenantId, userId, order, {
+    items: Array.isArray(items) ? items : [], referenceId: ref, reason: reason || `Return ${ref} received`, destination, warehouseCode,
+  });
 }
 
 module.exports = {
@@ -232,4 +310,5 @@ module.exports = {
   listReturns,
   approveReturn,
   receiveReturn,
+  restockOrderReturn,
 };

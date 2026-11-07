@@ -78,7 +78,9 @@ function toOrderDto(doc) {
     createdAt: order.orderDate || order.createdAt,
     courier: order.courier || '',
     awb: order.awb || '',
-    invoiceNo: order.channel === 'Shopify' ? invoiceNumber(order) : (order.invoiceNo || ''),
+    invoiceNo: order.channel === 'Shopify'
+      ? (order.invoiceGeneratedAt || order.invoiceNo ? invoiceNumber(order) : '')
+      : (order.invoiceNo || ''),
     labelGeneratedAt: order.labelGeneratedAt || null,
     handoverAt: order.handoverAt || null,
     manifestNo: order.manifestNo || '',
@@ -91,6 +93,8 @@ function toOrderDto(doc) {
       handover: order.easyShip.handover || '',
     } : null,
     invoiceGeneratedAt: order.invoiceGeneratedAt || null,
+    creditNoteGeneratedAt: order.creditNoteGeneratedAt || null,
+    shippingCharge: order.shippingCharge || 0,
     reversePickup: order.reversePickup || null,
     source: order.source || 'demo',
     externalOrderId: order.externalOrderId || '',

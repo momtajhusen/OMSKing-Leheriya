@@ -83,6 +83,7 @@ export default function RtoPage() {
     try {
       if (destination !== 'None') {
         await api.post('/returns/approve-restock', {
+          orderNo: row.order.id,
           returnId: row.id,
           referenceId: row.id,
           destination,

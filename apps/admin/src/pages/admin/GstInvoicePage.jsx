@@ -5,8 +5,10 @@ import api from '../../lib/api';
 import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate } from '../../utils/format';
 import { isChannelManaged, packetIdOf, openMyntraDocument } from '../../lib/channelOrders';
+import { channelIssuesInvoice } from '../../lib/channelInvoice';
 import { downloadPdfBase64 } from '../../lib/orderPrint';
-import { lineTax, downloadCsv, isCancelled } from '../../lib/orderMetrics';
+import { downloadCsv, istDate } from '../../lib/orderMetrics';
+import { lineTax, registerGroups, registerTotals } from '../../lib/gstRegister';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -23,34 +25,8 @@ const TABS = [
   { id: 'notes', label: 'Credit notes needed' },
 ];
 
-function invoiceNoOf(order) {
-  return order.invoiceNo || (order.channelLines || []).find((line) => line.invoiceNumber)?.invoiceNumber || '';
-}
-
-function cleanState(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z]/g, '');
-}
-
-function shipStateOf(order) {
-  if (order.shipState) return order.shipState;
-  const parts = String(order.city || '').split(',').map((part) => part.replace(/\b\d{6}\b/, '').trim()).filter(Boolean);
-  return parts.length > 1 ? parts[parts.length - 1] : '';
-}
-
-function orderTax(order, warehouseState) {
-  const intraState = Boolean(cleanState(warehouseState)) && cleanState(warehouseState) === cleanState(shipStateOf(order));
-  return (order.items || []).reduce((acc, item) => {
-    const tax = lineTax(item, { intraState });
-    acc.taxable += tax.taxable;
-    acc.cgst += tax.cgst;
-    acc.sgst += tax.sgst;
-    acc.igst += tax.igst;
-    acc.gst += tax.cgst + tax.sgst + tax.igst;
-    acc.gross += tax.gross;
-    acc.intraState = intraState;
-    return acc;
-  }, { taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0, gross: 0, intraState });
-}
+const money = (value) => Number(value || 0).toFixed(2);
+const inr2 = (value) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
 export default function GstInvoicePage() {
   const navigate = useNavigate();
@@ -59,40 +35,30 @@ export default function GstInvoicePage() {
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const generateInvoice = useOrderStore((s) => s.generateInvoice);
   const [company, setCompany] = useState(null);
-  const [warehouseState, setWarehouseState] = useState('');
+  const [warehouses, setWarehouses] = useState([]);
   const [tab, setTab] = useState('invoiced');
   const [busy, setBusy] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
 
   useEffect(() => {
     hydrateFromApi();
     api.get('/settings/company').then(({ data }) => setCompany(data.data)).catch(() => setCompany(null));
     api.get('/warehouses').then(({ data }) => {
-      const list = Array.isArray(data.data) ? data.data : (data.data?.warehouses || []);
-      const home = list.find((row) => row.code === 'WH-001');
-      setWarehouseState(home?.address?.state || '');
-    }).catch(() => setWarehouseState(''));
+      setWarehouses(Array.isArray(data.data) ? data.data : (data.data?.warehouses || []));
+    }).catch(() => setWarehouses([]));
   }, [hydrateFromApi]);
 
-  const rows = useMemo(() => orders.map((order) => ({
-    order,
-    invoiceNo: invoiceNoOf(order),
-    tax: orderTax(order, warehouseState),
-    creditNote: (isCancelled(order) || order.reversePickup?.returnId || order.channelStatus === 'RTO') && (order.invoiceNo || order.channel === 'Shopify')
-      ? `CN-${order.invoiceNo || order.externalOrderId || order.id}`
-      : '',
-  })).sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt))), [orders, warehouseState]);
-
-  const groups = useMemo(() => ({
-    invoiced: rows.filter((row) => row.invoiceNo && !isCancelled(row.order)),
-    pending: rows.filter((row) => !row.invoiceNo && ['Dispatched', 'Delivered'].includes(row.order.status)),
-    notes: rows.filter((row) => row.creditNote),
-  }), [rows]);
+  const gstin = company?.gstin || '';
+  const warehouseState = warehouses.find((row) => row.code === 'WH-001')?.address?.state || '';
+  const groups = useMemo(() => registerGroups(orders, { warehouses, gstin, from, to }), [orders, warehouses, gstin, from, to]);
 
   const hsnSummary = useMemo(() => {
     const map = new Map();
     groups.invoiced.forEach(({ order, tax: orderTaxRow }) => (order.items || []).forEach((item) => {
       const key = `${item.hsn || '—'}|${item.gst ?? '—'}`;
-      const tax = lineTax(item, { intraState: orderTaxRow.intraState });
+      const tax = lineTax(item, orderTaxRow);
+      if (tax.rateMissing) return;
       const row = map.get(key) || { hsn: item.hsn || '—', rate: item.gst, qty: 0, taxable: 0, gst: 0 };
       row.qty += Number(item.qty) || 1;
       row.taxable += tax.taxable;
@@ -105,10 +71,7 @@ export default function GstInvoicePage() {
     return [...map.values()].sort((a, b) => b.taxable - a.taxable);
   }, [groups.invoiced]);
 
-  const totals = groups.invoiced.reduce((acc, row) => ({
-    taxable: acc.taxable + row.tax.taxable,
-    gst: acc.gst + row.tax.gst,
-  }), { taxable: 0, gst: 0 });
+  const totals = registerTotals(groups.invoiced);
 
   const invoiceNote = (email) => {
     if (email?.emailed) return 'PDF opened and emailed from the company mailbox.';
@@ -146,12 +109,13 @@ export default function GstInvoicePage() {
       toast.error('Nothing to export in this tab');
       return;
     }
-    const lines = list.flatMap(({ order, invoiceNo, tax: orderTaxRow }) => (order.items || []).map((item) => {
-      const tax = lineTax(item, { intraState: orderTaxRow.intraState });
-      return [invoiceNo, order.createdAt ? String(order.createdAt).slice(0, 10) : '', order.id, order.channel,
-        item.sku, item.name, item.hsn || '', item.gst ?? '', item.qty, tax.taxable.toFixed(2), tax.cgst.toFixed(2), tax.sgst.toFixed(2), tax.igst.toFixed(2), tax.gross.toFixed(2)];
+    const lines = list.flatMap(({ order, invoiceNo, date, tax: orderTaxRow }) => (order.items || []).map((item) => {
+      const tax = lineTax(item, orderTaxRow);
+      return [invoiceNo, date, order.id, order.channel,
+        item.sku, item.name, item.hsn || '', tax.rateMissing ? 'Rate missing' : tax.rate, item.qty,
+        money(tax.taxable), money(tax.cgst), money(tax.sgst), money(tax.igst), money(tax.gross)];
     }));
-    downloadCsv(`gst-${tab}-${new Date().toISOString().slice(0, 10)}.csv`,
+    downloadCsv(`gst-${tab}-${istDate(new Date())}.csv`,
       ['Invoice No', 'Date', 'Order', 'Channel', 'SKU', 'Item', 'HSN', 'GST %', 'Qty', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'], lines);
     toast.success(`${lines.length} invoice lines exported`);
   };
@@ -171,19 +135,23 @@ export default function GstInvoicePage() {
           </p>
         </div>
         <Button variant="outline" onClick={() => {
-          const lines = groups.invoiced.flatMap(({ order, invoiceNo, tax }) => (order.items || []).map((item) => {
-            const row = lineTax(item, { intraState: tax.intraState });
-            return ['Sales', invoiceNo, order.id, row.taxable.toFixed(2), row.cgst.toFixed(2), row.sgst.toFixed(2), row.igst.toFixed(2), row.gross.toFixed(2)];
-          })).concat(groups.notes.map(({ order, creditNote, tax }) => (
-            ['Credit Note', creditNote, order.id, (-tax.taxable).toFixed(2), (-tax.cgst).toFixed(2), (-tax.sgst).toFixed(2), (-tax.igst).toFixed(2), (-tax.gross).toFixed(2)]
+          const ready = (row) => !row.tax.rateMissing;
+          const skipped = groups.invoiced.filter((row) => !ready(row)).length + groups.notes.filter((row) => !ready(row)).length;
+          const lines = groups.invoiced.filter(ready).flatMap(({ order, invoiceNo, date, tax }) => (order.items || []).map((item) => {
+            const row = lineTax(item, tax);
+            return ['Sales', invoiceNo, date, order.id, money(row.taxable), money(row.cgst), money(row.sgst), money(row.igst), money(row.gross)];
+          })).concat(groups.notes.filter(ready).map(({ order, creditNote, date, tax }) => (
+            ['Credit Note', creditNote, date, order.id, money(-tax.taxable), money(-tax.cgst), money(-tax.sgst), money(-tax.igst), money(-tax.gross)]
           )));
           if (!lines.length) {
             toast.error('Nothing to export for Tally');
             return;
           }
-          downloadCsv(`tally-gst-${new Date().toISOString().slice(0, 10)}.csv`,
-            ['Voucher', 'Number', 'Order', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'], lines);
-          toast.success('Tally CSV downloaded. This is a file export, not a Tally API.');
+          downloadCsv(`tally-gst-${from || 'start'}-to-${to || istDate(new Date()).slice(0, 7)}.csv`,
+            ['Voucher', 'Number', 'Date', 'Order', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'], lines);
+          toast.success(skipped
+            ? `Tally CSV downloaded. ${skipped} invoice(s) left out: Rate missing. Set the GST % and export again.`
+            : 'Tally CSV downloaded. This is a file export, not a Tally API.');
         }}>
           <Download className="w-4 h-4 mr-2" />
           Tally export
@@ -194,10 +162,24 @@ export default function GstInvoicePage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="flex items-end gap-3 flex-wrap text-sm">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">From month</span>
+          <input type="month" className="border rounded-md px-2 py-1 bg-background" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">To month</span>
+          <input type="month" className="border rounded-md px-2 py-1 bg-background" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        {(from || to) && <Button variant="ghost" size="sm" onClick={() => { setFrom(''); setTo(''); }}>All months</Button>}
+        <span className="text-muted-foreground">Dates are the invoice date in India time; the exports follow this filter.</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <KpiCard label="Tax invoices" value={groups.invoiced.length} icon={Receipt} onClick={() => setTab('invoiced')} />
         <KpiCard label="Taxable value" value={formatINR(Math.round(totals.taxable))} icon={FileText} />
         <KpiCard label="GST" value={formatINR(Math.round(totals.gst))} icon={FileText} />
+        <KpiCard label="Rate missing" value={totals.rateMissing} icon={AlertTriangle} />
         <KpiCard label="Credit notes needed" value={groups.notes.length} icon={AlertTriangle} onClick={() => setTab('notes')} />
       </div>
 
@@ -230,7 +212,7 @@ export default function GstInvoicePage() {
       <Card>
         <CardHeader>
           <CardTitle>{TABS.find((item) => item.id === tab).label}</CardTitle>
-          {tab === 'notes' && <CardDescription>These orders were cancelled after the invoice was issued. Issue a credit note — never delete the original invoice. Marketplace orders get the note from the marketplace.</CardDescription>}
+          {tab === 'notes' && <CardDescription>OMS invoices that were issued and then cancelled, returned or sent back (RTO). Issue a credit note — never delete the original invoice. Marketplace orders get the note from the marketplace, so they are not listed.</CardDescription>}
         </CardHeader>
         <CardContent>
           {list.length === 0 ? (
@@ -255,23 +237,29 @@ export default function GstInvoicePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paged.rows.map(({ order, invoiceNo, tax, creditNote }) => (
+                  {paged.rows.map(({ order, invoiceNo, date, tax, creditNote }) => (
                     <TableRow key={order.id}>
                       <TableCell className="font-medium font-mono text-xs">{invoiceNo || '—'}</TableCell>
-                      <TableCell>{order.createdAt ? formatDate(order.createdAt) : '—'}</TableCell>
+                      <TableCell>{date ? formatDate(date) : '—'}</TableCell>
                       <TableCell>
                         <button type="button" className="text-primary hover:underline" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>{order.id}</button>
                       </TableCell>
                       <TableCell><Badge variant="outline">{order.channel}</Badge></TableCell>
                       <TableCell>{order.customer}</TableCell>
-                      <TableCell className="text-right">{formatINR(Math.round(tax.taxable))}</TableCell>
-                      <TableCell className="text-right">{formatINR(Math.round(tax.cgst))}</TableCell>
-                      <TableCell className="text-right">{formatINR(Math.round(tax.sgst))}</TableCell>
-                      <TableCell className="text-right">{formatINR(Math.round(tax.igst))}</TableCell>
+                      {tax.rateMissing ? (
+                        <TableCell colSpan={4} className="text-right text-destructive">Rate missing: set the GST % on the SKU</TableCell>
+                      ) : (
+                        <>
+                          <TableCell className="text-right">{inr2(tax.taxable)}</TableCell>
+                          <TableCell className="text-right">{inr2(tax.cgst)}</TableCell>
+                          <TableCell className="text-right">{inr2(tax.sgst)}</TableCell>
+                          <TableCell className="text-right">{inr2(tax.igst)}</TableCell>
+                        </>
+                      )}
                       {tab === 'notes' && <TableCell className="font-mono text-xs">{creditNote}</TableCell>}
-                      <TableCell className="text-right font-medium">{formatINR(order.total)}</TableCell>
+                      <TableCell className="text-right font-medium">{inr2(tax.gross)}</TableCell>
                       <TableCell>
-                        {(isChannelManaged(order) ? packetIdOf(order) : true) && (
+                        {(isChannelManaged(order) ? packetIdOf(order) : !channelIssuesInvoice(order)) && (
                           <div className="flex gap-1 justify-end">
                             <Button variant="ghost" size="sm" disabled={busy === order.id} onClick={() => openInvoice(order)}>
                               {isChannelManaged(order) ? `${order.channel} invoice` : tab === 'notes' ? 'Credit note PDF' : 'PDF'}

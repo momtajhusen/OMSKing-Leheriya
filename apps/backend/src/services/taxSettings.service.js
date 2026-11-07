@@ -6,8 +6,8 @@ const { HttpError } = require('../utils/httpError');
 const DEFAULT_TAX = {
   defaultGstRate: 18,
   categories: [
-    { name: 'Clothing (Below ₹1000)', gstRate: 5 },
-    { name: 'Clothing (Above ₹1000)', gstRate: 12 },
+    { name: 'Apparel (up to ₹2500 per piece)', gstRate: 5 },
+    { name: 'Apparel (above ₹2500 per piece)', gstRate: 18 },
     { name: 'Premium Textiles', gstRate: 18 },
   ],
   hsnMaster: [],

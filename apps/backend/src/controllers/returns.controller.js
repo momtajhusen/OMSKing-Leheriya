@@ -1,12 +1,12 @@
 const { successResponse } = require('../utils/response');
 const { merchantTenant } = require('./products.controller');
-const { restockReturn } = require('../services/inventory.service');
 const returnsFlow = require('../services/returnsFlow.service');
 
 async function approveRestock(req, res) {
   const tenantId = merchantTenant(req);
   const items = Array.isArray(req.body.items) ? req.body.items : [];
-  const data = await restockReturn(tenantId, req.user.id, {
+  const data = await returnsFlow.restockOrderReturn(tenantId, req.user.id, {
+    orderNo: req.body.orderNo,
     items,
     referenceId: req.body.referenceId || req.body.returnId,
     reason: req.body.reason,

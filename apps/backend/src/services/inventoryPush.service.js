@@ -4,6 +4,7 @@ const Warehouse = require('../models/Warehouse');
 const WarehouseLocationMap = require('../models/WarehouseLocationMap');
 const IntegrationJob = require('../models/IntegrationJob');
 const MasterSku = require('../models/MasterSku');
+const InventoryLedger = require('../models/InventoryLedger');
 const { HttpError } = require('../utils/httpError');
 const { getConnection, credsOf } = require('./channelConnection.service');
 const { getInventoryAuthority, ensureDefaultWarehouses, sellsOn } = require('./warehouse.service');
@@ -21,12 +22,14 @@ function skipTenant(query) {
 
 async function channelQty(tenantId, masterSkuId) {
   await ensureDefaultWarehouses(tenantId);
-  const [warehouses, balances, locations, maps] = await Promise.all([
+  const [warehouses, balances, locations, maps, recorded] = await Promise.all([
     skipTenant(Warehouse.find({ tenantId, status: 'active' })),
     skipTenant(Inventory.find({ tenantId, masterSkuId })),
     skipTenant(WarehouseLocationMap.find({ tenantId, channel: 'shopify' }).sort({ isPrimaryForChannel: -1, externalLocationId: 1 })),
     skipTenant(SkuMapping.find({ tenantId, masterSkuId, isActive: true, syncStatus: 'synced' })),
+    skipTenant(InventoryLedger.distinct('warehouseId', { tenantId, masterSkuId, movementType: { $in: require('./orderReserve.service').BASELINE_TYPES } })),
   ]);
+  const known = new Set(recorded.map(String));
   const balanceByWarehouse = new Map(balances.map((row) => [String(row.warehouseId), row]));
   const warehouseById = new Map(warehouses.map((row) => [String(row._id), row]));
   const sum = (flag, channel) => warehouses
@@ -42,8 +45,10 @@ async function channelQty(tenantId, masterSkuId) {
         warehouseId: loc.warehouseId,
         available: warehouse?.sellOnShopify ? channelSellable(balance, 'shopify') : (balance ? availableOf(balance) : 0),
         primary: Boolean(loc.isPrimaryForChannel),
+        known: Boolean(warehouse?.sellOnShopify) && known.has(String(loc.warehouseId)),
       };
     }),
+    known: known.size > 0,
     amazon: sum('sellOnAmazon', 'amazon'),
     myntra: sum('sellOnMyntra', 'myntra'),
     byChannel: Object.fromEntries(channelIds().map((id) => [
@@ -103,7 +108,9 @@ async function pushShopify(tenantId, masterSkuId, qty, deps) {
     err.terminal = true;
     throw err;
   }
-  const rows = qty.shopify.map((loc) => ({
+  const recorded = qty.shopify.filter((loc) => loc.known);
+  if (!recorded.length) return 'Shopify stock was not pushed. OMSKing has no stock record for the linked locations yet.';
+  const rows = recorded.map((loc) => ({
     variantId: mapping.channelVariantId,
     locationId: loc.locationId,
     available: loc.available,
@@ -167,6 +174,33 @@ async function pushMyntra(tenantId, masterSkuId, qty, deps) {
   return `Myntra ${mapping.channelSkuCode} quantity ${qty.myntra}.`;
 }
 
+function pushedValue(channel, qty) {
+  if (channel === 'shopify') return JSON.stringify(qty.shopify.filter((loc) => loc.known).map((loc) => [loc.locationId, loc.available]));
+  if (channel === 'amazon') return String(qty.amazon);
+  if (channel === 'myntra') return String(qty.myntra);
+  return String(qty.byChannel?.[channel] || 0);
+}
+
+async function pushOnce(job, sku, qty, deps) {
+  if (job.channel === 'shopify') return pushShopify(job.tenantId, sku._id, qty, deps);
+  if (job.channel === 'amazon') return pushAmazon(job.tenantId, sku._id, qty, deps);
+  if (job.channel === 'myntra') return pushMyntra(job.tenantId, sku._id, qty, deps);
+  const adapter = adapterFor(job.channel);
+  const mapping = qty.mappings.find((row) => row.channel === job.channel);
+  if (!adapter?.pushInventory || !mapping) {
+    const err = new Error(`${job.channel} stock was not pushed. This Master SKU has no synced listing.`);
+    err.terminal = true;
+    throw err;
+  }
+  const creds = credsOf(await getConnection(job.tenantId, job.channel));
+  const summary = await adapter.pushInventory(creds, {
+    sku: mapping.channelSkuCode,
+    quantity: qty.byChannel?.[job.channel] || 0,
+    request: deps.partnerRequest,
+  });
+  return `${job.channel} ${summary}`;
+}
+
 async function runInventoryJob(job, deps = {}) {
   const masterSkuId = job.payload?.masterSkuId;
   if (!masterSkuId) {
@@ -197,32 +231,25 @@ async function runInventoryJob(job, deps = {}) {
     err.terminal = true;
     throw err;
   }
-  const qty = await channelQty(job.tenantId, sku._id);
+  let qty = await channelQty(job.tenantId, sku._id);
   const authority = await getInventoryAuthority(job.tenantId);
+  if (!qty.known && !(job.channel === 'shopify' && authority === 'shopify')) {
+    const summary = `${job.channel} stock was not pushed. OMSKing has no stock record for ${sku.code} yet, so the channel's stock was left as it is.`;
+    await IntegrationJob.updateOne({ _id: job._id }, { $set: { shortSummary: summary, recordsTotal: 1, recordsProcessed: 0 } })
+      .setOptions({ skipTenantFilter: true });
+    return { skipped: true, summary };
+  }
   let summary;
   if (job.channel === 'shopify' && authority === 'shopify') {
     summary = await pullShopifyMaster(job.tenantId, job.triggeredByUserId, sku._id, qty, deps);
-  } else if (job.channel === 'shopify') {
-    summary = await pushShopify(job.tenantId, sku._id, qty, deps);
-  } else if (job.channel === 'amazon') {
-    summary = await pushAmazon(job.tenantId, sku._id, qty, deps);
-  } else if (job.channel === 'myntra') {
-    summary = await pushMyntra(job.tenantId, sku._id, qty, deps);
   } else {
-    const adapter = adapterFor(job.channel);
-    const mapping = qty.mappings.find((row) => row.channel === job.channel);
-    if (!adapter?.pushInventory || !mapping) {
-      const err = new Error(`${job.channel} stock was not pushed. This Master SKU has no synced listing.`);
-      err.terminal = true;
-      throw err;
+    // Another push for the same SKU may land after ours with an older qty; re-read and resend until it holds.
+    for (let round = 0; round < 3; round += 1) {
+      summary = await pushOnce(job, sku, qty, deps);
+      const latest = await channelQty(job.tenantId, sku._id);
+      if (pushedValue(job.channel, latest) === pushedValue(job.channel, qty)) break;
+      qty = latest;
     }
-    const creds = credsOf(await getConnection(job.tenantId, job.channel));
-    summary = await adapter.pushInventory(creds, {
-      sku: mapping.channelSkuCode,
-      quantity: qty.byChannel?.[job.channel] || 0,
-      request: deps.partnerRequest,
-    });
-    summary = `${job.channel} ${summary}`;
   }
   await IntegrationJob.updateOne(
     { _id: job._id },

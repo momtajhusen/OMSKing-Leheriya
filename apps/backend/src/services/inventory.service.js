@@ -472,7 +472,7 @@ async function stockIn(tenantId, userId, { masterSkuId, warehouseId, qty, reason
 // Opening stock skips channel pushes and low stock alerts; one row per SKU and warehouse, only where OMS holds no stock yet.
 async function importOpeningStock(tenantId, userId, lines = [], { reason = 'Opening stock', referenceType = 'opening_stock' } = {}) {
   await assertOmsMaster(tenantId);
-  const out = { imported: 0, skipped: 0, failed: 0, units: 0 };
+  const out = { imported: 0, skipped: 0, failed: 0, units: 0, errors: [] };
   for (const line of lines) {
     const n = Math.floor(Number(line.qty) || 0);
     if (n < 1) {
@@ -512,6 +512,7 @@ async function importOpeningStock(tenantId, userId, lines = [], { reason = 'Open
       }
     } catch (err) {
       out.failed += 1;
+      out.errors.push(`${line.sku || line.masterSkuId}: ${err.message}`);
     }
   }
   return out;
@@ -672,7 +673,9 @@ async function restockReturn(tenantId, userId, { items = [], referenceId, reason
   const skipped = [];
   for (const item of items) {
     const qty = Math.max(1, Number(item.qty) || 1);
-    const sku = await resolveMasterSkuForChannelSku(tenantId, item.sku);
+    const sku = item.masterSkuId
+      ? await exec(MasterSku.findOne({ _id: item.masterSkuId, tenantId }), null)
+      : await resolveMasterSkuForChannelSku(tenantId, item.sku);
     if (!sku) {
       skipped.push(item.sku);
       continue;
@@ -1020,7 +1023,7 @@ async function reserveStock(tenantId, userId, input) {
   try {
     const result = await withTransaction((session) => reserveInside(tenantId, userId, { ...input, session }));
     if (!result.idempotent) {
-      await notifyChannels(tenantId, userId, input.masterSkuId);
+      if (!input.skipNotify) await notifyChannels(tenantId, userId, input.masterSkuId);
       for (const slice of result.allocations || []) {
         await watchLowStock(tenantId, { sku: result.sku, warehouse: slice.warehouse, available: slice.available });
       }
@@ -1075,9 +1078,9 @@ async function releaseReservation(tenantId, userId, { orderRef, idempotencyKey, 
       });
       out.push({ warehouseId: String(hold.warehouseId), qty: hold.qty, available: availableOf(balance) });
     }
-    return { status: 'released', slices: out, masterSkuId: holds[0].masterSkuId };
+    return { status: 'released', slices: out, masterSkuId: holds[0].masterSkuId, masterSkuIds: [...new Set(holds.map((hold) => String(hold.masterSkuId)))] };
   });
-  await notifyChannels(tenantId, userId, result.masterSkuId);
+  for (const id of result.masterSkuIds || [result.masterSkuId]) await notifyChannels(tenantId, userId, id);
   return result;
 }
 
@@ -1140,7 +1143,7 @@ async function consumeReservation(tenantId, userId, { orderRef, reason }) {
         consumed.push({ hold, warehouse, field, fromOnly, shared });
         out.push({ warehouse: warehouse.code, qty: hold.qty, available: availableOf(balance) });
       }
-      return { status: 'consumed', slices: out, masterSkuId: holds[0].masterSkuId };
+      return { status: 'consumed', slices: out, masterSkuId: holds[0].masterSkuId, masterSkuIds: [...new Set(holds.map((hold) => String(hold.masterSkuId)))] };
     } catch (err) {
       if (!session) {
         for (const item of consumed.reverse()) {
@@ -1168,7 +1171,7 @@ async function consumeReservation(tenantId, userId, { orderRef, reason }) {
       throw err;
     }
   });
-  await notifyChannels(tenantId, userId, result.masterSkuId);
+  for (const id of result.masterSkuIds || [result.masterSkuId]) await notifyChannels(tenantId, userId, id);
   return result;
 }
 
@@ -1287,6 +1290,7 @@ module.exports = {
   stockIn,
   importOpeningStock,
   restockReturn,
+  resolveMasterSkuForChannelSku,
   stockOut,
   adjustStock,
   setReorderPoint,

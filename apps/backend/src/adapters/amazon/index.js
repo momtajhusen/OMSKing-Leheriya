@@ -142,26 +142,39 @@ const ORDER_STATUS = {
   PendingAvailability: 'New',
 };
 
+const paise = (value) => Math.round((Number(value) || 0) * 100) / 100;
+const money = (field) => Number(field?.Amount || 0);
+
+function paymentModeOf(order) {
+  const details = (order.PaymentMethodDetails || []).map(String);
+  return order.PaymentMethod === 'COD' || details.includes('CashOnDelivery') ? 'COD' : 'Prepaid';
+}
+
 function orderRows(payloadOrders) {
   return (payloadOrders || []).map((order) => {
     const qty = Number(order.NumberOfItemsUnshipped || 0) + Number(order.NumberOfItemsShipped || 0);
-    const amount = Number(order.OrderTotal?.Amount || 0);
+    const units = qty > 0 ? qty : 1;
+    const amount = money(order.OrderTotal);
     return {
       externalOrderId: String(order.AmazonOrderId || ''),
       status: ORDER_STATUS[order.OrderStatus] || 'Processing',
       total: amount,
+      paymentMode: paymentModeOf(order),
+      currency: String(order.OrderTotal?.CurrencyCode || 'INR'),
+      shippingCharge: 0,
       orderDate: order.PurchaseDate ? new Date(order.PurchaseDate) : undefined,
       shipByTime: order.LatestShipDate ? new Date(order.LatestShipDate) : undefined,
       items: [{
         name: order.OrderStatus ? `Amazon ${order.OrderStatus}` : 'Amazon item',
         sku: String(order.AmazonOrderId || ''),
-        qty: qty > 0 ? qty : 1,
-        price: amount,
+        qty: units,
+        price: paise(amount / units),
       }],
     };
   }).filter((order) => order.externalOrderId);
 }
 
+/** SP-API ItemPrice / PromotionDiscount are line totals (unit price x QuantityOrdered). */
 function orderItemRows(payloadItems) {
   return (payloadItems || []).flatMap((item) => {
     const sku = String(item.SellerSKU || '').trim();
@@ -171,9 +184,16 @@ function orderItemRows(payloadItems) {
       name: String(item.Title || sku),
       sku,
       qty,
-      price: Number(item.ItemPrice?.Amount || 0),
+      price: paise((money(item.ItemPrice) - money(item.PromotionDiscount)) / qty),
     }];
   });
+}
+
+function itemsShipping(payloadItems) {
+  return paise((payloadItems || []).reduce(
+    (sum, item) => sum + money(item.ShippingPrice) - money(item.ShippingDiscount),
+    0,
+  ));
 }
 
 async function withOrderItems(rows, creds, request, token) {
@@ -188,10 +208,13 @@ async function withOrderItems(rows, creds, request, token) {
       if (res?.status === 429) throttled = true;
       if (!res || res.status < 200 || res.status >= 300) continue;
       const body = JSON.parse(res.text || '{}');
-      const items = orderItemRows(body.payload?.OrderItems || body.OrderItems);
+      const raw = body.payload?.OrderItems || body.OrderItems;
+      const items = orderItemRows(raw);
       if (!items.length) continue;
       row.items = items;
       row.itemsKnown = true;
+      row.shippingCharge = itemsShipping(raw);
+      if (!row.total) row.total = paise(items.reduce((sum, item) => sum + item.price * item.qty, 0) + row.shippingCharge);
     } catch {
       continue;
     }

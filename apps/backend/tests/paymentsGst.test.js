@@ -116,9 +116,12 @@ test('a delivered Shopify COD order stays partially paid until it is marked paid
     awb: 'AWB-COD-1',
     total: 118,
     email: '',
+    shipState: 'Maharashtra',
     items: [{ name: 'Kurta', sku: 'KURTA', qty: 1, price: 118, gst: 18 }],
     source: 'manual',
   });
+  await ensureDefaultWarehouses(shop.tenant._id);
+  await Warehouse.updateOne({ tenantId: shop.tenant._id, code: 'WH-001' }, { 'address.state': 'Maharashtra' }).setOptions({ skipTenantFilter: true });
   await applyTracking(shop.tenant._id, {
     orderNo: 'SHP-COD-1',
     awb: 'AWB-COD-1',
@@ -169,7 +172,7 @@ test('reports and settlement totals stay on the caller company', async () => {
   await Order.create({
     tenantId: alpha.tenant._id,
     orderNo: 'ALP-1',
-    channel: 'Shopify',
+    channel: 'Amazon',
     status: 'Delivered',
     paymentMode: 'Prepaid',
     total: 111,
@@ -179,7 +182,7 @@ test('reports and settlement totals stay on the caller company', async () => {
   await Order.create({
     tenantId: beta.tenant._id,
     orderNo: 'BET-1',
-    channel: 'Shopify',
+    channel: 'Amazon',
     status: 'Delivered',
     paymentMode: 'Prepaid',
     total: 999,

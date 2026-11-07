@@ -8,6 +8,7 @@ import useAuthStore from '../../stores/authStore';
 import { formatINR, formatDate } from '../../utils/format';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { filterReturnRows } from '../../lib/reportFilters';
+import { refundRows, sumMoney } from '../../lib/orderMetrics';
 import Select from '../../components/ui/Select';
 import Input from '../../components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
@@ -26,10 +27,6 @@ const TABS = [
   { id: 'refund', label: 'Refund due (prepaid)' },
 ];
 
-function hasTracking(order) {
-  return Boolean(order.awb || (order.channelLines || []).some((line) => line.trackingNumber));
-}
-
 export default function ReturnsRefundsReconciliationPage() {
   const navigate = useNavigate();
   const orders = useOrderStore((s) => s.orders);
@@ -37,6 +34,7 @@ export default function ReturnsRefundsReconciliationPage() {
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const tenantId = useAuthStore((s) => s.user?.tenantId);
   const workflow = useReturnsStore((s) => (tenantId && s.workflowByTenant?.[tenantId]) || EMPTY_WORKFLOW);
+  const [returnRows, setReturnRows] = useState([]);
   const [tab, setTab] = useState('all');
   const [channelFilter, setChannelFilter] = useState('');
   const [kindFilter, setKindFilter] = useState('');
@@ -49,32 +47,10 @@ export default function ReturnsRefundsReconciliationPage() {
 
   useEffect(() => {
     hydrateFromApi();
+    api.get('/returns').then(({ data }) => setReturnRows(data.data || [])).catch(() => setReturnRows([]));
   }, [hydrateFromApi]);
 
-  const rows = useMemo(() => orders.flatMap((order) => {
-    if (order.reversePickup?.returnId) {
-      const state = workflow[order.reversePickup.returnId] || {};
-      return [{
-        key: order.reversePickup.returnId,
-        order,
-        kind: 'Customer return',
-        shipped: true,
-        received: state.status === 'Completed',
-        refund: order.total,
-      }];
-    }
-    if (order.status !== 'Cancelled') return [];
-    const shipped = hasTracking(order);
-    const state = workflow[`RTO-${order.id}`] || {};
-    return [{
-      key: order.id,
-      order,
-      kind: shipped ? 'Cancelled after dispatch (RTO)' : 'Cancelled before dispatch',
-      shipped,
-      received: !shipped || state.status === 'QC Complete',
-      refund: order.paymentMode === 'COD' ? 0 : order.total,
-    }];
-  }).sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt))), [orders, workflow]);
+  const rows = useMemo(() => refundRows(orders, workflow, returnRows), [orders, workflow, returnRows]);
 
   const kinds = useMemo(() => [...new Set(rows.map((row) => row.kind))].sort(), [rows]);
   const payments = useMemo(() => [...new Set(rows.map((row) => row.order.paymentMode).filter(Boolean))].sort(), [rows]);
@@ -167,7 +143,7 @@ export default function ReturnsRefundsReconciliationPage() {
         <KpiCard label="Cancellations + returns" value={scoped.length} icon={RotateCcw} onClick={() => setTab('all')} />
         <KpiCard label="Parcel not back" value={scoped.filter((row) => row.shipped && !row.received).length} icon={Clock} onClick={() => setTab('awaiting')} />
         <KpiCard label="Return received" value={scoped.filter((row) => row.shipped && row.received).length} icon={PackageCheck} onClick={() => setTab('received')} />
-        <KpiCard label="Prepaid refunds" value={formatINR(scoped.reduce((sum, row) => sum + row.refund, 0))} icon={AlertTriangle} onClick={() => setTab('refund')} />
+        <KpiCard label="Prepaid refunds" value={formatINR(sumMoney(scoped.map((row) => row.refund)))} icon={AlertTriangle} onClick={() => setTab('refund')} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

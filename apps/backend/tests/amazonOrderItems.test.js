@@ -75,7 +75,7 @@ test('Amazon order pull reads the order items (seller SKU, title, qty) instead o
   ];
   const rows = await amazon.pullOrders(creds, { request: async (_method, url) => { urls.push(url); return replies.shift(); } });
   assert.match(urls[2], /\/orders\/v0\/orders\/402-1\/orderItems$/);
-  assert.deepEqual(rows[0].items, [{ name: 'Blue kurta (Amazon)', sku: 'AMZ-K1', qty: 2, price: 1998 }]);
+  assert.deepEqual(rows[0].items, [{ name: 'Blue kurta (Amazon)', sku: 'AMZ-K1', qty: 2, price: 999 }], 'ItemPrice is the line total: unit price = 1998 / 2');
   assert.equal(rows[0].itemsKnown, true);
   assert.equal(rows[1].items[0].sku, '402-2', 'order items call failed: the header placeholder stays');
   assert.equal(rows[1].itemsKnown, false);

@@ -55,7 +55,7 @@ test('a paid Shopify delivered order stays out of reconciliation and a return fi
     { orderNo: 'SHP-PART', channel: 'Shopify', status: 'Delivered', paymentMode: 'Partially paid', paymentStatus: '', createdAt: '2026-01-01' },
     { orderNo: 'SHP-CANCEL', channel: 'Shopify', status: 'Cancelled', paymentMode: 'COD', createdAt: '2026-01-01' },
     { orderNo: 'SHP-NEW', channel: 'Shopify', status: 'Dispatched', paymentMode: 'Prepaid', paymentStatus: '', createdAt: '2026-10-01' },
-    { orderNo: 'AMZ-1', channel: 'Amazon', status: 'Delivered', externalOrderId: '902-1', createdAt: '2026-08-01' },
+    { orderNo: 'AMZ-1', channel: 'Amazon', status: 'Delivered', externalOrderId: '902-1', total: 1000, createdAt: '2026-08-01' },
   ];
   const queue = finance.reconciliationQueue(orders, { now });
   assert.equal(queue.some((row) => row.orderNo === 'SHP-PAID'), false);

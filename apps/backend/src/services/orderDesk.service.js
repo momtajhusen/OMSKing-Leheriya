@@ -1,5 +1,6 @@
 const Inventory = require('../models/Inventory');
 const Warehouse = require('../models/Warehouse');
+const { isCodLike } = require('../utils/payment');
 
 const OPEN = new Set(['New', 'Processing', 'Pending', 'Packed', 'Ready to Ship', 'Unfulfillable']);
 
@@ -13,8 +14,7 @@ function closedNote(order) {
 function paymentView(mode) {
   const text = String(mode || '').trim();
   if (/^void$/i.test(text)) return { paymentMode: 'Void', paymentDetail: '' };
-  if (/partial/i.test(text)) return { paymentMode: 'COD', paymentDetail: 'Partially paid' };
-  if (/cod|cash on delivery/i.test(text)) return { paymentMode: 'COD', paymentDetail: '' };
+  if (isCodLike(text)) return { paymentMode: 'COD', paymentDetail: /partial/i.test(text) ? 'Partially paid' : '' };
   return { paymentMode: text || 'Prepaid', paymentDetail: '' };
 }
 

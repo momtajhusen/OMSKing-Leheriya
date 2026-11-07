@@ -31,3 +31,7 @@ client-reports/
 .eslintcache
 .cache/
 .parcel-cache/
+
+# Google service account keys (download name: <project>-<12 hex>.json)
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
+gdrive-service-account*.json

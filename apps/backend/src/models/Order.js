@@ -6,6 +6,7 @@ const itemSchema = new mongoose.Schema({
   sku: { type: String, default: '' },
   qty: { type: Number, default: 1 },
   price: { type: Number, default: 0 },
+  priceFromMrp: { type: Boolean, default: false },
   cost: { type: Number },
   hsn: { type: String, default: '' },
   gst: { type: Number, default: 0 },
@@ -77,6 +78,13 @@ const orderSchema = new mongoose.Schema({
   items: { type: [itemSchema], default: [] },
   subOrders: { type: [subOrderSchema], default: [] },
   total: { type: Number, default: 0 },
+  codAmount: { type: Number, default: null },
+  shippingCharge: { type: Number, default: 0 },
+  currency: { type: String, default: 'INR' },
+  totalChangedAfterLock: {
+    type: new mongoose.Schema({ from: Number, to: Number, at: Date }, { _id: false }),
+    default: null,
+  },
   courier: { type: String, default: '' },
   awb: { type: String, default: '' },
   invoiceNo: { type: String, default: '' },
@@ -84,6 +92,8 @@ const orderSchema = new mongoose.Schema({
   handoverAt: { type: Date, default: null },
   manifestNo: { type: String, default: '' },
   pickedUpAt: { type: Date, default: null },
+  bookingAt: { type: Date, default: null },
+  cancelSource: { type: String, enum: ['', 'oms', 'channel'], default: '' },
   easyShip: {
     packageId: { type: String, default: '' },
     status: { type: String, default: '' },
@@ -92,6 +102,8 @@ const orderSchema = new mongoose.Schema({
     handover: { type: String, default: '' },
   },
   invoiceGeneratedAt: { type: Date },
+  creditNoteGeneratedAt: { type: Date },
+  invoiceSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
   orderDate: { type: Date },
   reversePickup: {
     returnId: { type: String, default: '' },
@@ -120,6 +132,8 @@ const orderSchema = new mongoose.Schema({
       trackingNumber: String,
       courierCode: String,
       cancellationReason: String,
+      price: Number,
+      qty: Number,
       packByTime: Date,
       shipByTime: Date,
     }, { _id: false })],
@@ -139,4 +153,29 @@ orderSchema.index(
 orderSchema.index({ tenantId: 1, 'subOrders.id': 1 });
 orderSchema.plugin(tenantPlugin);
 
+const SHIPPED_STATUS = /^(shipped|in transit|out for delivery|delivered)$/i;
+
+// An OMSKing label also sets Dispatched; the parcel has only left once the courier picked it up.
+function leftWarehouse(order) {
+  const status = order.status || '';
+  if (SHIPPED_STATUS.test(status)) return true;
+  return /^dispatched$/i.test(status) && Boolean(order.pickedUpAt || !order.labelGeneratedAt);
+}
+
+orderSchema.pre('save', function markShipped(next) {
+  this.$locals.deductStock = (this.isModified('status') || this.isModified('pickedUpAt')) && leftWarehouse(this);
+  next();
+});
+
+orderSchema.post('save', async function deductOnDispatch(doc) {
+  if (!doc.$locals?.deductStock) return;
+  doc.$locals.deductStock = false;
+  try {
+    await require('../services/orderReserve.service').consumeOrderStock(doc.tenantId, doc.orderNo);
+  } catch (err) {
+    console.error('[INVENTORY] dispatch deduct failed for', doc.orderNo, err.message);
+  }
+});
+
 module.exports = mongoose.model('Order', orderSchema);
+module.exports.leftWarehouse = leftWarehouse;

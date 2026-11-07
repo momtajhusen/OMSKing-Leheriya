@@ -203,7 +203,12 @@ async function deleteCheck(tenantId, id) {
   const [maps, stocked, held, openOrders, history, closedOrders, shipments] = await Promise.all([
     skip(WarehouseLocationMap.find({ tenantId, warehouseId: warehouse._id })).lean(),
     skip(Inventory.countDocuments({
-      tenantId, warehouseId: warehouse._id, $expr: { $gt: [{ $add: ['$physicalQty', '$virtualQty', '$reservedQty'] }, 0] },
+      tenantId,
+      warehouseId: warehouse._id,
+      $or: [
+        { $expr: { $gt: [{ $add: ['$physicalQty', '$virtualQty', '$reservedQty'] }, 0] } },
+        ...CHANNELS.map((row) => row.id).flatMap((id) => [{ [`channelOnly.${id}`]: { $gt: 0 } }, { [`channelHeld.${id}`]: { $gt: 0 } }]),
+      ],
     })),
     skip(InventoryReservation.countDocuments({ tenantId, warehouseId: warehouse._id, status: 'held' })),
     skip(Order.countDocuments({ tenantId, warehouseCode: warehouse.code, status: { $not: FINISHED_ORDER } })),

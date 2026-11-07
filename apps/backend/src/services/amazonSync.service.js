@@ -2,7 +2,7 @@ const { getConnection, credsOf } = require('./channelConnection.service');
 const amazon = require('../adapters/amazon');
 const { withSubOrders } = require('../lib/orderSubOrders');
 const { HttpError } = require('../utils/httpError');
-const { claimChannelOrder, finishChannelOrder } = require('./channelOrder.service');
+const { claimChannelOrder, finishChannelOrder, applyChannelTotal, moneyLocked } = require('./channelOrder.service');
 const MasterSku = require('../models/MasterSku');
 const Product = require('../models/Product');
 const SkuMapping = require('../models/SkuMapping');
@@ -82,10 +82,12 @@ async function pullAmazonOrders(tenantId, { skipExternalIds = [], afterEach } = 
       orderNo,
       channel: 'Amazon',
       status: order.status,
-      paymentMode: 'Prepaid',
+      paymentMode: order.paymentMode || 'Prepaid',
       fulfilmentSource: 'Offline',
       items: order.itemsKnown ? await withCatalog(tenantId, order.items) : order.items,
       total: order.total,
+      shippingCharge: Number(order.shippingCharge) || 0,
+      currency: order.currency || 'INR',
       orderDate: order.orderDate,
       source: 'channel_api',
       externalOrderId: order.externalOrderId,
@@ -102,8 +104,11 @@ async function pullAmazonOrders(tenantId, { skipExternalIds = [], afterEach } = 
     let before = null;
     if (!created) {
       before = `${doc.status}|${doc.total}`;
-      doc.status = next.status;
-      doc.total = next.total;
+      require('./orderReserve.service').mergeChannelStatus(doc, next.status);
+      if (order.itemsKnown && !moneyLocked(doc)) doc.shippingCharge = next.shippingCharge;
+      applyChannelTotal(doc, Number(next.total) || doc.total);
+      if (order.paymentMode) doc.paymentMode = order.paymentMode;
+      if (order.currency) doc.currency = order.currency;
       if (order.itemsKnown !== false || !(doc.items || []).length) {
         doc.items = next.items;
         doc.subOrders = next.subOrders;

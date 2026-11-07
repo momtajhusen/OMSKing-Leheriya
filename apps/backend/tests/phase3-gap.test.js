@@ -14,7 +14,7 @@ const InventoryReservation = require('../src/models/InventoryReservation');
 const IntegrationJob = require('../src/models/IntegrationJob');
 const CustomerReturn = require('../src/models/CustomerReturn');
 const shopify = require('../src/adapters/shopify');
-const { stockIn } = require('../src/services/inventory.service');
+const { stockIn, reserveStock } = require('../src/services/inventory.service');
 const { ingestChannelOrders, applyStoredWebhook } = require('../src/services/channelOrder.service');
 const { enqueueManual } = require('../src/services/jobQueue.service');
 const { upsertConnection } = require('../src/services/channelConnection.service');
@@ -274,7 +274,10 @@ test('orders pull is refused until the shop URL and admin token are saved', asyn
 });
 
 test('RTO restocks a mapped item once and a return label uses Delhivery only when a token is passed in', async () => {
-  const { tenant } = await seller();
+  const { tenant, sku, physical } = await seller();
+  await reserveStock(String(tenant._id), null, {
+    masterSkuId: sku._id, warehouseId: physical._id, channel: 'shopify', qty: 1, idempotencyKey: 'shp-rto', orderRef: 'SHP-RTO',
+  });
   const order = await Order.create({
     tenantId: tenant._id,
     orderNo: 'SHP-RTO',

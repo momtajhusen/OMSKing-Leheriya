@@ -7,14 +7,30 @@ const { decryptObject } = require('../lib/secretBox');
 const { ensurePricing, present, quoteOrders, paymentPublic, payLine, upiPayUrl } = require('./pricing.service');
 const { verifyCheckoutSignature, verifyWebhookSignature, createRazorpayOrder, fetchRazorpayPayment } = require('./razorpay.service');
 
+const IST_MS = 330 * 60 * 1000;
+const BUSINESS_TZ = 'Asia/Kolkata';
+
+/** Year and 0-based month of the instant on the Asia/Kolkata calendar. */
+function istMonth(date) {
+  const ist = new Date(date.getTime() + IST_MS);
+  return { year: ist.getUTCFullYear(), month: ist.getUTCMonth() };
+}
+
 function periodKey(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  const { year, month } = istMonth(date);
+  return `${year}-${String(month + 1).padStart(2, '0')}`;
 }
 
 function monthBounds(date = new Date()) {
-  const start = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
-  const end = new Date(date.getFullYear(), date.getMonth() + 1, 1, 0, 0, 0, 0);
+  const { year, month } = istMonth(date);
+  const start = new Date(Date.UTC(year, month, 1) - IST_MS);
+  const end = new Date(Date.UTC(year, month + 1, 1) - IST_MS);
   return { start, end };
+}
+
+/** Last millisecond of the Asia/Kolkata month the instant falls in. */
+function monthEnd(date = new Date()) {
+  return new Date(monthBounds(date).end.getTime() - 1);
 }
 
 function orderPlacedMatch(date = new Date()) {
@@ -28,14 +44,14 @@ function orderPlacedMatch(date = new Date()) {
 }
 
 function monthName(date = new Date()) {
-  return date.toLocaleString('en-IN', { month: 'long' });
+  return date.toLocaleString('en-IN', { month: 'long', timeZone: BUSINESS_TZ });
 }
 
 function formatDate(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: BUSINESS_TZ });
 }
 
 function daysLeft(value) {
@@ -166,7 +182,7 @@ async function viewFor(tenant, pricing, paidRow) {
 function periodLabel(period) {
   const [year, month] = String(period || '').split('-').map(Number);
   if (!year || !month) return String(period || '');
-  return new Date(year, month - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  return new Date(Date.UTC(year, month - 1, 15)).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: BUSINESS_TZ });
 }
 
 function slabPosition(orders, slabs) {
@@ -248,10 +264,7 @@ async function recordSubscriptionPayment(tenantId, body = {}) {
   await row.save();
   if (tenant.status === 'trial') {
     tenant.status = 'active';
-    const end = new Date();
-    end.setMonth(end.getMonth() + 1, 0);
-    end.setHours(23, 59, 59, 999);
-    tenant.planExpiresAt = end;
+    tenant.planExpiresAt = monthEnd();
     await tenant.save();
   }
   return viewFor(tenant, pricing, row);
@@ -421,6 +434,9 @@ async function applyRazorpayWebhook(req) {
 }
 
 module.exports = {
+  periodKey,
+  monthBounds,
+  monthEnd,
   orderPlacedMatch,
   subscriptionMessage,
   mySubscription,

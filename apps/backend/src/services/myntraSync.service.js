@@ -57,6 +57,32 @@ function parseMyntraDate(value) {
   return new Date(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}+05:30`);
 }
 
+/**
+ * price x qty over lines Myntra has not cancelled (a fully cancelled order keeps its full value).
+ * Lines saved without price fall back to the item.
+ */
+function linesTotal(lines, items = []) {
+  const bySku = new Map(items.map((item) => [item.sku, item]));
+  const live = lines.some((l) => omsStatus(l.status) !== 'Cancelled');
+  const sum = lines.reduce((acc, l) => {
+    if (live && omsStatus(l.status) === 'Cancelled') return acc;
+    const item = bySku.get(l.sku);
+    return acc + (Number(l.price ?? item?.price) || 0) * (Number(l.qty ?? item?.qty) || 1);
+  }, 0);
+  return Math.round(sum * 100) / 100;
+}
+
+/** A unit cannot sell above MRP, so an amount above MRP on a multi-unit line is the line total. */
+function myntraUnitPrice(line) {
+  const qty = Number(line.quantity) || 1;
+  const mrp = Number(line.mrp) || 0;
+  const sold = line.lineFinalAmount ?? line.sellingPrice;
+  if (sold == null || sold === '') return { price: mrp, priceFromMrp: true };
+  const amount = Number(sold) || 0;
+  const unit = qty > 1 && mrp > 0 && amount > mrp + 0.5 ? amount / qty : amount;
+  return { price: Math.round(unit * 100) / 100, priceFromMrp: false };
+}
+
 function lineGstRate(line) {
   return (line.taxEntries || []).reduce((sum, tax) => sum + (Number(tax.taxRate) || 0), 0);
 }
@@ -135,7 +161,7 @@ function mapMyntraOrder(orderId, details, masters = new Map()) {
       masterSkuId: master?.id || null,
       skuMappingId: master?.mappingId || null,
       qty: Number(line.quantity) || 1,
-      price: Number(line.lineFinalAmount ?? line.sellingPrice ?? line.mrp) || 0,
+      ...myntraUnitPrice(line),
       hsn: String(line.hsnCode || ''),
       gst: lineGstRate(line),
       imageUrl: master?.imageUrl || '',
@@ -143,10 +169,12 @@ function mapMyntraOrder(orderId, details, masters = new Map()) {
     };
   });
 
-  const channelLines = lines.map(({ detail, line }) => ({
+  const channelLines = lines.map(({ detail, line }, i) => ({
     sellerOrderId: String(detail.sellerOrderId || line.sellerOrderId || ''),
     orderLineId: String(line.orderLineId || ''),
     sku: String(line.sku || ''),
+    price: items[i].price,
+    qty: items[i].qty,
     imageUrl: masters.get(String(line.sku))?.imageUrl || '',
     status: String(line.status_code || line.status || '').toUpperCase(),
     packetId: String(line.packetId || detail.packetId || ''),
@@ -180,7 +208,7 @@ function mapMyntraOrder(orderId, details, masters = new Map()) {
     channelStatus: [...new Set(channelLines.map((l) => l.status).filter(Boolean))].join(', '),
     warehouseCode: String(lines[0]?.line?.warehouse || head.warehouse || ''),
     items,
-    total: items.reduce((sum, item) => sum + item.price, 0),
+    total: linesTotal(channelLines),
     courier: tracking ? (firstWith('courierCode') || 'Myntra Logistics') : '',
     awb: tracking,
     invoiceNo: firstWith('invoiceNumber'),
@@ -195,7 +223,7 @@ function mapMyntraOrder(orderId, details, masters = new Map()) {
  */
 async function upsertMappedOrder(tenantId, mapped) {
   const sellerIds = [...new Set(mapped.channelLines.map((l) => l.sellerOrderId).filter(Boolean))];
-  const existing = await Order.findOne({
+  let existing = await Order.findOne({
     tenantId,
     $or: [
       { orderNo: mapped.orderNo },
@@ -228,13 +256,24 @@ async function upsertMappedOrder(tenantId, mapped) {
     existing = claimed.doc;
   }
   const before = JSON.stringify([existing.status, existing.channelStatus, existing.awb, existing.invoiceNo]);
-  const lines = [
-    ...existing.channelLines.map((l) => (l.toObject ? l.toObject() : l)).filter((l) => !sellerIds.includes(l.sellerOrderId)),
-    ...mapped.channelLines,
-  ];
-  existing.status = orderStatus(lines);
+  // A re-pulled line keeps its place, so stock holds and sub-orders stay matched to the same order item.
+  const lineId = (l) => (l.orderLineId ? `L${l.orderLineId}` : `${l.sellerOrderId}:${l.sku}`);
+  const fresh = new Map();
+  mapped.channelLines.forEach((l) => fresh.set(lineId(l), [...(fresh.get(lineId(l)) || []), l]));
+  const lines = existing.channelLines.map((l) => (l.toObject ? l.toObject() : l)).flatMap((l) => {
+    if (!sellerIds.includes(l.sellerOrderId)) return [l];
+    const next = fresh.get(lineId(l))?.shift();
+    return next ? [next] : [];
+  });
+  fresh.forEach((rest) => lines.push(...rest));
+  const { mergeChannelStatus, restockRtoOnce } = require('./orderReserve.service');
+  const { cancelledAfterDispatch } = mergeChannelStatus(existing, orderStatus(lines));
+  if (cancelledAfterDispatch && lines.some((l) => String(l.status || '').toUpperCase() === 'RTO')) {
+    await restockRtoOnce(tenantId, existing);
+  }
   existing.channelStatus = [...new Set(lines.map((l) => l.status).filter(Boolean))].join(', ');
   existing.channelLines = lines;
+  require('./channelOrder.service').applyChannelTotal(existing, linesTotal(lines, [...existing.items, ...mapped.items]));
   existing.awb = mapped.awb || existing.awb;
   existing.courier = mapped.courier || existing.courier;
   existing.invoiceNo = mapped.invoiceNo || existing.invoiceNo;
@@ -248,12 +287,17 @@ async function upsertMappedOrder(tenantId, mapped) {
     if (next.skuMappingId) item.skuMappingId = next.skuMappingId;
     if (next.imageUrl) item.imageUrl = next.imageUrl;
   });
+  const aligned = lines.length === existing.items.length && existing.items.every((item, i) => lines[i].sku === item.sku);
+  const lineByUnit = aligned
+    ? existing.items.flatMap((item, i) => Array(Math.max(1, Number(item.qty) || 1)).fill(lines[i]))
+    : [];
   existing.subOrders.forEach((sub) => {
     const next = bySku.get(sub.sku);
     if (next?.name && next.name !== next.sku) sub.title = next.name;
     if (next?.masterSkuId) sub.masterSkuId = next.masterSkuId;
     if (next?.imageUrl) sub.imageUrl = next.imageUrl;
-    const line = lines.find((l) => l.sku === sub.sku);
+    const own = lineByUnit[sub.index - 1];
+    const line = own?.sku === sub.sku ? own : lines.find((l) => l.sku === sub.sku);
     if (!line) return;
     sub.status = omsStatus(line.status);
     sub.deliveryStatus = deliveryStatusFor(sub.status);

@@ -47,6 +47,22 @@ async function claimChannelOrder(filter, insert, attempt = 0) {
   }
 }
 
+function moneyLocked(doc) {
+  return Boolean(doc.invoiceGeneratedAt || String(doc.awb || '').trim());
+}
+
+/** After invoice/AWB the channel may not move the total silently; the change is kept for review. */
+function applyChannelTotal(doc, total) {
+  const to = Number(total) || 0;
+  const from = Number(doc.total) || 0;
+  if (to === from) return;
+  if (moneyLocked(doc)) {
+    doc.totalChangedAfterLock = { from, to, at: new Date() };
+    return;
+  }
+  doc.total = to;
+}
+
 async function finishChannelOrder(tenantId, doc, { created, before, orderNo, channelName }) {
   const { syncOrderReservations } = require('./orderReserve.service');
   await syncOrderReservations(tenantId, doc);
@@ -80,6 +96,9 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       fulfilmentSource: 'Offline',
       items,
       total: Number(order.total) || 0,
+      codAmount: order.codAmount == null ? null : Number(order.codAmount) || 0,
+      shippingCharge: Number(order.shippingCharge) || 0,
+      currency: String(order.currency || 'INR'),
       orderDate: order.orderDate || new Date(),
       source: 'channel_api',
       externalOrderId,
@@ -101,8 +120,13 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
     let before = null;
     if (!created) {
       before = `${doc.status}|${doc.total}`;
-      doc.status = next.status;
-      doc.total = next.total;
+      require('./orderReserve.service').mergeChannelStatus(doc, next.status);
+      if (!moneyLocked(doc)) {
+        doc.codAmount = next.codAmount;
+        doc.shippingCharge = next.shippingCharge;
+      }
+      applyChannelTotal(doc, next.total);
+      doc.currency = next.currency;
       doc.items = next.items;
       doc.subOrders = next.subOrders;
       if (next.reserveState !== undefined) doc.reserveState = next.reserveState;
@@ -170,4 +194,4 @@ async function applyStoredWebhook(event) {
   return 'ignored';
 }
 
-module.exports = { ingestChannelOrders, applyStoredWebhook, claimChannelOrder, finishChannelOrder };
+module.exports = { ingestChannelOrders, applyStoredWebhook, claimChannelOrder, finishChannelOrder, applyChannelTotal, moneyLocked };

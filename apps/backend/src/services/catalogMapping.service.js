@@ -123,7 +123,10 @@ async function linkOpenOrders(tenantId, mapping) {
       { 'channelLines.sku': match },
     ],
   }).setOptions({ skipTenantFilter: true });
+  const channel = String(mapping.channel || '').toLowerCase();
+  const { syncOrderReservations } = require('./orderReserve.service');
   for (const order of orders) {
+    if (channel && String(order.channel || '').toLowerCase() !== channel) continue;
     let changed = false;
     (order.items || []).forEach((item) => {
       if (!match.test(item.sku || '')) return;
@@ -143,7 +146,9 @@ async function linkOpenOrders(tenantId, mapping) {
         changed = true;
       }
     });
-    if (changed) await order.save();
+    if (!changed) continue;
+    await syncOrderReservations(tenantId, order);
+    await order.save();
   }
 }
 
@@ -592,6 +597,7 @@ async function explainUnmapped(tenantId, rows) {
 }
 
 module.exports = {
+  linkOpenOrders,
   IMPORT_ORDER,
   shopifyOwnsCatalog,
   mapMaster,

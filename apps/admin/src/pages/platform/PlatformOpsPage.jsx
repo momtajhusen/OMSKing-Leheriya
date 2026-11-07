@@ -9,6 +9,7 @@ import { SUBSCRIPTION_PLANS } from '../../constants/channelCatalog';
 import { PlatformPage, PlatformSheet } from '../../components/platform/PlatformChrome';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
+import DatabaseBackupCard from '../../components/platform/DatabaseBackupCard';
 import { Check, Plug, ListTodo, ScrollText, Settings } from 'lucide-react';
 
 const TITLES = {
@@ -217,6 +218,8 @@ export default function PlatformOpsPage() {
 
       {mode === 'settings' && (
         loading || !settingsForm ? <PageLoader label="Loading platform settings..." /> : (
+          <div className="space-y-4">
+          <DatabaseBackupCard />
           <form
             className="premium-card max-w-xl space-y-4 p-4"
             onSubmit={async (event) => {
@@ -300,6 +303,7 @@ export default function PlatformOpsPage() {
               </Button>
             </div>
           </form>
+          </div>
         )
       )}
 

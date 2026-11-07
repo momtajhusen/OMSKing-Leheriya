@@ -23,6 +23,7 @@ const customerReturnSchema = new mongoose.Schema({
   qcNote: { type: String, default: '' },
   refundStatus: { type: String, enum: ['not_due', 'pending', 'refunded', 'rejected'], default: 'pending' },
   refundAmount: { type: Number, default: 0 },
+  receivingAt: { type: Date, default: null },
   claim: {
     type: { type: String, enum: ['', 'safet', 'myntra'], default: '' },
     status: { type: String, enum: ['none', 'to_file', 'filed', 'approved', 'rejected'], default: 'none' },

@@ -6,7 +6,10 @@ import api from '../../lib/api';
 import useOrderStore from '../../stores/orderStore';
 import { vendorReportLabel } from '../../stores/vendorStore';
 import { formatINR } from '../../utils/format';
-import { netSales, salesByChannel, isCancelled, downloadCsv } from '../../lib/orderMetrics';
+import {
+  netSales, grossSales, salesByChannel, isCancelled, isRto, refundsByOrder, sumMoney, istDate, istMonth,
+  shippingStats, vendorReportLines, downloadCsv,
+} from '../../lib/orderMetrics';
 import { filterReportOrders } from '../../lib/reportFilters';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
@@ -28,8 +31,7 @@ const TABS = [
   { id: 'vendors', label: 'Vendors', icon: Store },
 ];
 
-const monthOf = (value) => String(value || '').slice(0, 7);
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => istDate(new Date());
 
 function Stat({ label, value }) {
   return (
@@ -54,37 +56,42 @@ export default function ReportsPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [stock, setStock] = useState([]);
+  const [returnRows, setReturnRows] = useState([]);
 
   const filtered = useMemo(
     () => filterReportOrders(orders, { channel: channelFilter, from: fromDate, to: toDate }),
     [orders, channelFilter, fromDate, toDate],
   );
+  const refunds = useMemo(() => refundsByOrder(returnRows), [returnRows]);
 
   useEffect(() => {
     hydrateFromApi();
     api.get('/inventory').then(({ data }) => setStock(data.data?.rows || [])).catch(() => setStock([]));
+    api.get('/returns').then(({ data }) => setReturnRows(data.data || [])).catch(() => setReturnRows([]));
   }, [hydrateFromApi]);
 
   const sales = useMemo(() => {
-    const live = filtered.filter((order) => !isCancelled(order));
-    const revenue = netSales(filtered);
+    const counted = (order) => !isCancelled(order) && !isRto(order);
+    const live = filtered.filter(counted);
+    const revenue = netSales(filtered, refunds);
     const months = {};
-    live.forEach((order) => {
-      const key = monthOf(order.createdAt);
-      if (!key) return;
-      months[key] = months[key] || { month: key, revenue: 0, orders: 0 };
-      months[key].revenue += Number(order.total) || 0;
-      months[key].orders += 1;
+    filtered.forEach((order) => {
+      const key = istMonth(order.createdAt);
+      if (key) months[key] = [...(months[key] || []), order];
     });
     return {
       revenue,
+      gross: grossSales(filtered),
       count: live.length,
       aov: live.length ? Math.round(revenue / live.length) : 0,
-      cancelled: filtered.length - live.length,
-      byMonth: Object.values(months).sort((a, b) => a.month.localeCompare(b.month)),
-      byChannel: salesByChannel(filtered, channelFilter ? [channelFilter] : connected.labels),
+      cancelled: filtered.filter(isCancelled).length,
+      byMonth: Object.entries(months)
+        .map(([month, rows]) => ({ month, revenue: netSales(rows, refunds), orders: rows.filter(counted).length }))
+        .filter((row) => row.orders)
+        .sort((a, b) => a.month.localeCompare(b.month)),
+      byChannel: salesByChannel(filtered, channelFilter ? [channelFilter] : connected.labels, refunds),
     };
-  }, [filtered, channelFilter, connected.labels]);
+  }, [filtered, refunds, channelFilter, connected.labels]);
 
   const inventory = useMemo(() => {
     const warehouses = {};
@@ -106,25 +113,7 @@ export default function ReportsPage() {
     };
   }, [stock]);
 
-  const shipping = useMemo(() => {
-    const shipped = filtered.filter((order) => trackingOf(order));
-    const couriers = {};
-    shipped.forEach((order) => {
-      const name = order.courier || `${order.channel} logistics`;
-      couriers[name] = couriers[name] || { courier: name, shipments: 0, delivered: 0, cancelled: 0 };
-      couriers[name].shipments += 1;
-      if (order.status === 'Delivered') couriers[name].delivered += 1;
-      if (order.status === 'Cancelled') couriers[name].cancelled += 1;
-    });
-    return {
-      total: shipped.length,
-      delivered: shipped.filter((order) => order.status === 'Delivered').length,
-      inTransit: shipped.filter((order) => order.status === 'Dispatched').length,
-      cancelledAfterDispatch: shipped.filter((order) => order.status === 'Cancelled').length,
-      rto: shipped.filter((order) => `${order.channelStatus || ''} ${(order.channelLines || []).map((line) => line.status).join(' ')}`.toUpperCase().includes('RTO') || order.reversePickup?.returnId).length,
-      couriers: Object.values(couriers).sort((a, b) => b.shipments - a.shipments),
-    };
-  }, [filtered]);
+  const shipping = useMemo(() => shippingStats(filtered), [filtered]);
 
   const cancellations = useMemo(() => {
     const cancelled = filtered.filter(isCancelled);
@@ -142,9 +131,7 @@ export default function ReportsPage() {
     };
   }, [filtered]);
 
-  const vendorLines = useMemo(() => orders.flatMap((order) => (order.subOrders || [])
-    .filter((sub) => sub.assignedVendor)
-    .map((sub) => ({ order, sub, vendor: vendorReportLabel(sub.assignedVendor), month: monthOf(sub.assignedDate || order.createdAt) }))), [orders]);
+  const vendorLines = useMemo(() => vendorReportLines(filtered, vendorReportLabel), [filtered]);
 
   const vendorRows = useMemo(() => {
     const map = {};
@@ -154,7 +141,7 @@ export default function ReportsPage() {
       if (['Dispatched'].includes(sub.vendorStatus)) row.shipped += 1;
       else if (sub.vendorStatus === 'Delivered') row.delivered += 1;
       else row.pending += 1;
-      row.value += Number(sub.price) || 0;
+      row.value = sumMoney([row.value, sub.price]);
       map[vendor] = row;
     });
     return Object.values(map).sort((a, b) => b.orders - a.orders);
@@ -178,7 +165,7 @@ export default function ReportsPage() {
         const k = key(line);
         groups[k] = groups[k] || { month: line.month, vendor: line.vendor, lines: 0, value: 0 };
         groups[k].lines += 1;
-        groups[k].value += Number(line.sub.price) || 0;
+        groups[k].value = sumMoney([groups[k].value, line.sub.price]);
       });
       const header = kind === 'month' ? ['Month', 'Vendor', 'Lines', 'Assign value'] : ['Vendor', 'Lines', 'Assign value'];
       downloadCsv(`vendor-${kind}-${today()}.csv`, header, Object.values(groups).map((g) => (kind === 'month' ? [g.month, g.vendor, g.lines, g.value] : [g.vendor, g.lines, g.value])));
@@ -189,7 +176,7 @@ export default function ReportsPage() {
   const exportCurrent = () => {
     if (activeTab === 'sales') {
       downloadCsv(`sales-${today()}.csv`, ['Order', 'Date', 'Channel', 'Status', 'Payment', 'Items', 'Total'],
-        filtered.map((order) => [order.id, String(order.createdAt || '').slice(0, 10), order.channel, order.status, order.paymentMode, (order.items || []).length, order.total]));
+        filtered.map((order) => [order.id, istDate(order.createdAt), order.channel, order.status, order.paymentMode, (order.items || []).length, order.total]));
     } else if (activeTab === 'inventory') {
       downloadCsv(`inventory-${today()}.csv`, ['SKU', 'Product', 'Warehouse', 'Stock', 'Reserved', 'Available'],
         stock.map((row) => [row.sku, row.productName, row.warehouse, row.stock, row.reserved, row.available]));
@@ -239,7 +226,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {['sales', 'shipping', 'returns'].includes(activeTab) && (
+      {['sales', 'shipping', 'returns', 'vendors'].includes(activeTab) && (
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-48">
             <p className="mb-1 text-sm font-medium">Channel</p>
@@ -264,14 +251,15 @@ export default function ReportsPage() {
 
       {activeTab === 'sales' && (
         <div className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Stat label="Net sales (excl. cancelled)" value={formatINR(sales.revenue)} />
-            <Stat label="Orders (excl. cancelled)" value={sales.count} />
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <Stat label="Net sales (excl. cancelled, RTO, refunds)" value={formatINR(sales.revenue)} />
+            <Stat label="Gross sales (booked, excl. cancelled)" value={formatINR(sales.gross)} />
+            <Stat label="Orders (excl. cancelled, RTO)" value={sales.count} />
             <Stat label="Avg order value" value={formatINR(sales.aov)} />
             <Stat label="Cancelled orders" value={sales.cancelled} />
           </div>
           <Card>
-            <CardHeader><CardTitle>Revenue by month</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Net sales by month (IST)</CardTitle></CardHeader>
             <CardContent>
               {sales.byMonth.length === 0 ? <EmptyState title="No sales yet" /> : (
                 <ResponsiveContainer width="100%" height={240}>
@@ -470,7 +458,7 @@ export default function ReportsPage() {
             <Stat label="Vendors with lines" value={vendorRows.length} />
             <Stat label="Assigned lines" value={vendorLines.length} />
             <Stat label="Pending at vendor" value={vendorRows.reduce((n, row) => n + row.pending, 0)} />
-            <Stat label="Assign value" value={formatINR(vendorRows.reduce((n, row) => n + row.value, 0))} />
+            <Stat label="Assign value" value={formatINR(sumMoney(vendorRows.map((row) => row.value)))} />
           </div>
           <Card>
             <CardHeader>

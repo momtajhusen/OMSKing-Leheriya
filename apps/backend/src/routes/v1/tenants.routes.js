@@ -6,6 +6,7 @@ const { tenantMiddleware } = require('../../middleware/tenant');
 const { requirePermission } = require('../../middleware/requirePermission');
 const tenants = require('../../controllers/tenants.controller');
 const setup = require('../../controllers/setup.controller');
+const dbBackup = require('../../controllers/dbBackup.controller');
 
 const router = require('express').Router();
 const gate = [authMiddleware, tenantMiddleware, requirePermission('tenants.manage')];
@@ -19,6 +20,8 @@ router.get('/setup-checklist', ...gate, asyncHandler(setup.platformSetup));
 router.get('/ops/jobs', ...gate, asyncHandler(tenants.listOpsJobs));
 router.get('/ops/logs', ...gate, asyncHandler(tenants.listOpsLogs));
 router.post('/ops/jobs/:id/retry', ...gate, asyncHandler(tenants.retryOpsJob));
+router.get('/ops/backup/status', ...gate, asyncHandler(dbBackup.status));
+router.post('/ops/backup', ...gate, asyncHandler(dbBackup.download));
 router.post(
   '/',
   ...gate,

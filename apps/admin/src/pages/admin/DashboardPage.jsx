@@ -82,6 +82,7 @@ export default function DashboardPage() {
     returns: summary.returns,
     missingInvoice: summary.missingInvoice,
     revenue: summary.revenue,
+    grossSales: summary.grossSales || 0,
     channels: summary.channels || [],
     statuses: summary.statuses || [],
     trend: summary.trend || [],
@@ -160,7 +161,14 @@ export default function DashboardPage() {
       </div>
 
       <div className="kpi-grid">
-        <KpiCard label="Total Sales" value={formatINR(stats.revenue)} icon={TrendingUp} tone="violet" onClick={() => navigate('/reports')} />
+        <KpiCard
+          label="Net Sales"
+          title={`Net = booked ${formatINR(stats.grossSales)} (excl. cancelled) minus RTO orders and refunded returns`}
+          value={formatINR(stats.revenue)}
+          icon={TrendingUp}
+          tone="violet"
+          onClick={() => navigate('/reports')}
+        />
         {stats.channels.map((row) => (
           <KpiCard key={`sales-${row.channel}`} label={row.channel} value={formatINR(row.revenue)} icon={Package} onClick={() => navigate(ordersChannelPath(row.channel))} />
         ))}
@@ -177,7 +185,9 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader>
-                <CardTitle>Orders Trend ({periodLabel(range, fromDate, toDate)})</CardTitle>
+                <CardTitle>
+                  Orders Trend ({summary.range?.capped ? `${summary.range.from} to ${summary.range.to || 'today'}, max 366 days` : periodLabel(range, fromDate, toDate)})
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={250}>
@@ -231,7 +241,7 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Revenue by Channel (excluding cancelled)</CardTitle>
+              <CardTitle>Sales by Channel (net vs gross booked, excluding cancelled)</CardTitle>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={250}>
@@ -240,7 +250,9 @@ export default function DashboardPage() {
                   <XAxis dataKey="channel" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip formatter={(value) => formatINR(value)} />
-                  <Bar dataKey="revenue" fill="#7C3AED" radius={[6, 6, 0, 0]} />
+                  <Legend />
+                  <Bar dataKey="revenue" name="Net sales" fill="#7C3AED" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="grossSales" name="Gross booked" fill="#C4B5FD" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>

@@ -500,7 +500,13 @@ async function readLocationAvailable(creds, opts = {}) {
     throw err;
   }
   const level = (JSON.parse(res.text || '{}').inventory_levels || [])[0];
-  return Math.max(0, Math.floor(Number(level?.available) || 0));
+  if (level?.available == null || !Number.isFinite(Number(level.available))) {
+    const err = new Error('Shopify sent no stock level for this item at Location A. WH-001 was not updated.');
+    err.statusCode = 502;
+    err.terminal = true;
+    throw err;
+  }
+  return Math.max(0, Math.floor(Number(level.available)));
 }
 
 async function fulfillOrder(creds, opts = {}) {
@@ -637,27 +643,56 @@ function shopifyTracking(order) {
   return { courier: '', awb: '' };
 }
 
+const paise = (value) => Math.round((Number(value) || 0) * 100) / 100;
+const amountSum = (rows, key) => (rows || []).reduce((sum, row) => sum + (Number(row?.[key]) || 0), 0);
+
+/**
+ * Per-unit price after line discounts; GST added when the shop prices exclude tax.
+ * discount_allocations and tax_lines cover the originally ordered quantity, so they are split per original unit.
+ */
+function shopifyUnitPrice(line, taxesIncluded) {
+  const ordered = Math.max(1, Number(line.quantity) || 1);
+  const discount = amountSum(line.discount_allocations, 'amount');
+  const tax = taxesIncluded === false ? amountSum(line.tax_lines, 'price') : 0;
+  return paise((Number(line.price) * ordered - discount + tax) / ordered);
+}
+
+function shopifyShipping(order) {
+  return paise((order.shipping_lines || []).reduce((sum, row) => (
+    sum
+    + Number(row.discounted_price ?? row.price ?? 0)
+    + (order.taxes_included === false ? amountSum(row.tax_lines, 'price') : 0)
+  ), 0));
+}
+
 function mapShopifyOrder(order, creds) {
   const externalOrderId = String(order?.id || '').trim();
   if (!externalOrderId || !Array.isArray(order?.line_items)) return null;
   const cancelled = Boolean(order.cancelled_at);
-  const items = order.line_items.map((line) => ({
-    name: String(line.title || line.sku || ''),
-    sku: String(line.sku || '').trim(),
-    imageUrl: String(line.image?.src || line.image_url || '').trim(),
-    vendor: String(line.vendor || '').trim(),
-    channelVariantId: line.variant_id ? String(line.variant_id) : '',
-    channelProductId: line.product_id ? String(line.product_id) : '',
-    qty: Math.max(1, Number(line.quantity) || 1),
-    price: Number(line.price) || 0,
-    locationId: String(line.origin_location?.id || order.location_id || ''),
-  })).filter((line) => line.sku);
+  const items = order.line_items.map((line) => {
+    const qty = line.current_quantity == null ? Math.max(1, Number(line.quantity) || 1) : Number(line.current_quantity) || 0;
+    return {
+      name: String(line.title || line.sku || ''),
+      sku: String(line.sku || '').trim(),
+      imageUrl: String(line.image?.src || line.image_url || '').trim(),
+      vendor: String(line.vendor || '').trim(),
+      channelVariantId: line.variant_id ? String(line.variant_id) : '',
+      channelProductId: line.product_id ? String(line.product_id) : '',
+      qty,
+      price: shopifyUnitPrice(line, order.taxes_included),
+      locationId: String(line.origin_location?.id || order.location_id || ''),
+    };
+  }).filter((line) => line.sku && line.qty > 0);
+  const partial = String(order.financial_status || '').toLowerCase() === 'partially_paid';
   return {
     externalOrderId,
     channelOrderNo: String(order.name || order.order_number || '').trim(),
     status: cancelled ? 'Cancelled' : (order.fulfillment_status === 'fulfilled' ? 'Dispatched' : 'New'),
     paymentMode: shopifyPayment(order, creds),
-    total: Number(order.total_price) || 0,
+    total: Number(order.current_total_price ?? order.total_price) || 0,
+    codAmount: partial && order.total_outstanding != null ? paise(order.total_outstanding) : null,
+    shippingCharge: shopifyShipping(order),
+    currency: String(order.currency || 'INR'),
     orderDate: order.created_at ? new Date(order.created_at) : new Date(),
     customer: String(order.shipping_address?.name || ''),
     email: String(order.email || order.contact_email || order.customer?.email || '').trim(),
@@ -723,6 +758,7 @@ function returnRowsFromOrders(orders) {
     const orderNo = `SHP-${externalOrderId}`;
     const refunds = Array.isArray(order.refunds) && order.refunds.length ? order.refunds : [null];
     for (const refund of refunds) {
+      if (refund && !refund.refund_line_items?.length) continue;
       const lines = refund?.refund_line_items?.length
         ? refund.refund_line_items
         : (order.line_items || []).map((item) => ({ quantity: item.quantity, line_item: item }));
@@ -796,6 +832,7 @@ module.exports = {
   mapShopifyOrder,
   pullOrders,
   pullReturns,
+  returnRowsFromOrders,
   pushInventory,
   readLocationAvailable,
   readVariantCost,

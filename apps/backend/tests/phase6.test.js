@@ -14,7 +14,7 @@ const IntegrationJob = require('../src/models/IntegrationJob');
 const CustomerReturn = require('../src/models/CustomerReturn');
 const Shipment = require('../src/models/Shipment');
 const CourierAccount = require('../src/models/CourierAccount');
-const { stockIn, restockReturn } = require('../src/services/inventory.service');
+const { stockIn, restockReturn, reserveStock } = require('../src/services/inventory.service');
 const { ensureDefaultWarehouses } = require('../src/services/warehouse.service');
 const { channelQty, runInventoryJob } = require('../src/services/inventoryPush.service');
 const { upsertConnection } = require('../src/services/channelConnection.service');
@@ -182,6 +182,7 @@ test('return receive restocks WH-001 and raises channel ATS for the chosen chann
     channel: 'Shopify',
     status: 'Delivered',
     source: 'manual',
+    orderDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
     items: [{ sku: 'KURTA-RED-L', name: 'Kurta', qty: 1 }],
   });
   const beforeOrders = await Order.countDocuments({ tenantId: tenant._id });
@@ -311,6 +312,9 @@ test('the third NDR on the same order becomes RTO once and does not restock agai
     syncStatus: 'synced',
   });
   await stockIn(String(tenant._id), null, { masterSkuId: sku._id, warehouseId: physical._id, qty: 2, reason: 'opening' });
+  await reserveStock(String(tenant._id), null, {
+    masterSkuId: sku._id, warehouseId: physical._id, channel: 'shopify', qty: 1, idempotencyKey: 'shp-ndr3', orderRef: 'SHP-NDR3',
+  });
   const order = await Order.create({
     tenantId: tenant._id,
     orderNo: 'SHP-NDR3',

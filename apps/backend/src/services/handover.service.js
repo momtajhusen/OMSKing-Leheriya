@@ -2,6 +2,7 @@ const Order = require('../models/Order');
 const HandoverManifest = require('../models/HandoverManifest');
 const { HttpError } = require('../utils/httpError');
 const { warehouseResolver } = require('./channelWarehouse.service');
+const { codCollectAmount } = require('../utils/payment');
 
 const skip = (query) => query.setOptions({ skipTenantFilter: true });
 const CLOSED = ['Delivered', 'Cancelled', 'Returned'];
@@ -33,7 +34,7 @@ function manifestRow(order) {
     city: order.city || '',
     pincode,
     paymentMode: order.paymentMode || '',
-    codAmount: order.paymentMode === 'COD' ? Number(order.total) || 0 : 0,
+    codAmount: codCollectAmount(order),
     qty: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 0), 0),
     weightKg: (order.items || []).reduce((sum, item) => sum + (Number(item.weightKg) || 0) * (Number(item.qty) || 1), 0),
   };
@@ -48,7 +49,7 @@ function view(doc) {
     day: doc.day,
     createdAt: doc.createdAt,
     count: rows.length,
-    codTotal: rows.reduce((sum, row) => sum + (Number(row.codAmount) || 0), 0),
+    codTotal: rows.reduce((sum, row) => sum + Math.round((Number(row.codAmount) || 0) * 100), 0) / 100,
     rows,
   };
 }

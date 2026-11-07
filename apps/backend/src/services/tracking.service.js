@@ -25,11 +25,15 @@ async function applyTracking(tenantId, { orderNo, awb, status, detail, attempt, 
   const orderId = String(order._id);
   const before = await orderCount(tenantId);
   const waybill = String(awb || order.awb || '').trim();
+  const ignored = (reason) => ({ order, shipment: null, duplicate: false, ignored: reason, orderCount: before, orderId });
+  if (order.status === 'Cancelled') return ignored('Order is cancelled');
   let shipment = waybill
-    ? await skip(Shipment.findOne({ tenantId, awb: waybill, status: 'booked' }))
-    : null;
-  if (!shipment) shipment = await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked' }));
+    ? await skip(Shipment.findOne({ tenantId, orderNo, awb: waybill, status: 'booked' }))
+    : await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked' }));
   if (!shipment) {
+    const otherBooked = await skip(Shipment.exists({ tenantId, orderNo, status: 'booked' }));
+    const cancelled = waybill && await skip(Shipment.exists({ tenantId, orderNo, awb: waybill, status: 'cancelled' }));
+    if (!waybill || otherBooked || cancelled || (order.awb && order.awb !== waybill)) return ignored('No booked shipment for this AWB');
     shipment = await Shipment.create({
       tenantId,
       orderNo,
@@ -54,7 +58,11 @@ async function applyTracking(tenantId, { orderNo, awb, status, detail, attempt, 
   shipment.deliveryStatus = status;
   await shipment.save();
 
-  if (status === 'ndr') {
+  const delivered = order.status === 'Delivered';
+  const rto = order.channelStatus === 'RTO' || Boolean(order.rtoRestockedAt);
+  if (delivered || (rto && ORDER_STATUS[status])) {
+    // History only: a delivered order never moves back, and an RTO parcel is not delivered to the customer.
+  } else if (status === 'ndr') {
     const seen = (shipment.trackingEvents || []).filter((row) => row.status === 'ndr').length;
     const attemptNo = Math.max(seen, Number(attempt) || 0, 1);
     const existing = await skip(NdrCase.findOne({ tenantId, orderNo }));
@@ -90,6 +98,7 @@ async function applyTracking(tenantId, { orderNo, awb, status, detail, attempt, 
     ).setOptions({ skipTenantFilter: true });
   } else if (ORDER_STATUS[status]) {
     order.status = ORDER_STATUS[status];
+    if (!order.pickedUpAt) order.pickedUpAt = new Date();
     if (waybill) order.awb = waybill;
     await order.save();
     const { notifyEventEmail } = require('./notify.service');
@@ -160,6 +169,7 @@ async function convertNdrToRto(tenantId, orderNo) {
   const before = await orderCount(tenantId);
   const order = await skip(Order.findOne({ tenantId, orderNo }));
   if (!order) throw new HttpError(404, 'Order not found');
+  if (order.status === 'Delivered') throw new HttpError(400, 'This order was delivered, so it cannot be turned into an RTO.');
   const ndr = await skip(NdrCase.findOne({ tenantId, orderNo }));
   if (!ndr) throw new HttpError(404, 'No NDR is open for this order');
   ndr.status = 'rto';

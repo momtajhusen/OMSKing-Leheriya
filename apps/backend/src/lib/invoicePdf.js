@@ -1,5 +1,5 @@
 const {
-  invoiceNumber, creditNoteNumber, lineTax, shipToState, gstStateCode, fromPaise, toPaise,
+  invoiceNumber, creditNoteNumber, invoiceTotals, gstStateCode, stateName, fromPaise, toPaise,
 } = require('../services/finance.service');
 
 function escapePdfText(value) {
@@ -123,26 +123,9 @@ function buildInvoicePdf(order, { company = {}, warehouseState = '', kind = 'inv
   const invoiceNo = invoiceNumber(order);
   const creditNoteNo = creditNoteNumber(order);
   const number = kind === 'credit' ? creditNoteNo : invoiceNo;
-  const ship = shipToState(order);
-  const taxes = (order.items || []).map((item) => ({
-    item,
-    tax: lineTax(item, { warehouseState, shipState: ship }),
-  }));
-  const totalsPaise = taxes.reduce((acc, row) => ({
-    taxable: acc.taxable + toPaise(row.tax.taxable),
-    cgst: acc.cgst + toPaise(row.tax.cgst),
-    sgst: acc.sgst + toPaise(row.tax.sgst),
-    igst: acc.igst + toPaise(row.tax.igst),
-    gross: acc.gross + toPaise(row.tax.gross),
-  }), { taxable: 0, cgst: 0, sgst: 0, igst: 0, gross: 0 });
-  const totals = {
-    taxable: fromPaise(totalsPaise.taxable),
-    cgst: fromPaise(totalsPaise.cgst),
-    sgst: fromPaise(totalsPaise.sgst),
-    igst: fromPaise(totalsPaise.igst),
-    gross: fromPaise(totalsPaise.gross),
-  };
-  const intraState = Boolean(taxes[0]?.tax.intraState);
+  const {
+    lines: taxes, totals, intraState, shipState: ship,
+  } = invoiceTotals(order, { warehouseState });
   const orderId = String(order.channelOrderNo || '').replace(/^#/, '') || order.orderNo || order.id || '';
   const L = 20;
   const R = 575;
@@ -163,13 +146,14 @@ function buildInvoicePdf(order, { company = {}, warehouseState = '', kind = 'inv
     kind === 'credit' ? `Invoice No: ${invoiceNo}` : '',
     `Order Id: ${orderId}`,
     `Invoice Date: ${invoiceDateText(order.invoiceGeneratedAt || order.orderDate)}`,
+    kind === 'credit' ? `Credit Note Date: ${invoiceDateText(order.creditNoteGeneratedAt)}` : '',
     `Payment: ${order.paymentMode || ''}`,
   ].filter(Boolean);
   info.forEach((row, index) => page.text(L + 6, 130 + index * 13, row));
-  const supplyPlace = String(order.city || '').replace(/\b\d{6}\b/, '').replace(/[\s,]+$/, '').trim() || ship;
+  const supplyCode = gstStateCode(ship);
   page.text(300, 130, 'Place of Supply', { bold: true });
-  page.text(300, 143, supplyPlace || '-');
-  page.text(450, 143, `State Code: ${gstStateCode(ship) || '-'}`);
+  page.text(300, 143, supplyCode ? `${stateName(supplyCode)} (${supplyCode})` : (ship || '-'));
+  page.text(450, 143, `State Code: ${supplyCode || '-'}`);
   let top = 130 + info.length * 13 + 4;
   page.line(L, top, R, top);
 
@@ -213,10 +197,8 @@ function buildInvoicePdf(order, { company = {}, warehouseState = '', kind = 'inv
     .forEach(([label, x]) => { if (label) page.text(x, top + 12, label, { bold: true }); });
   top += 18;
   page.line(L, top, R, top);
-  let rateSumPaise = 0;
   taxes.forEach(({ item, tax }) => {
     const nameLines = wrapText(item.name || item.sku || 'Item', 30);
-    rateSumPaise += toPaise(item.price);
     nameLines.forEach((text, at) => page.text(L + 6, top + 13 + at * 10, text));
     page.text(cols.qty, top + 13, item.qty || 1);
     page.text(cols.rate, top + 13, rs(item.price));
@@ -230,7 +212,6 @@ function buildInvoicePdf(order, { company = {}, warehouseState = '', kind = 'inv
     page.line(L, top, R, top);
   });
   page.text(L + 6, top + 13, 'Total', { bold: true });
-  page.text(cols.rate, top + 13, rs(fromPaise(rateSumPaise)), { bold: true });
   page.text(cols.taxable, top + 13, rs(totals.taxable), { bold: true });
   page.text(cols.tax1, top + 13, rs(intraState ? totals.cgst : totals.igst), { bold: true });
   if (intraState) page.text(cols.tax2, top + 13, rs(totals.sgst), { bold: true });

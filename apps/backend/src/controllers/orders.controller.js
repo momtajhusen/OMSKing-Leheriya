@@ -11,10 +11,12 @@ const { warehouseResolver } = require('../services/channelWarehouse.service');
 const { imagesBySku, imageForSku, paintOrder } = require('../lib/catalogImages');
 const { applyDeskRules, stockPools, OPEN } = require('../services/orderDesk.service');
 const { buildOrderSummary, customRange, dayKey } = require('../services/orderSummary.service');
+const { SHIPPING_TABS, ON_THE_WAY, shippingTab } = require('../lib/orderTabs');
 const { vendorContact, labelHtml, invoiceHtml, deliveryStatusFor, escapeHtml } = require('../lib/orderSubOrders');
 const { vendorByName, scopedVendorNames } = require('./vendors.controller');
 const { recordFromReq } = require('../services/auditLog.service');
 const { customerHistory } = require('../services/customerHistory.service');
+const { codCollectAmount, isPaid } = require('../utils/payment');
 
 function nextProcessing(status) {
   if (status === 'New' || status === 'Pending') return 'Processing';
@@ -55,7 +57,7 @@ async function loadOrders(tenantId, vendorNames = null) {
     filter['subOrders.assignedVendor'] = { $in: vendorNames.map((n) => new RegExp(`^${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) };
   }
   return Order.find(filter)
-    .select('-sourceOrderData')
+    .select('-sourceOrderData.id -sourceOrderData.fulfillment_status -sourceOrderData.cancelled_at -sourceOrderData.location_id -sourceOrderData.gateways')
     .sort({ orderDate: -1, createdAt: -1 })
     .lean()
     .setOptions({ skipTenantFilter: true });
@@ -134,14 +136,6 @@ async function decorateOne(tenantId, doc) {
   return painted;
 }
 
-const SHIPPING_TABS = ['Pickup & Manifest', 'In Transit', 'Delivered', 'RTO'];
-const ON_THE_WAY = ['Dispatched', 'In transit'];
-
-function isRto(row) {
-  const codes = `${row.channelStatus || ''} ${(row.channelLines || []).map((line) => line.status || '').join(' ')}`;
-  return codes.toUpperCase().includes('RTO');
-}
-
 /** Booked OMSKing shipments with no courier scan yet are still waiting for pickup. */
 async function awaitingPickup(tenantId, rows) {
   const orderNos = rows.filter((row) => ON_THE_WAY.includes(row.status)).map((row) => row.id);
@@ -154,13 +148,6 @@ async function awaitingPickup(tenantId, rows) {
     deliveryStatus: '',
   }).select('orderNo').lean().setOptions({ skipTenantFilter: true });
   return new Set(waiting.map((row) => row.orderNo));
-}
-
-function shippingTab(row, waiting) {
-  if (isRto(row)) return 'RTO';
-  if (row.status === 'Delivered') return 'Delivered';
-  if (ON_THE_WAY.includes(row.status)) return waiting.has(row.id) ? 'Pickup & Manifest' : 'In Transit';
-  return '';
 }
 
 async function listOrders(req, res) {
@@ -178,30 +165,12 @@ async function listOrders(req, res) {
     const allowed = new Set(String(req.query.connected).split(',').map((name) => name.trim()).filter(Boolean));
     scoped = scoped.filter((row) => allowed.has(row.channel));
   }
-  const counts = {
-    total: scoped.length,
-    New: scoped.filter((row) => row.status === 'New').length,
-    Packed: scoped.filter((row) => row.status === 'Packed').length,
-    'Ready to Ship': scoped.filter((row) => row.status === 'Ready to Ship').length,
-    Unfulfillable: scoped.filter((row) => row.status === 'Unfulfillable').length,
-    Ready: scoped.filter((row) => row.orderReady).length,
-  };
-  const waiting = await awaitingPickup(tenantId, scoped);
-  const tabOf = new Map(scoped.map((row) => [row.id, shippingTab(row, waiting)]));
-  SHIPPING_TABS.forEach((tab) => {
-    counts[tab] = scoped.filter((row) => tabOf.get(row.id) === tab).length;
-  });
   let filtered = scoped;
   const statuses = String(req.query.status || '').split(',').map((value) => value.trim()).filter((value) => value && value !== 'all');
   const channel = String(req.query.channel || '');
   const payment = String(req.query.payment || '');
   const source = String(req.query.source || '');
   const q = String(req.query.q || '').trim().toLowerCase();
-  if (statuses.length) {
-    filtered = filtered.filter((row) => statuses.some((status) => (SHIPPING_TABS.includes(status)
-      ? tabOf.get(row.id) === status
-      : row.status === status)));
-  }
   if (channel && channel !== 'all') filtered = filtered.filter((row) => row.channel === channel);
   if (payment && payment !== 'all') {
     filtered = filtered.filter((row) => (payment === 'Partially Paid'
@@ -230,6 +199,24 @@ async function listOrders(req, res) {
       || (row.subOrders || []).some((sub) => String(sub.id || '').toLowerCase().includes(q))
       || String(row.customer || '').toLowerCase().includes(q));
   }
+  const counts = {
+    total: filtered.length,
+    New: filtered.filter((row) => row.status === 'New').length,
+    Packed: filtered.filter((row) => row.status === 'Packed').length,
+    'Ready to Ship': filtered.filter((row) => row.status === 'Ready to Ship').length,
+    Unfulfillable: filtered.filter((row) => row.status === 'Unfulfillable').length,
+    Ready: filtered.filter((row) => row.orderReady).length,
+  };
+  const waiting = await awaitingPickup(tenantId, filtered);
+  const tabOf = new Map(filtered.map((row) => [row.id, shippingTab(row, waiting)]));
+  SHIPPING_TABS.forEach((tab) => {
+    counts[tab] = filtered.filter((row) => tabOf.get(row.id) === tab).length;
+  });
+  if (statuses.length) {
+    filtered = filtered.filter((row) => statuses.some((status) => (SHIPPING_TABS.includes(status)
+      ? tabOf.get(row.id) === status
+      : row.status === status)));
+  }
   const paged = pageOf(filtered, req.query);
   const presented = await presentOrders(tenantId, paged.rows);
   return paginatedResponse(res, presented, paged.page, paged.limit, paged.total, 'Orders', { counts });
@@ -255,15 +242,14 @@ async function orderSummary(req, res) {
   const ids = String(req.query.channelIds || '').split(',').map((item) => item.trim()).filter(Boolean);
   const labels = String(req.query.channelLabels || '').split(',').map((item) => item.trim()).filter(Boolean);
   const series = ids.map((id, index) => ({ id, label: labels[index] || id }));
-  const returnRows = await CustomerReturn.find({ tenantId }).select('orderNo status').setOptions({ skipTenantFilter: true }).lean();
-  const settledRows = await Order.find({
-    tenantId,
-    channel: 'Shopify',
-    'sourceOrderData.financial_status': { $in: ['paid', 'voided'] },
-  }).select('orderNo').setOptions({ skipTenantFilter: true }).lean();
+  const returnRows = await CustomerReturn.find({ tenantId }).select('orderNo status refundStatus refundAmount').setOptions({ skipTenantFilter: true }).lean();
+  const voided = (row) => row.channel === 'Shopify' && row.sourceOrderData?.financial_status === 'voided';
+  const settledOrderNos = rows.filter((row) => isPaid(row) || voided(row)).map((row) => row.orderNo);
   const summary = buildOrderSummary(data, {
-    returnRows: returnRows.map((row) => ({ orderNo: row.orderNo, status: row.status })),
-    settledOrderNos: settledRows.map((row) => row.orderNo),
+    returnRows: returnRows.map((row) => ({
+      orderNo: row.orderNo, status: row.status, refundStatus: row.refundStatus, refundAmount: row.refundAmount,
+    })),
+    settledOrderNos,
     channel: req.query.channel || 'all',
     days: req.query.days || 'all',
     from: req.query.from,
@@ -411,9 +397,11 @@ async function markPaid(req, res) {
   return successResponse(res, await decorateOne(tenantId, order), 'Payment marked. This order is paid.');
 }
 
+/** Fills missing GST rate / HSN from the Master SKU or product; returns the SKUs that still have no GST rate. */
 async function fillLineTax(tenantId, order) {
-  const open = (order.items || []).filter((item) => !Number(item.gst) || !item.hsn);
-  if (!open.length) return;
+  const { resolveLineRate } = require('../services/finance.service');
+  const open = (order.items || []).filter((item) => !(Number(item.gst) > 0) || !item.hsn);
+  if (!open.length) return [];
   const MasterSku = require('../models/MasterSku');
   const Product = require('../models/Product');
   const ids = open.map((item) => item.masterSkuId).filter(Boolean);
@@ -425,14 +413,17 @@ async function fillLineTax(tenantId, order) {
     ? await Product.find({ tenantId, _id: { $in: productIds } }).select('hsnCode gstRatePercent').setOptions({ skipTenantFilter: true }).lean()
     : [];
   const productOf = new Map(products.map((row) => [String(row._id), row]));
+  const missing = [];
   open.forEach((item) => {
     const master = masters.find((row) => String(row._id) === String(item.masterSkuId || ''))
       || masters.find((row) => row.code === String(item.sku || '').trim().toUpperCase());
-    if (!master) return;
-    const product = productOf.get(String(master.productId || '')) || {};
-    if (!Number(item.gst)) item.gst = Number(master.gstRatePercent) || Number(product.gstRatePercent) || 0;
-    if (!item.hsn) item.hsn = master.hsnCode || product.hsnCode || '';
+    const product = master ? productOf.get(String(master.productId || '')) || {} : {};
+    const rate = resolveLineRate(item, master, product);
+    if (rate === null) missing.push(item.sku || item.name || 'item');
+    else item.gst = rate;
+    if (master && !item.hsn) item.hsn = master.hsnCode || product.hsnCode || '';
   });
+  return missing;
 }
 
 async function generateInvoice(req, res) {
@@ -444,14 +435,49 @@ async function generateInvoice(req, res) {
   const Warehouse = require('../models/Warehouse');
   const { buildInvoicePdf, emailInvoicePdf } = require('../lib/invoicePdf');
   const { mailboxOf, sendMail } = require('../lib/mailer');
+  const {
+    gstinState, sameState, gstStateCode, shipToState, channelIssuesInvoice,
+  } = require('../services/finance.service');
+  const kind = req.body?.kind === 'credit' ? 'credit' : 'invoice';
+  if (kind === 'invoice' && channelIssuesInvoice(order)) {
+    throw new HttpError(400, `Invoice not created. ${order.channel} issues the tax invoice for this order. Open it from ${order.channel}.`);
+  }
+  if (kind === 'credit' && !order.invoiceGeneratedAt) {
+    throw new HttpError(400, 'Credit note not created. No tax invoice was issued for this order, so there is nothing to credit.');
+  }
+  const frozen = order.invoiceSnapshot?.order ? order.invoiceSnapshot : null;
+  if (frozen) {
+    if (req.body?.customerGstin !== undefined) {
+      const asked = String(req.body.customerGstin || '').replace(/\s+/g, '').toUpperCase();
+      if (asked && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(asked)) {
+        throw new HttpError(400, 'Customer GSTIN is not valid. It has 15 characters, like 07AAQCP4784P1ZB.');
+      }
+      order.customerGstin = asked;
+      order.invoiceSnapshot = { ...frozen, order: { ...frozen.order, customerGstin: asked } };
+      order.markModified('invoiceSnapshot');
+    }
+    if (kind === 'credit' && !order.creditNoteGeneratedAt) order.creditNoteGeneratedAt = new Date();
+    const source = { ...order.toObject(), ...order.invoiceSnapshot.order };
+    const pdf = buildInvoicePdf(source, { company: frozen.company, warehouseState: frozen.warehouseState, kind });
+    await order.save();
+    return sendInvoice(req, res, { tenantId, order, source, pdf, kind, warehouseState: frozen.warehouseState, emailInvoicePdf, mailboxOf, sendMail });
+  }
   const tenant = await Tenant.findById(tenantId).setOptions({ skipTenantFilter: true });
-  const home = await Warehouse.findOne({ tenantId, code: 'WH-001' }).setOptions({ skipTenantFilter: true });
+  const ownCode = String(order.warehouseCode || '').trim();
+  const own = ownCode ? await Warehouse.findOne({ tenantId, code: ownCode }).setOptions({ skipTenantFilter: true }) : null;
+  const home = own || await Warehouse.findOne({ tenantId, code: 'WH-001' }).setOptions({ skipTenantFilter: true });
+  const homeCode = home?.code || 'WH-001';
   const warehouseState = home?.address?.state || '';
-  const { gstinState, sameState } = require('../services/finance.service');
   const gstin = String(tenant?.legalEntity?.gstin || '').trim();
   const registered = gstinState(gstin);
   if (registered && warehouseState && !sameState(registered, warehouseState)) {
-    throw new HttpError(400, `Invoice not created. GSTIN ${gstin} is registered in ${registered}, but pickup warehouse WH-001 is in ${warehouseState}. Correct the GSTIN in Company Details or the state in Warehouses, then generate the invoice again.`);
+    throw new HttpError(400, `Invoice not created. GSTIN ${gstin} is registered in ${registered}, but pickup warehouse ${homeCode} is in ${warehouseState}. Correct the GSTIN in Company Details or the state in Warehouses, then generate the invoice again.`);
+  }
+  if (!gstStateCode(warehouseState || registered)) {
+    throw new HttpError(400, `Invoice not created. The seller state is unknown: warehouse ${homeCode} has ${warehouseState ? `"${warehouseState}", which is not a GST state` : 'no state'} and the company GSTIN is not set. Set the state in Warehouses or the GSTIN in Company Details.`);
+  }
+  if (!gstStateCode(shipToState(order))) {
+    throw new HttpError(400, `Invoice not created. The place of supply could not be found: the buyer state "${shipToState(order) || order.city || ''}" is not a GST state. Add the state to the order address, then generate the invoice again.`);
   }
   if (req.body?.customerGstin !== undefined) {
     const customerGstin = String(req.body.customerGstin || '').replace(/\s+/g, '').toUpperCase();
@@ -460,25 +486,46 @@ async function generateInvoice(req, res) {
     }
     order.customerGstin = customerGstin;
   }
-  await fillLineTax(tenantId, order);
-  const kind = req.body?.kind === 'credit' ? 'credit' : 'invoice';
-  const pdf = buildInvoicePdf(order.toObject(), {
-    company: {
-      companyName: tenant?.name || '',
-      legalName: tenant?.legalEntity?.legalName || '',
-      gstin: tenant?.legalEntity?.gstin || '',
-      email: tenant?.legalEntity?.email || '',
-      phone: tenant?.legalEntity?.phone || '',
-      address: tenant?.legalEntity?.address || '',
-      city: [tenant?.legalEntity?.city, tenant?.legalEntity?.district].filter(Boolean).join(', '),
-      website: String(tenant?.settings?.storefrontUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
-    },
-    warehouseState: warehouseState || registered,
-    kind,
-  });
-  order.invoiceNo = pdf.invoiceNo;
-  order.invoiceGeneratedAt = new Date();
+  const missingRate = await fillLineTax(tenantId, order);
+  if (missingRate.length) {
+    throw new HttpError(400, `Invoice not created. No GST rate for ${missingRate.join(', ')}. Set the GST % on the Master SKU or product, then generate the invoice again.`);
+  }
+  if (kind === 'credit') {
+    if (!order.creditNoteGeneratedAt) order.creditNoteGeneratedAt = new Date();
+  } else if (!order.invoiceGeneratedAt) {
+    order.invoiceGeneratedAt = new Date();
+  }
+  const company = {
+    companyName: tenant?.name || '',
+    legalName: tenant?.legalEntity?.legalName || '',
+    gstin: tenant?.legalEntity?.gstin || '',
+    email: tenant?.legalEntity?.email || '',
+    phone: tenant?.legalEntity?.phone || '',
+    address: tenant?.legalEntity?.address || '',
+    city: [tenant?.legalEntity?.city, tenant?.legalEntity?.district].filter(Boolean).join(', '),
+    website: String(tenant?.settings?.storefrontUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
+  };
+  const sellerState = warehouseState || registered;
+  const source = order.toObject();
+  const pdf = buildInvoicePdf(source, { company, warehouseState: sellerState, kind });
+  if (kind === 'invoice') {
+    order.invoiceNo = pdf.invoiceNo;
+    order.invoiceSnapshot = { order: invoiceFacts({ ...source, invoiceNo: pdf.invoiceNo }), company, warehouseState: sellerState };
+  }
   await order.save();
+  return sendInvoice(req, res, {
+    tenantId, order, source: { ...source, invoiceNo: order.invoiceNo }, pdf, kind, warehouseState: sellerState, emailInvoicePdf, mailboxOf, sendMail,
+  });
+}
+
+const INVOICE_FACTS = ['items', 'shippingCharge', 'total', 'currency', 'customer', 'customerGstin', 'address', 'city', 'shipState', 'phone',
+  'invoiceNo', 'orderNo', 'externalOrderId', 'channelOrderNo', 'orderDate', 'paymentMode'];
+
+function invoiceFacts(order) {
+  return Object.fromEntries(INVOICE_FACTS.filter((key) => order[key] !== undefined).map((key) => [key, order[key]]));
+}
+
+async function sendInvoice(req, res, { tenantId, order, source, pdf, kind, warehouseState, emailInvoicePdf, mailboxOf, sendMail }) {
   const invoiceEmail = req.body?.email === false
     ? { emailed: false, skipped: true, reason: 'not requested' }
     : await emailInvoicePdf({
@@ -491,9 +538,10 @@ async function generateInvoice(req, res) {
       sendMail,
     });
   const dto = await decorateOne(tenantId, order);
+  const facts = invoiceFacts(source);
   return successResponse(res, {
     ...dto,
-    invoiceHtml: invoiceHtml(dto, { warehouseState: warehouseState || registered, kind }),
+    invoiceHtml: invoiceHtml({ ...dto, ...facts, id: dto.id }, { warehouseState, kind }),
     invoicePdf: pdf.bytes.toString('base64'),
     invoiceEmail,
   }, invoiceEmail.emailed ? 'Invoice emailed' : 'Invoice PDF ready. Email was not sent.');
@@ -671,9 +719,11 @@ async function patchStatus(req, res) {
   if (['Packed', 'Ready to Ship'].includes(status) && (order.items || []).some((item) => !item.masterSkuId)) {
     throw new HttpError(400, 'Map the SKU before this order can be packed.');
   }
+  await require('../services/ship.service').assertStatusChange(tenantId, order, status);
   order.status = status;
   if (status === 'Dispatched' && !order.pickedUpAt) order.pickedUpAt = new Date();
   if (status === 'Cancelled') {
+    order.cancelSource = 'oms';
     const { releaseOrderReserve } = require('../services/ship.service');
     await releaseOrderReserve(tenantId, order);
   }
@@ -930,7 +980,9 @@ async function courierManifests(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
   const { day, start, end } = manifestDay(req.query.date);
-  const rows = await deskOrders(tenantId, await loadOrders(tenantId));
+  const docs = await loadOrders(tenantId);
+  const codByOrder = new Map(docs.map((doc) => [doc.orderNo, codCollectAmount(doc)]));
+  const rows = await deskOrders(tenantId, docs);
   const labelledToday = (row) => {
     const at = row.labelGeneratedAt ? new Date(row.labelGeneratedAt).getTime() : NaN;
     return at >= start.getTime() && at < end.getTime();
@@ -942,7 +994,7 @@ async function courierManifests(req, res) {
   picked.forEach((row) => {
     const courier = String(row.courier || '').trim() || 'Other';
     if (!byCourier.has(courier)) byCourier.set(courier, []);
-    const cod = row.paymentMode === 'COD' ? Number(row.total) || 0 : 0;
+    const cod = codByOrder.get(row.orderNo) || 0;
     byCourier.get(courier).push({
       orderNo: row.orderNo,
       channel: row.channel,
@@ -963,7 +1015,7 @@ async function courierManifests(req, res) {
       courier,
       date: day,
       count: list.length,
-      codTotal: list.reduce((sum, row) => sum + row.codAmount, 0),
+      codTotal: list.reduce((sum, row) => sum + Math.round(row.codAmount * 100), 0) / 100,
       rows: list,
     }));
   return successResponse(res, {

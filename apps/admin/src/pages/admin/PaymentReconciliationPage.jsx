@@ -6,6 +6,7 @@ import api, { apiError } from '../../lib/api';
 import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate } from '../../utils/format';
 import { downloadCsv } from '../../lib/orderMetrics';
+import { isPaid, awaitsPayment } from '../../lib/paymentStatus';
 import { orderChannelLabel } from '../../constants/channelCatalog';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
@@ -37,11 +38,10 @@ export default function PaymentReconciliationPage() {
   }, [hydrateFromApi]);
 
   const open = useMemo(() => orders
-    .filter((order) => order.status === 'Delivered' || order.status === 'Dispatched')
-    .filter((order) => !(order.channel === 'Shopify' && order.paid))
+    .filter(awaitsPayment)
     .map((order) => {
       const ageing = dayjs().diff(dayjs(order.createdAt), 'day');
-      return { ...order, ageing, flagged: !order.paid && ageing > AGEING_THRESHOLD_DAYS };
+      return { ...order, ageing, flagged: !isPaid(order) && ageing > AGEING_THRESHOLD_DAYS };
     })
     .sort((a, b) => b.ageing - a.ageing), [orders]);
 
@@ -210,7 +210,7 @@ export default function PaymentReconciliationPage() {
                         {settlement.find((row) => row.orderNo === order.id)?.label === 'Payment Received' && <Badge variant="outline">Payment Received</Badge>}
                         {settlement.find((row) => row.orderNo === order.id)?.status === 'exception' && <Badge variant="destructive">Exception</Badge>}
                         {!settlement.find((row) => row.orderNo === order.id) && <span className="text-sm text-muted-foreground">No file matched</span>}
-                        {order.channel === 'Shopify' && !order.paid && (
+                        {order.channel === 'Shopify' && !isPaid(order) && (
                           <Button className="ml-2" size="sm" variant="outline" disabled={busy === order.id} onClick={() => markPaid(order)}>Mark paid</Button>
                         )}
                       </TableCell>
@@ -226,7 +226,7 @@ export default function PaymentReconciliationPage() {
       <Card>
         <CardHeader>
           <CardTitle>Marketplace settlement file</CardTitle>
-          <CardDescription>CSV columns: order, gross, commission, shipping, fees, tcs, tds, refunds, net. Expected net is gross minus those deductions. A mismatch stays an exception.</CardDescription>
+          <CardDescription>CSV columns: order, gross, commission, shipping, fees, tcs, tds, refunds, net. Expected net is gross minus those deductions. Lines of one order are added up; gross must match the order total within ₹0.50. A mismatch, a missing net or a refund-only line never marks the order paid, and the same file cannot be imported twice.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -261,9 +261,9 @@ export default function PaymentReconciliationPage() {
                 {settlement.map((row) => (
                   <TableRow key={`${row.key}-${row.orderNo || 'none'}`}>
                     <TableCell className="font-mono text-xs">{row.orderNo || row.key}</TableCell>
-                    <TableCell><Badge variant={row.label === 'Payment Received' ? 'outline' : 'destructive'}>{row.label || row.status}</Badge></TableCell>
-                    <TableCell className="text-right">{formatINR(row.expected)}</TableCell>
-                    <TableCell className="text-right">{formatINR(row.net)}</TableCell>
+                    <TableCell><Badge variant={row.status === 'matched' ? 'outline' : row.status === 'refund' ? 'secondary' : 'destructive'}>{row.label || row.status}</Badge></TableCell>
+                    <TableCell className="text-right">{row.expected == null ? '—' : formatINR(row.expected)}</TableCell>
+                    <TableCell className="text-right">{row.net == null ? '—' : formatINR(row.net)}</TableCell>
                     <TableCell className="text-sm">{row.exception || '—'}</TableCell>
                   </TableRow>
                 ))}

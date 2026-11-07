@@ -14,7 +14,7 @@ const Inventory = require('../src/models/Inventory');
 const InventoryLedger = require('../src/models/InventoryLedger');
 const Shipment = require('../src/models/Shipment');
 const CustomerReturn = require('../src/models/CustomerReturn');
-const { stockIn } = require('../src/services/inventory.service');
+const { stockIn, reserveStock } = require('../src/services/inventory.service');
 const { applyTracking } = require('../src/services/tracking.service');
 const { receiveReturn } = require('../src/services/returnsFlow.service');
 const { bookShopify, cancelShopifyLabel, bookMarketplace } = require('../src/services/ship.service');
@@ -281,6 +281,9 @@ test('NDR then RTO then Return Received restocks once when the receipt is replay
   });
   const warehouse = await Warehouse.findOne({ tenantId: tenant._id, code: 'WH-001' });
   await stockIn(String(tenant._id), null, { masterSkuId: sku._id, warehouseId: warehouse._id, qty: 1, reason: 'opening' });
+  await reserveStock(String(tenant._id), null, {
+    masterSkuId: sku._id, warehouseId: warehouse._id, channel: 'shopify', qty: 1, idempotencyKey: 'shp-rto-once', orderRef: 'SHP-RTO-ONCE',
+  });
   await Order.create({
     tenantId: tenant._id,
     orderNo: 'SHP-RTO-ONCE',
@@ -308,7 +311,7 @@ test('NDR then RTO then Return Received restocks once when the receipt is replay
   const balance = await Inventory.findOne({ tenantId: tenant._id, masterSkuId: sku._id, warehouseId: warehouse._id });
   const rtoRows = await InventoryLedger.countDocuments({ tenantId: tenant._id, referenceId: 'SHP-RTO-ONCE', movementType: 'rto_restock' });
   const returnRows = await InventoryLedger.countDocuments({ tenantId: tenant._id, referenceId: 'RET-RTO-ONCE', movementType: 'return_restock' });
-  assert.equal(balance.physicalQty, 2);
+  assert.equal(balance.physicalQty, 1, 'opening 1, minus 1 on dispatch, plus 1 on RTO');
   assert.equal(rtoRows, 1);
   assert.equal(returnRows, 0);
   const saved = await CustomerReturn.findOne({ tenantId: tenant._id, returnNo: 'RET-RTO-ONCE' });

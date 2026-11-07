@@ -7,6 +7,7 @@ const { getConnection, credsOf } = require('./channelConnection.service');
 const { releaseReservation } = require('./inventory.service');
 const { enqueue } = require('./jobQueue.service');
 const { bookPaymentMode } = require('./orderDesk.service');
+const { codCollectAmount } = require('../utils/payment');
 const { orderPackage } = require('./packageDefaults.service');
 const delhivery = require('../adapters/couriers/delhivery');
 const shopify = require('../adapters/shopify');
@@ -51,7 +52,53 @@ async function saveShipment(doc) {
   return Shipment.create(doc);
 }
 
+const BOOKING_LOCK_MS = 2 * 60 * 1000;
+const NO_LABEL_STATUS = ['Cancelled', 'Delivered'];
+const OPEN_STATUS = ['New', 'Processing', 'Pending', 'Packed', 'Ready to Ship'];
+const LEFT_STATUS = /^(shipped|in transit|out for delivery|delivered)$/i;
+const MOVED_SCANS = ['picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'rto', 'ndr'];
+
+/** One label booking per order at a time; the courier is never called twice for the same order. */
+async function withBookingLock(tenantId, orderNo, fn) {
+  const order = await skip(Order.findOne({ tenantId, orderNo }));
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (NO_LABEL_STATUS.includes(order.status)) {
+    const err = new HttpError(400, `This order is ${order.status}. No label was booked.`);
+    err.terminal = true;
+    throw err;
+  }
+  const now = new Date();
+  const claim = await skip(Order.updateOne(
+    { _id: order._id, tenantId, $or: [{ bookingAt: null }, { bookingAt: { $lt: new Date(now.getTime() - BOOKING_LOCK_MS) } }] },
+    { $set: { bookingAt: now } },
+  ));
+  if (!claim.modifiedCount) throw new HttpError(409, 'A label is already being booked for this order. Try again in a minute.');
+  try {
+    return await fn();
+  } finally {
+    await skip(Order.updateOne({ _id: order._id, tenantId, bookingAt: now }, { $set: { bookingAt: null } }));
+  }
+}
+
+function leftWarehouse(order) {
+  return Boolean(order.pickedUpAt) || LEFT_STATUS.test(order.status || '');
+}
+
+/** Manual status changes may not undo a booked label or a parcel that already left. */
+async function assertStatusChange(tenantId, order, status) {
+  if (status === order.status || !(OPEN_STATUS.includes(status) || status === 'Cancelled')) return;
+  if (leftWarehouse(order)) {
+    throw new HttpError(400, `This order already left the warehouse, so it cannot be set to ${status}. Use RTO or a return instead.`);
+  }
+  const booked = await skip(Shipment.findOne({ tenantId, orderNo: order.orderNo, status: 'booked' }));
+  if (booked) throw new HttpError(400, `This order has a booked AWB ${booked.awb}. Cancel the label first.`);
+}
+
 async function bookShopify(tenantId, orderNo, deps = {}) {
+  return withBookingLock(tenantId, orderNo, () => bookShopifyNow(tenantId, orderNo, deps));
+}
+
+async function bookShopifyNow(tenantId, orderNo, deps = {}) {
   const order = await skip(Order.findOne({ tenantId, orderNo }));
   if (!order) throw new HttpError(404, 'Order not found');
   if (String(order.channel).toLowerCase() !== 'shopify') {
@@ -60,7 +107,16 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
     throw err;
   }
   const existing = await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked' }));
-  if (existing?.shopifyFulfillmentId) return existing;
+  if (existing?.shopifyFulfillmentId) {
+    if (order.awb !== existing.awb) {
+      order.awb = existing.awb;
+      if (existing.courier === 'delhivery') order.courier = 'Delhivery';
+      order.status = 'Dispatched';
+      order.labelGeneratedAt = order.labelGeneratedAt || existing.bookedAt || new Date();
+      await order.save();
+    }
+    return existing;
+  }
 
   const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
   const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
@@ -100,10 +156,10 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
       description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo,
       quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
       amount: order.total || 0,
+      codAmount: pay === 'COD' ? codCollectAmount(order) : 0,
       pickupAddress: pickup.address,
     }, { request });
     order.labelPaymentMode = booked.paymentMode || pay;
-    const label = await delhivery.labelPdf(creds, booked.awb, { request });
     shipment = await saveShipment({
       tenantId,
       orderNo: order.orderNo,
@@ -112,9 +168,14 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
       awb: booked.awb,
       status: 'booked',
       warehouseCode: 'WH-001',
-      labelPdf: label,
+      labelPdf: null,
       bookedAt: new Date(),
     });
+  }
+  if (!order.labelPaymentMode) order.labelPaymentMode = pay;
+  if (!shipment.labelPdf) {
+    shipment.labelPdf = await delhivery.labelPdf(creds, shipment.awb, { request });
+    await shipment.save();
   }
   const fulfilled = await shopify.fulfillOrder(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
@@ -131,7 +192,11 @@ async function bookShopify(tenantId, orderNo, deps = {}) {
   return shipment;
 }
 
-async function bookOtherCourier(tenantId, orderNo, { courier, awb } = {}, deps = {}) {
+async function bookOtherCourier(tenantId, orderNo, input = {}, deps = {}) {
+  return withBookingLock(tenantId, orderNo, () => bookOtherCourierNow(tenantId, orderNo, input, deps));
+}
+
+async function bookOtherCourierNow(tenantId, orderNo, { courier, awb } = {}, deps = {}) {
   const CourierAccount = require('../models/CourierAccount');
   const order = await skip(Order.findOne({ tenantId, orderNo }));
   if (!order) throw new HttpError(404, 'Order not found');
@@ -148,6 +213,8 @@ async function bookOtherCourier(tenantId, orderNo, { courier, awb } = {}, deps =
   if (await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked' }))) {
     throw new HttpError(400, 'This order already has a booked AWB. Cancel it first.');
   }
+  const reused = await skip(Shipment.findOne({ tenantId, awb: tracking, status: 'booked', orderNo: { $ne: order.orderNo } }));
+  if (reused) throw new HttpError(400, `AWB ${tracking} is already used on order ${reused.orderNo}.`);
   const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
   if (!shopify.hasShopifyAuth(shopCreds)) throw new HttpError(400, 'Shopify shop URL and admin token are missing.');
   const fulfilled = await shopify.fulfillOrder(shopCreds, {
@@ -216,8 +283,15 @@ async function cancelShopifyLabel(tenantId, orderNo, { releaseReserve = false, d
   if (!order) throw new HttpError(404, 'Order not found');
   const shipment = await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked', courier: 'delhivery' }));
   if (!shipment) throw new HttpError(400, 'This order has no Delhivery AWB to cancel.');
-  const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
-  await delhivery.cancelAwb(creds, shipment.awb, { request: deps.delhiveryRequest });
+  if (leftWarehouse(order) || MOVED_SCANS.includes(shipment.deliveryStatus)) {
+    throw new HttpError(400, 'The courier already picked this parcel up, so the label cannot be cancelled. Mark it RTO instead.');
+  }
+  if (!shipment.courierCancelledAt) {
+    const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
+    await delhivery.cancelAwb(creds, shipment.awb, { request: deps.delhiveryRequest });
+    shipment.courierCancelledAt = new Date();
+    await shipment.save();
+  }
   if (shipment.shopifyFulfillmentId) {
     const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
     await shopify.cancelFulfillment(shopCreds, {
@@ -251,6 +325,10 @@ async function releaseHeld(tenantId, order) {
 }
 
 async function bookMarketplace(tenantId, orderNo, deps = {}) {
+  return withBookingLock(tenantId, orderNo, () => bookMarketplaceNow(tenantId, orderNo, deps));
+}
+
+async function bookMarketplaceNow(tenantId, orderNo, deps = {}) {
   const order = await skip(Order.findOne({ tenantId, orderNo }));
   if (!order) throw new HttpError(404, 'Order not found');
   const channel = String(order.channel || '').toLowerCase();
@@ -450,4 +528,5 @@ module.exports = {
   shippingReadiness,
   courierRates,
   rateEstimate,
+  assertStatusChange,
 };

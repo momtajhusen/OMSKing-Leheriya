@@ -1,3 +1,5 @@
+const { isPaid } = require('../utils/payment');
+
 function toPaise(value) {
   return Math.round((Number(value) || 0) * 100);
 }
@@ -26,10 +28,14 @@ const GST_STATES = {
   '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh', 10: 'Bihar', 11: 'Sikkim',
   12: 'Arunachal Pradesh', 13: 'Nagaland', 14: 'Manipur', 15: 'Mizoram', 16: 'Tripura', 17: 'Meghalaya',
   18: 'Assam', 19: 'West Bengal', 20: 'Jharkhand', 21: 'Odisha', 22: 'Chhattisgarh', 23: 'Madhya Pradesh',
-  24: 'Gujarat', 26: 'Dadra and Nagar Haveli and Daman and Diu', 27: 'Maharashtra', 29: 'Karnataka', 30: 'Goa',
+  24: 'Gujarat', 25: 'Daman and Diu', 26: 'Dadra and Nagar Haveli and Daman and Diu', 27: 'Maharashtra',
+  28: 'Andhra Pradesh (Old)', 29: 'Karnataka', 30: 'Goa',
   31: 'Lakshadweep', 32: 'Kerala', 33: 'Tamil Nadu', 34: 'Puducherry', 35: 'Andaman and Nicobar Islands',
-  36: 'Telangana', 37: 'Andhra Pradesh', 38: 'Ladakh',
+  36: 'Telangana', 37: 'Andhra Pradesh', 38: 'Ladakh', 97: 'Other Territory',
 };
+
+// Pre-merger codes: kept for reading old GSTINs, never picked for a state name.
+const LEGACY_STATE_CODES = new Set(['25', '28']);
 
 function gstinState(gstin) {
   return GST_STATES[String(gstin || '').trim().slice(0, 2)] || '';
@@ -50,9 +56,13 @@ const STATE_ALIASES = {
 };
 
 function gstStateCode(state) {
-  const code = Object.keys(GST_STATES).find((key) => [GST_STATES[key], ...(STATE_ALIASES[key] || [])]
-    .some((name) => sameState(name, state)));
+  const code = Object.keys(GST_STATES).find((key) => !LEGACY_STATE_CODES.has(key)
+    && [GST_STATES[key], ...(STATE_ALIASES[key] || [])].some((name) => sameState(name, state)));
   return code ? String(code).padStart(2, '0') : '';
+}
+
+function stateName(code) {
+  return GST_STATES[String(code || '')] || GST_STATES[Number(code)] || '';
 }
 
 function stateKey(state) {
@@ -86,26 +96,68 @@ function lineTax(item, { warehouseState = '', shipState = '' } = {}) {
   const from = stateKey(warehouseState);
   const to = stateKey(shipState);
   const intra = Boolean(from) && from === to;
-  const cgstPaise = intra ? Math.floor(taxPaise / 2) : 0;
-  const sgstPaise = intra ? taxPaise - cgstPaise : 0;
+  const halfPaise = intra ? Math.round(taxPaise / 2) : 0;
   const igstPaise = intra ? 0 : taxPaise;
   return {
     rate,
     gross: fromPaise(grossPaise),
-    taxable: fromPaise(taxablePaise),
-    cgst: fromPaise(cgstPaise),
-    sgst: fromPaise(sgstPaise),
+    taxable: fromPaise(grossPaise - halfPaise * 2 - igstPaise),
+    cgst: fromPaise(halfPaise),
+    sgst: fromPaise(halfPaise),
     igst: fromPaise(igstPaise),
     intraState: intra,
   };
 }
 
+function hasGstRate(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+}
+
+/** Line rate > 0 wins; a 0 or empty line rate is the schema default, so the Master SKU, then the product, decide. null = missing. */
+function resolveLineRate(item, master, product) {
+  if (Number(item?.gst) > 0) return Number(item.gst);
+  const found = [master?.gstRatePercent, product?.gstRatePercent].find(hasGstRate);
+  return found === undefined ? null : Number(found);
+}
+
+/** Order items plus a 'Shipping' line (GST-inclusive shippingCharge) taxed at the highest item rate. */
+function invoiceItems(order) {
+  const items = order.items || [];
+  const shipping = toPaise(order.shippingCharge || 0);
+  if (shipping <= 0) return items;
+  const top = items.reduce((best, item) => ((Number(item.gst) || 0) > (Number(best?.gst) || 0) ? item : best), items[0]);
+  return [...items, {
+    name: 'Shipping', sku: 'SHIPPING', qty: 1, price: fromPaise(shipping), gst: Number(top?.gst) || 0, hsn: top?.hsn || '',
+  }];
+}
+
+function invoiceTotals(order, { warehouseState = '', shipState } = {}) {
+  const ship = shipState === undefined ? shipToState(order) : shipState;
+  const lines = invoiceItems(order).map((item) => ({ item, tax: lineTax(item, { warehouseState, shipState: ship }) }));
+  const paise = lines.reduce((acc, { tax }) => ({
+    taxable: acc.taxable + toPaise(tax.taxable),
+    cgst: acc.cgst + toPaise(tax.cgst),
+    sgst: acc.sgst + toPaise(tax.sgst),
+    igst: acc.igst + toPaise(tax.igst),
+    gross: acc.gross + toPaise(tax.gross),
+  }), { taxable: 0, cgst: 0, sgst: 0, igst: 0, gross: 0 });
+  const totals = Object.fromEntries(Object.entries(paise).map(([key, value]) => [key, fromPaise(value)]));
+  return { lines, totals, intraState: Boolean(lines[0]?.tax.intraState), shipState: ship };
+}
+
+const CHANNEL_INVOICED = new Set(['Myntra', 'Amazon']);
+
+/** Myntra and Amazon issue the tax invoice for orders that came from their API. */
+function channelIssuesInvoice(order) {
+  return CHANNEL_INVOICED.has(String(order?.channel || '')) && ['channel_api', 'channel_push'].includes(order?.source);
+}
+
 const FULFILLED = new Set(['Dispatched', 'Delivered']);
 
 function paymentStanding(order) {
-  if (String(order.paymentStatus || '') === 'paid') return { standing: 'paid', label: 'Paid', paid: true };
-  const cod = /cod|cash on delivery|partial/i.test(String(order.paymentMode || ''));
-  if (order.channel === 'Shopify' && cod) {
+  if (isPaid(order)) return { standing: 'paid', label: 'Paid', paid: true };
+  const shopifyCod = order.channel === 'Shopify' && /cod|cash on delivery/i.test(String(order.paymentMode || ''));
+  if (shopifyCod || /partial/i.test(String(order.paymentMode || '')) || order.paymentStatus === 'partially_paid') {
     return { standing: 'partially_paid', label: 'Partially paid', paid: false };
   }
   return { standing: 'unpaid', label: 'Unpaid', paid: false };
@@ -173,38 +225,103 @@ function first(row, keys) {
   return '';
 }
 
-function num(row, keys) {
-  return money(first(row, keys).replace(/[,₹]/g, ''));
+/** "₹1,234.50" → 1234.5; accounting brackets "(500)" → -500. */
+function parseAmount(text) {
+  const clean = String(text ?? '').replace(/[,₹\s]/g, '').replace(/^rs\.?/i, '');
+  const bracket = clean.match(/^\((.*)\)$/);
+  return money(bracket ? -Number(bracket[1]) : Number(clean));
 }
 
-function matchSettlement(orders, csv, { source = 'amazon' } = {}) {
-  const rows = parseCsv(csv);
-  const used = new Set();
-  return rows.map((row) => {
-    const key = first(row, ['order', 'orderid', 'orderno', 'amazonorderid', 'externalorderid', 'orderid']);
-    const order = (orders || []).find((item) => !used.has(item.orderNo) && (item.orderNo === key || item.externalOrderId === key || item.id === key));
-    const gross = num(row, ['gross', 'ordervalue', 'sale']) || money(order?.total);
-    const parts = {
-      gross,
-      commission: num(row, ['commission']),
-      shipping: num(row, ['shipping', 'shippingfee']),
-      fees: num(row, ['fees', 'fee', 'closingfee']),
-      tcs: num(row, ['tcs']),
-      tds: num(row, ['tds']),
-      refunds: num(row, ['refunds', 'refund']),
-    };
-    const expected = expectedNet(parts);
-    const stated = first(row, ['net', 'expectednet', 'settlement']);
-    const net = stated === '' ? expected : money(stated.replace(/[,₹]/g, ''));
+function num(row, keys) {
+  return parseAmount(first(row, keys));
+}
+
+const SETTLEMENT_ID_KEYS = ['order', 'orderid', 'orderno', 'amazonorderid', 'externalorderid', 'sellerorderid', 'packetid'];
+const GROSS_KEYS = ['gross', 'ordervalue', 'sale'];
+const NET_KEYS = ['net', 'expectednet', 'settlement'];
+const DEDUCTION_KEYS = {
+  commission: ['commission'],
+  shipping: ['shipping', 'shippingfee'],
+  fees: ['fees', 'fee', 'closingfee'],
+  tcs: ['tcs'],
+  tds: ['tds'],
+  refunds: ['refunds', 'refund'],
+};
+const PAID_TOLERANCE_PAISE = 50;
+
+function settlementIds(order) {
+  return [order.orderNo, order.externalOrderId, order.id, order.channelOrderNo,
+    ...(order.channelLines || []).flatMap((line) => [line.sellerOrderId, line.packetId])]
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+}
+
+function settlementLine(row) {
+  const line = {
+    gross: first(row, GROSS_KEYS) === '' ? null : num(row, GROSS_KEYS),
+    net: first(row, NET_KEYS) === '' ? null : num(row, NET_KEYS),
+  };
+  Object.entries(DEDUCTION_KEYS).forEach(([name, keys]) => { line[name] = num(row, keys); });
+  line.deductionPaise = Object.keys(DEDUCTION_KEYS).reduce((sum, name) => sum + toPaise(line[name]), 0);
+  return line;
+}
+
+/** All lines of one order (sale, fees, refunds, sub-orders) are summed, then checked against the order total. */
+function settleOrder({ order, key, lines }, source) {
+  const deductionPaise = lines.reduce((sum, line) => sum + line.deductionPaise, 0);
+  const netPaise = lines.every((line) => line.net !== null) ? lines.reduce((sum, line) => sum + toPaise(line.net), 0) : null;
+  let grossPaise = null;
+  if (lines.some((line) => line.gross !== null)) grossPaise = lines.reduce((sum, line) => sum + toPaise(line.gross ?? 0), 0);
+  else if (netPaise !== null) grossPaise = netPaise + deductionPaise;
+  const base = {
+    source,
+    orderNo: order.orderNo,
+    key,
+    lines: lines.length,
+    gross: grossPaise === null ? null : fromPaise(grossPaise),
+    orderTotal: money(order.total),
+    expected: grossPaise === null ? null : fromPaise(grossPaise - deductionPaise),
+    net: netPaise === null ? null : fromPaise(netPaise),
+  };
+  const exception = (text) => ({ ...base, status: 'exception', label: 'Exception', exception: text });
+  if (grossPaise !== null && grossPaise <= 0) return { ...base, status: 'refund', label: 'Refund line', exception: '' };
+  if (netPaise === null) return exception('No net amount in the settlement file for this order');
+  if (Math.abs(grossPaise - toPaise(order.total)) > PAID_TOLERANCE_PAISE) {
+    return exception(`Amount mismatch: settlement gross ₹${base.gross} but the order total is ₹${base.orderTotal}`);
+  }
+  if (Math.abs(netPaise - (grossPaise - deductionPaise)) > PAID_TOLERANCE_PAISE) {
+    return exception('Net does not match gross minus commission, shipping, fees, TCS/TDS and refunds');
+  }
+  return { ...base, status: 'matched', label: 'Payment Received', exception: '' };
+}
+
+function matchSettlement(orders, csv, { source = 'amazon', channel = '' } = {}) {
+  const want = String(channel || '').toLowerCase();
+  const byId = new Map();
+  (orders || [])
+    .filter((order) => !want || String(order.channel || '').toLowerCase() === want)
+    .forEach((order) => settlementIds(order).forEach((id) => { if (!byId.has(id)) byId.set(id, order); }));
+  const out = [];
+  const groups = new Map();
+  parseCsv(csv).forEach((row) => {
+    const ids = SETTLEMENT_ID_KEYS.map((name) => first(row, [name])).filter(Boolean);
+    const key = ids[0] || '';
+    const order = ids.map((id) => byId.get(id)).find(Boolean);
+    const line = settlementLine(row);
     if (!order) {
-      return { source, key, status: 'exception', label: 'Exception', exception: 'No Master Order for this settlement line', expected, net };
+      out.push({
+        source, key, status: 'exception', label: 'Exception', exception: 'No Master Order for this settlement line', expected: null, net: line.net,
+      });
+      return;
     }
-    used.add(order.orderNo);
-    if (Math.abs(net - expected) > 0.5) {
-      return { source, orderNo: order.orderNo, key, status: 'exception', label: 'Exception', exception: 'Net does not match gross minus commission, shipping, fees, TCS/TDS and refunds', expected, net };
+    if (!groups.has(order.orderNo)) {
+      const group = { order, key, lines: [] };
+      groups.set(order.orderNo, group);
+      out.push(group);
     }
-    return { source, orderNo: order.orderNo, key, status: 'matched', label: 'Payment Received', exception: '', expected, net };
+    groups.get(order.orderNo).lines.push(line);
   });
+  return out.map((item) => (item.lines ? settleOrder(item, source) : item));
 }
 
 function matchReturnFile(orders, csv) {
@@ -220,7 +337,21 @@ function matchReturnFile(orders, csv) {
   });
 }
 
-function matchCourierBill(csv) {
+/** codByAwb: AWB → amount the courier had to collect for that order (0 for prepaid). */
+function courierCodIssue(row, base, codByAwb) {
+  if (!codByAwb.has(base.awb)) return '';
+  const expected = money(codByAwb.get(base.awb));
+  const collected = first(row, ['codamount', 'codcollected', 'collectableamount', 'codvalue']);
+  if (collected !== '') {
+    const billed = parseAmount(collected);
+    return Math.abs(toPaise(billed) - toPaise(expected)) > PAID_TOLERANCE_PAISE
+      ? `Billed COD amount ₹${billed} does not match the order COD amount ₹${expected}`
+      : '';
+  }
+  return expected === 0 && base.cod > 0 ? 'COD charge billed on a prepaid order' : '';
+}
+
+function matchCourierBill(csv, { codByAwb = new Map() } = {}) {
   return parseCsv(csv).map((row) => {
     const awb = first(row, ['awb', 'waybill']);
     const charged = Number(first(row, ['chargedweight', 'chargeableweight'])) || 0;
@@ -237,8 +368,12 @@ function matchCourierBill(csv) {
       amount,
     };
     if (!awb) return { ...base, status: 'exception', exception: 'AWB is missing' };
-    if (!declared) return { ...base, status: 'exception', exception: 'Declared weight is missing' };
-    if (charged > declared) return { ...base, status: 'exception', exception: 'Charged weight is higher than the declared weight' };
+    const issues = [];
+    if (!declared) issues.push('Declared weight is missing');
+    else if (charged > declared) issues.push('Charged weight is higher than the declared weight');
+    const codIssue = courierCodIssue(row, base, codByAwb);
+    if (codIssue) issues.push(codIssue);
+    if (issues.length) return { ...base, status: 'exception', exception: issues.join('; ') };
     return { ...base, status: 'matched', exception: '' };
   });
 }
@@ -252,11 +387,20 @@ module.exports = {
   creditNoteNumber,
   gstinState,
   gstStateCode,
+  stateName,
   sameState,
   shipToState,
   lineTax,
+  hasGstRate,
+  resolveLineRate,
+  invoiceItems,
+  invoiceTotals,
+  channelIssuesInvoice,
+  GST_STATES,
+  STATE_ALIASES,
   paymentStanding,
   expectedNet,
+  parseAmount,
   parseCsv,
   reconciliationQueue,
   matchSettlement,

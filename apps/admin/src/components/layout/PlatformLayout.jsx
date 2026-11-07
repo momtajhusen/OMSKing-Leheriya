@@ -12,6 +12,8 @@ import useScrollTopOnNavigate from '../../hooks/useScrollTopOnNavigate';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
 import ReportButton from '../report/ReportButton';
+import useAutoBackup from '../../hooks/useAutoBackup';
+import { attachPermissions } from '../../constants/permissions';
 
 const GROUPS = [
   {
@@ -76,6 +78,7 @@ export default function PlatformLayout() {
 
   const current = [...FLAT, SETUP].find((item) => isActive(location.pathname, item.path)) || FLAT[0];
   const photo = useProfilePhoto();
+  useAutoBackup(Boolean(attachPermissions(user)?.permissions?.includes('tenants.manage')) && !user?.impersonating);
 
   const Nav = ({ onClick }) =>
     GROUPS.map((group) => (

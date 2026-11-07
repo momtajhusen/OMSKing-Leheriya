@@ -149,6 +149,7 @@ const useReturnsStore = create(persist((set, get) => ({
     if (action === 'restock' && dest !== 'None') {
       try {
         await api.post('/returns/approve-restock', {
+          orderNo: row.orderId,
           returnId: id,
           referenceId: id,
           destination: dest,

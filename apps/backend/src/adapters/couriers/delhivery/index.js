@@ -96,6 +96,8 @@ async function book(creds, shipment, opts = {}) {
     throw err;
   }
   const request = gatedRequest(creds, opts.request, httpCall);
+  const paymentMode = shipment.paymentMode === 'COD' ? 'COD' : (shipment.paymentMode === 'Pickup' ? 'Pickup' : 'Prepaid');
+  const codDue = shipment.codAmount === null || shipment.codAmount === undefined ? shipment.amount : shipment.codAmount;
   const payload = JSON.stringify({
     shipments: [{
       name: shipment.name,
@@ -105,10 +107,11 @@ async function book(creds, shipment, opts = {}) {
       state: shipment.state,
       phone: shipment.phone,
       order: shipment.orderNo,
-      payment_mode: shipment.paymentMode === 'COD' ? 'COD' : (shipment.paymentMode === 'Pickup' ? 'Pickup' : 'Prepaid'),
+      payment_mode: paymentMode,
       products_desc: shipment.description,
       quantity: shipment.quantity,
       total_amount: shipment.amount,
+      cod_amount: paymentMode === 'COD' ? Math.round((Number(codDue) || 0) * 100) / 100 : 0,
       seller_add: shipment.pickupAddress,
       seller_name: creds.clientName || warehouse,
       ...(shipment.weightGrams ? { weight: shipment.weightGrams } : {}),
@@ -202,7 +205,8 @@ function mapScanStatus(text) {
   if (value.includes('out for delivery')) return 'out_for_delivery';
   if (value.includes('delivered')) return 'delivered';
   if (value.includes('transit')) return 'in_transit';
-  if (value.includes('pick') || value.includes('manifest')) return 'picked_up';
+  if (/not picked|pickup scheduled|pending pickup|pickup request|manifest/.test(value)) return '';
+  if (/picked|pick done|pickup done/.test(value)) return 'picked_up';
   return '';
 }
 

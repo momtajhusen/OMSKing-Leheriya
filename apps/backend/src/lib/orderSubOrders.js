@@ -189,13 +189,12 @@ function labelHtml(order, subOrderId) {
 }
 
 function invoiceHtml(order, { warehouseState = '', kind = 'invoice' } = {}) {
-  const { invoiceNumber, creditNoteNumber, lineTax, shipToState } = require('../services/finance.service');
+  const { invoiceNumber, creditNoteNumber, invoiceTotals } = require('../services/finance.service');
   const invoiceNo = kind === 'credit'
     ? creditNoteNumber(order)
     : (order.invoiceNo || invoiceNumber(order));
-  const ship = shipToState(order);
-  const rows = (order.items || []).map((item) => {
-    const tax = lineTax(item, { warehouseState, shipState: ship });
+  const { lines, totals, shipState: ship } = invoiceTotals(order, { warehouseState });
+  const rows = lines.map(({ item, tax }) => {
     return `
     <tr>
       <td>${photoHtml(item.name || item.sku, item.imageUrl)}</td>
@@ -231,7 +230,7 @@ function invoiceHtml(order, { warehouseState = '', kind = 'invoice' } = {}) {
     <thead><tr><th></th><th>Item</th><th>SKU</th><th>HSN</th><th>Qty</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
-  <p style="margin-top:16px;font-weight:700">Total ₹${Number(order.total || 0).toLocaleString('en-IN')}</p>
+  <p style="margin-top:16px;font-weight:700">Total ₹${totals.gross.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
 </body>
 </html>`;
 }

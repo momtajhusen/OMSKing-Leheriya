@@ -19,7 +19,8 @@ import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, Rotat
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import { isChannelManaged, packetIdOf, openMyntraDocument, pullMyntraOrders } from '../../lib/channelOrders';
-import { downloadCsv } from '../../lib/orderMetrics';
+import { channelIssuesInvoice } from '../../lib/channelInvoice';
+import { downloadCsv, istDate } from '../../lib/orderMetrics';
 import { shipWarehouseTag } from '../../lib/channelWarehouse';
 import api, { apiError } from '../../lib/api';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
@@ -351,7 +352,7 @@ export default function OrdersPage() {
         toast.error('No orders in this view to export');
         return;
       }
-      downloadCsv(`orders-${new Date().toISOString().slice(0, 10)}.csv`,
+      downloadCsv(`orders-${istDate(new Date())}.csv`,
         ['Order', 'Channel', 'Status', 'Payment', 'Fulfil from', 'Items', 'Value', 'Date'],
         rows.map((order) => [
           order.id,
@@ -361,7 +362,7 @@ export default function OrdersPage() {
           order.fulfilmentSource,
           (order.items || []).length,
           order.total,
-          order.createdAt ? String(order.createdAt).slice(0, 10) : '',
+          istDate(order.createdAt),
         ]));
       toast.success(`Exported ${rows.length} orders`);
     } catch (err) {
@@ -594,7 +595,7 @@ export default function OrdersPage() {
                           <Eye className="w-3 h-3 mr-1" />
                           View
                         </Button>
-                        {can(PERMISSIONS.FINANCE_VIEW) && !isChannelManaged(order) && (
+                        {can(PERMISSIONS.FINANCE_VIEW) && !channelIssuesInvoice(order) && (
                           <Button
                             variant="ghost"
                             size="sm"

@@ -30,6 +30,10 @@ test('from and to are inclusive local calendar days', () => {
   assert.deepEqual(ids(filterReportOrders(orders, { to: '2026-10-01' })), ['A', 'B']);
 });
 
+test('a reversed from/to is swapped like the backend', () => {
+  assert.deepEqual(ids(filterReportOrders(orders, { from: '2026-10-31', to: '2026-10-01' })), ['B', 'C', 'D']);
+});
+
 test('channel and period combine', () => {
   assert.deepEqual(ids(filterReportOrders(orders, { channel: 'Shopify', from: '2026-10-01', to: '2026-10-31' })), ['C']);
 });
@@ -46,5 +50,14 @@ test('Reports page has Channel and From/To filters that drive the order reports'
   assert.match(reports, /type="date"[^>]*value=\{fromDate\}/);
   assert.match(reports, /type="date"[^>]*value=\{toDate\}/);
   assert.match(reports, /salesByChannel\(filtered,/);
-  assert.match(reports, /netSales\(filtered\)/);
+  assert.match(reports, /netSales\(filtered, refunds\)/);
+});
+
+test('Reports page dates, months and file names use the IST calendar, not the UTC slice', () => {
+  assert.doesNotMatch(reports, /slice\(0, 7\)/);
+  assert.doesNotMatch(reports, /slice\(0, 10\)/);
+  assert.match(reports, /istMonth\(order\.createdAt\)/);
+  assert.match(reports, /istDate\(order\.createdAt\)/);
+  assert.match(reports, /vendorReportLines\(filtered,/);
+  assert.match(reports, /shippingStats\(filtered\)/);
 });
