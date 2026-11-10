@@ -1,5 +1,9 @@
 const MasterSku = require('../models/MasterSku');
 const SkuMapping = require('../models/SkuMapping');
+const Inventory = require('../models/Inventory');
+const InventoryLedger = require('../models/InventoryLedger');
+const InventoryReservation = require('../models/InventoryReservation');
+const Order = require('../models/Order');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
 const { pageOf, pageRequest, escapeRegex } = require('../utils/page');
@@ -150,4 +154,45 @@ async function getMasterSku(req, res) {
   return successResponse(res, mapMaster(sku, maps), 'Master SKU');
 }
 
-module.exports = { listMasterSkus, createMasterSku, updateMasterSku, getMasterSku };
+async function deleteMasterSku(req, res) {
+  const tenantId = merchantTenant(req);
+  const sku = await MasterSku.findOne({ _id: req.params.id, tenantId }).setOptions({ skipTenantFilter: true });
+  if (!sku) throw new HttpError(404, 'Master SKU not found');
+  const before = skuSnap(sku);
+  const scoped = { tenantId, masterSkuId: sku._id };
+  const [stock, ledger, holds, maps, orders] = await Promise.all([
+    Inventory.countDocuments(scoped).setOptions({ skipTenantFilter: true }),
+    InventoryLedger.countDocuments(scoped).setOptions({ skipTenantFilter: true }),
+    InventoryReservation.countDocuments(scoped).setOptions({ skipTenantFilter: true }),
+    SkuMapping.countDocuments(scoped).setOptions({ skipTenantFilter: true }),
+    Order.countDocuments({ tenantId, $or: [{ 'items.masterSkuId': sku._id }, { 'subOrders.masterSkuId': sku._id }] }).setOptions({ skipTenantFilter: true }),
+  ]);
+  if (stock || ledger || holds || maps || orders) {
+    sku.status = 'discontinued';
+    sku.updatedBy = req.user.id;
+    await sku.save();
+    await recordFromReq(req, {
+      tenantId,
+      action: 'sku.updated',
+      resourceType: 'master_skus',
+      resourceId: sku._id,
+      resourceDisplay: sku.code,
+      before,
+      after: skuSnap(sku),
+    });
+    return successResponse(res, { id: String(sku._id), deleted: false, status: sku.status }, 'Master SKU discontinued because it has stock, mappings or orders');
+  }
+  await MasterSku.deleteOne({ _id: sku._id, tenantId }).setOptions({ skipTenantFilter: true });
+  await recordFromReq(req, {
+    tenantId,
+    action: 'sku.deleted',
+    resourceType: 'master_skus',
+    resourceId: sku._id,
+    resourceDisplay: sku.code,
+    before,
+    after: null,
+  });
+  return successResponse(res, { id: String(sku._id), deleted: true }, 'Master SKU deleted');
+}
+
+module.exports = { listMasterSkus, createMasterSku, updateMasterSku, getMasterSku, deleteMasterSku };

@@ -8,6 +8,7 @@ import PageLoader from '../../components/ui/PageLoader';
 import { PlatformPage, PlatformSheet } from '../../components/platform/PlatformChrome';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 
 const emptySlab = () => ({ upTo: '', rate: '' });
 
@@ -25,6 +26,7 @@ export default function PlatformPlansPage() {
   const [inquiries, setInquiries] = useState([]);
   const [subscriptions, setSubscriptions] = useState([]);
   const [marking, setMarking] = useState('');
+  const [undoing, setUndoing] = useState(null);
   const [payment, setPayment] = useState({
     upiId: '', accountName: '', accountNumber: '', ifsc: '', bankName: '', note: '',
     razorpayKeyId: '', razorpayKeySecret: '', razorpayWebhookSecret: '',
@@ -122,6 +124,17 @@ export default function PlatformPlansPage() {
       toast.error(apiError(err, 'Could not save pricing'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const undoPaid = async () => {
+    try {
+      const { data } = await api.delete(`/pricing/subscriptions/${undoing.tenantId}/payments`);
+      setSubscriptions((current) => current.map((item) => (item.tenantId === undoing.tenantId ? data.data : item)));
+      toast.success(`${undoing.name} is no longer marked paid`);
+      setUndoing(null);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not undo the payment'));
     }
   };
 
@@ -273,6 +286,11 @@ export default function PlatformPlansPage() {
                         {marking === row.tenantId ? 'Saving…' : row.monthStatus === 'submitted' ? 'Confirm payment' : 'Mark paid'}
                       </Button>
                     )}
+                    {row.monthStatus === 'paid' && (
+                      <Button size="sm" variant="ghost" className="text-destructive" disabled={marking === row.tenantId} onClick={() => setUndoing(row)}>
+                        Undo paid
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -318,6 +336,16 @@ export default function PlatformPlansPage() {
           </Table>
         </PlatformSheet>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(undoing)}
+        title={`Undo payment for ${undoing?.name || 'this company'}?`}
+        confirmLabel="Undo paid"
+        onConfirm={undoPaid}
+        onClose={() => setUndoing(null)}
+      >
+        This month goes back to Due, or to Payment sent if the company had sent a UPI reference. A payment made online through Razorpay cannot be undone here.
+      </ConfirmDialog>
     </PlatformPage>
   );
 }

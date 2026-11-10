@@ -3,7 +3,7 @@ const { HttpError } = require('../utils/httpError');
 const PricingInquiry = require('../models/PricingInquiry');
 const { ensurePricing, present, quoteOrders, savePricing, paymentPublic } = require('../services/pricing.service');
 const {
-  mySubscription, listSubscriptions, recordSubscriptionPayment,
+  mySubscription, listSubscriptions, recordSubscriptionPayment, undoSubscriptionPayment,
   upiCheckout, startRazorpayCheckout, confirmRazorpayCheckout, submitUpiReference, applyRazorpayWebhook,
 } = require('../services/subscription.service');
 const { recordFromReq } = require('../services/auditLog.service');
@@ -84,6 +84,20 @@ async function recordPayment(req, res) {
   return successResponse(res, view, 'Payment recorded');
 }
 
+async function undoPayment(req, res) {
+  const { before, view } = await undoSubscriptionPayment(req.params.tenantId);
+  await recordFromReq(req, {
+    tenantId: req.user?.tenantId,
+    action: 'subscription.payment_undone',
+    resourceType: 'subscription',
+    resourceId: view.tenantId,
+    resourceDisplay: view.name,
+    before,
+    after: { period: view.period, monthStatus: view.monthStatus, status: view.status },
+  });
+  return successResponse(res, view, 'Payment undone');
+}
+
 async function createInquiry(req, res) {
   const name = String(req.body.name || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
@@ -130,5 +144,5 @@ async function listInquiries(_req, res) {
 }
 
 module.exports = {
-  getPricing, putPricing, createInquiry, listInquiries, mine, upi, checkout, confirm, reference, razorpayWebhook, subscriptions, recordPayment,
+  getPricing, putPricing, createInquiry, listInquiries, mine, upi, checkout, confirm, reference, razorpayWebhook, subscriptions, recordPayment, undoPayment,
 };

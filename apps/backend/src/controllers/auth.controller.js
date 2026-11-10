@@ -114,6 +114,7 @@ async function login(req, res) {
   }
 
   user.lastLoginAt = new Date();
+  if (user.status === 'invited') user.status = 'active';
   await user.save();
   const session = await issueSession(req, res, user);
   return successResponse(res, session, 'Signed in');
@@ -240,6 +241,7 @@ async function verifyLogin(req, res) {
   const tenant = user.tenantId;
   if (tenant.kind === 'merchant' && tenant.status === 'suspended') throw new HttpError(403, 'This tenant is suspended');
   user.lastLoginAt = new Date();
+  if (user.status === 'invited') user.status = 'active';
   await user.save();
   const session = await issueSession(req, res, user);
   return successResponse(res, session, 'Signed in');
@@ -262,6 +264,10 @@ async function refresh(req, res) {
   const home = user.tenantId;
   if (home?.kind === 'merchant' && home.status === 'suspended') {
     throw new HttpError(403, 'This tenant is suspended');
+  }
+  if (home?.kind === 'merchant' && home.status === 'trial' && home.planExpiresAt && new Date(home.planExpiresAt) < new Date()) {
+    const { expiredTrialMessage } = require('../services/subscription.service');
+    throw new HttpError(403, await expiredTrialMessage(home));
   }
 
   session.lastActiveAt = new Date();

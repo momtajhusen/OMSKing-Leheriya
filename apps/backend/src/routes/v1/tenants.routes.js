@@ -31,6 +31,7 @@ router.post(
   asyncHandler(tenants.createTenant),
 );
 router.patch('/:id', ...gate, asyncHandler(tenants.patchTenant));
+router.delete('/:id', ...gate, asyncHandler(tenants.deleteTenant));
 router.post('/:id/impersonate', ...gate, asyncHandler(tenants.impersonate));
 
 module.exports = router;

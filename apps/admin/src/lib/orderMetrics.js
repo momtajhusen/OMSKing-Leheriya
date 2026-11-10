@@ -165,6 +165,12 @@ export function statusCounts(orders) {
   return Object.entries(counts).map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count);
 }
 
+export function statusShare(count, total) {
+  if (!total || !count) return '0%';
+  const percent = (count / total) * 100;
+  return percent < 1 ? '<1%' : `${Math.round(percent)}%`;
+}
+
 /** Orders per day per channel for the last `days` days, ending today. */
 export function ordersTrend(orders, days = 14, catalog = CHANNEL_CATALOG) {
   const today = new Date();

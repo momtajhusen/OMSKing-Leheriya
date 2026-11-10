@@ -5,7 +5,9 @@ const QRCode = require('qrcode');
 const { HttpError } = require('../utils/httpError');
 const { decryptObject } = require('../lib/secretBox');
 const { ensurePricing, present, quoteOrders, paymentPublic, payLine, upiPayUrl } = require('./pricing.service');
-const { verifyCheckoutSignature, verifyWebhookSignature, createRazorpayOrder, fetchRazorpayPayment } = require('./razorpay.service');
+const {
+  verifyCheckoutSignature, verifyWebhookSignature, createRazorpayOrder, fetchRazorpayPayment, fetchRazorpayOrder,
+} = require('./razorpay.service');
 
 const IST_MS = 330 * 60 * 1000;
 const BUSINESS_TZ = 'Asia/Kolkata';
@@ -261,6 +263,10 @@ async function recordSubscriptionPayment(tenantId, body = {}) {
     if (taken && String(taken.tenantId) !== String(tenant._id)) throw new HttpError(400, 'This payment is already used');
     row.razorpayPaymentId = paymentId;
   }
+  if (tenant.status === 'trial') {
+    row.endedTrial = true;
+    row.trialExpiresAt = tenant.planExpiresAt || null;
+  }
   await row.save();
   if (tenant.status === 'trial') {
     tenant.status = 'active';
@@ -268,6 +274,33 @@ async function recordSubscriptionPayment(tenantId, body = {}) {
     await tenant.save();
   }
   return viewFor(tenant, pricing, row);
+}
+
+async function undoSubscriptionPayment(tenantId) {
+  const tenant = await Tenant.findById(tenantId);
+  if (!tenant || tenant.kind !== 'merchant') throw new HttpError(404, 'Tenant not found');
+  const pricing = await ensurePricing();
+  const row = await SubscriptionPayment.findOne({ tenantId: tenant._id, period: periodKey() }).setOptions({ skipTenantFilter: true });
+  if (!row || row.status !== 'paid') throw new HttpError(404, 'This month is not marked paid');
+  if (row.razorpayPaymentId) throw new HttpError(400, 'This month was paid online through Razorpay. Refund it in Razorpay instead.');
+  const before = { period: row.period, amount: row.amount, status: row.status, companyStatus: tenant.status };
+  if (row.endedTrial && tenant.status === 'active') {
+    tenant.status = 'trial';
+    tenant.planExpiresAt = row.trialExpiresAt || undefined;
+    await tenant.save();
+  }
+  let kept = null;
+  if (row.note) {
+    row.status = 'submitted';
+    row.paidAt = undefined;
+    row.endedTrial = false;
+    row.trialExpiresAt = null;
+    await row.save();
+    kept = row;
+  } else {
+    await SubscriptionPayment.deleteOne({ _id: row._id }).setOptions({ skipTenantFilter: true });
+  }
+  return { before, view: await viewFor(tenant, pricing, kept) };
 }
 
 async function expiredTrialMessage(tenant) {
@@ -377,9 +410,18 @@ async function confirmRazorpayCheckout(tenant, body = {}, deps = {}) {
     paymentId,
     fetchImpl: deps.fetchImpl,
   });
-  const notes = remote.notes || {};
   if (remote.order_id !== orderId || !['captured', 'authorized'].includes(remote.status)) {
     throw new HttpError(400, 'The UPI payment is not complete');
+  }
+  const order = await fetchRazorpayOrder({
+    keyId: payment.razorpayKeyId,
+    keySecret: secret,
+    orderId,
+    fetchImpl: deps.fetchImpl,
+  });
+  const notes = order.notes || {};
+  if (!(Number(remote.amount) >= Number(order.amount))) {
+    throw new HttpError(400, 'The UPI payment amount is less than the bill');
   }
   if (String(notes.tenantId) !== String(tenant._id) || notes.purpose !== 'subscription' || notes.period !== periodKey()) {
     throw new HttpError(400, 'This payment is not for this subscription');
@@ -398,6 +440,8 @@ async function submitUpiReference(tenant, reference) {
   const { pricing, quote, period, row } = await billNow(tenant);
   if (!pricing.payment?.upiId) throw new HttpError(400, 'UPI is not configured yet');
   if (row?.status === 'paid') throw new HttpError(400, 'This month is already paid');
+  const claimed = await SubscriptionPayment.findOne({ note: ref, tenantId: { $ne: tenant._id } }).setOptions({ skipTenantFilter: true });
+  if (claimed) throw new HttpError(400, 'This UPI reference is already used by another company');
   const doc = row || new SubscriptionPayment({ tenantId: tenant._id, period });
   doc.orders = quote.orders;
   doc.amount = quote.bill;
@@ -407,7 +451,7 @@ async function submitUpiReference(tenant, reference) {
   return viewFor(tenant, pricing, doc);
 }
 
-async function applyRazorpayWebhook(req) {
+async function applyRazorpayWebhook(req, deps = {}) {
   const pricing = await ensurePricing();
   const secret = decryptObject(pricing.payment?.razorpayWebhookSecretEnc || '').secret;
   if (!secret) throw new HttpError(503, 'Razorpay webhook secret is not saved');
@@ -417,12 +461,21 @@ async function applyRazorpayWebhook(req) {
   const event = JSON.parse(req.rawBody.toString('utf8'));
   if (event.event !== 'payment.captured') return { ignored: true };
   const entity = event.payload?.payment?.entity || {};
-  const notes = entity.notes || {};
-  if (entity.status !== 'captured' || notes.purpose !== 'subscription' || !notes.tenantId || notes.period !== periodKey()) {
-    return { ignored: true };
-  }
+  const orderId = String(entity.order_id || '');
+  if (entity.status !== 'captured' || !entity.id || !orderId) return { ignored: true };
   const duplicate = await SubscriptionPayment.findOne({ razorpayPaymentId: entity.id }).setOptions({ skipTenantFilter: true });
   if (duplicate) return { ignored: true, already: true };
+  const keySecret = decryptObject(pricing.payment?.razorpayKeySecretEnc || '').secret;
+  if (!pricing.payment?.razorpayKeyId || !keySecret) return { ignored: true };
+  const order = await fetchRazorpayOrder({
+    keyId: pricing.payment.razorpayKeyId,
+    keySecret,
+    orderId,
+    fetchImpl: deps.fetchImpl,
+  });
+  const notes = order.notes || {};
+  if (notes.purpose !== 'subscription' || !notes.tenantId || notes.period !== periodKey()) return { ignored: true };
+  if (!(Number(entity.amount) >= Number(order.amount))) return { ignored: true };
   const tenant = await Tenant.findById(notes.tenantId);
   if (!tenant || tenant.kind !== 'merchant' || tenant.status === 'suspended') return { ignored: true };
   const view = await recordSubscriptionPayment(tenant._id, {
@@ -442,6 +495,7 @@ module.exports = {
   mySubscription,
   listSubscriptions,
   recordSubscriptionPayment,
+  undoSubscriptionPayment,
   expiredTrialMessage,
   upiCheckout,
   startRazorpayCheckout,

@@ -1,6 +1,13 @@
 const { hashPassword } = require('../lib/password');
 const User = require('../models/User');
 const Role = require('../models/Role');
+const RefreshSession = require('../models/RefreshSession');
+const PasswordReset = require('../models/PasswordReset');
+const AuditLog = require('../models/AuditLog');
+const InventoryLedger = require('../models/InventoryLedger');
+const Product = require('../models/Product');
+const MasterSku = require('../models/MasterSku');
+const SupportMessage = require('../models/SupportMessage');
 const { HttpError } = require('../utils/httpError');
 const { successResponse, paginatedResponse } = require('../utils/response');
 const { pageOf } = require('../utils/page');
@@ -18,9 +25,9 @@ function userSnap(row) {
   };
 }
 
-function statusLabel(status) {
+function statusLabel(status, lastLoginAt) {
   if (status === 'disabled') return 'Inactive';
-  if (status === 'invited') return 'Invited';
+  if (status === 'invited' && !lastLoginAt) return 'Invited';
   return 'Active';
 }
 
@@ -30,7 +37,7 @@ function mapUser(row) {
     name: row.fullName,
     email: row.email,
     role: row.roleId?.code,
-    status: statusLabel(row.status),
+    status: statusLabel(row.status, row.lastLoginAt),
     lastLogin: row.lastLoginAt || 'Never',
     tenant: row.tenantId?.name,
     createdAt: row.createdAt,
@@ -183,4 +190,66 @@ async function patchUserStatus(req, res) {
   return successResponse(res, mapUser(populated), 'Status updated');
 }
 
-module.exports = { listUsers, createUser, updateUser, patchUserStatus };
+async function deleteImpact(user) {
+  const count = (Model, filter) =>
+    Model.countDocuments({ tenantId: user.tenantId, ...filter }).setOptions({ skipTenantFilter: true });
+  const [sessions, resets, audit, ledger, products, skus, messages] = await Promise.all([
+    count(RefreshSession, { userId: user._id }),
+    count(PasswordReset, { userId: user._id }),
+    count(AuditLog, { actorId: user._id }),
+    count(InventoryLedger, { performedBy: user._id }),
+    count(Product, { createdBy: user._id }),
+    count(MasterSku, { createdBy: user._id }),
+    count(SupportMessage, { senderId: user._id }),
+  ]);
+  const removed = [
+    { key: 'sessions', label: 'Signed-in sessions (signed out everywhere)', count: sessions },
+    { key: 'passwordResets', label: 'Password reset links', count: resets },
+  ].filter((row) => row.count > 0);
+  const kept = [
+    { key: 'auditLogs', label: 'Audit log entries', count: audit },
+    { key: 'stockMovements', label: 'Stock movements', count: ledger },
+    { key: 'products', label: 'Products they created', count: products },
+    { key: 'masterSkus', label: 'Master SKUs they created', count: skus },
+    { key: 'supportMessages', label: 'Support chat messages', count: messages },
+  ].filter((row) => row.count > 0);
+  return { removed, kept, needsConfirm: removed.length + kept.length > 0 };
+}
+
+async function findUserToDelete(req) {
+  const user = await User.findById(req.params.id).populate('roleId').setOptions({ skipTenantFilter: true });
+  if (!user) throw new HttpError(404, 'User not found');
+  assertSameTenant(req, user.tenantId);
+  return user;
+}
+
+async function userDeleteImpact(req, res) {
+  const user = await findUserToDelete(req);
+  return successResponse(res, await deleteImpact(user));
+}
+
+async function deleteUser(req, res) {
+  const user = await findUserToDelete(req);
+  if (String(user._id) === String(req.user.id)) throw new HttpError(400, 'You cannot delete your own login');
+  await assertNotLastSuperAdmin(user, null, true);
+  const impact = await deleteImpact(user);
+  if (impact.needsConfirm && req.body?.confirmLinkedData !== true) {
+    throw new HttpError(409, 'This user has linked data. Tick the confirm box to delete.');
+  }
+  const before = userSnap(mapUser(user));
+  await RefreshSession.deleteMany({ tenantId: user.tenantId, userId: user._id }).setOptions({ skipTenantFilter: true });
+  await PasswordReset.deleteMany({ tenantId: user.tenantId, userId: user._id }).setOptions({ skipTenantFilter: true });
+  await User.deleteOne({ _id: user._id }).setOptions({ skipTenantFilter: true });
+  await recordFromReq(req, {
+    tenantId: user.tenantId,
+    action: 'user.deleted',
+    resourceType: 'users',
+    resourceId: user._id,
+    resourceDisplay: before.email,
+    before,
+    after: null,
+  });
+  return successResponse(res, { id: String(user._id), deleted: true }, 'User deleted');
+}
+
+module.exports = { listUsers, createUser, updateUser, patchUserStatus, userDeleteImpact, deleteUser };

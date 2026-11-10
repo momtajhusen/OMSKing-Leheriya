@@ -8,7 +8,7 @@ import api, { apiError } from '../../lib/api';
 import useAuthStore from '../../stores/authStore';
 import useChannelStore from '../../stores/channelStore';
 import { formatINR, statusBadgeVariant } from '../../utils/format';
-import { relativeTime } from '../../lib/orderMetrics';
+import { relativeTime, statusShare } from '../../lib/orderMetrics';
 import { ordersChannelPath } from '../../lib/ordersChannelLink';
 import { periodParams, periodLabel } from '../../lib/dashboardPeriod';
 import { orderChannelLabel } from '../../constants/channelCatalog';
@@ -26,7 +26,7 @@ import Badge from '../../components/ui/Badge';
 import ProductThumb from '../../components/ui/ProductThumb';
 import { TrendingUp, Package, ShoppingCart, RotateCcw, AlertTriangle } from 'lucide-react';
 
-const COLORS = ['#7C3AED', '#D97706', '#2563EB', '#10B981', '#F43F5E', '#64748B'];
+const COLORS = ['#7C3AED', '#D97706', '#2563EB', '#10B981', '#F43F5E', '#64748B', '#0891B2', '#CA8A04', '#DB2777', '#65A30D'];
 const CHANNEL_STROKES = ['#7C3AED', '#D97706', '#2563EB', '#059669', '#DB2777', '#0891B2', '#CA8A04'];
 
 const STATUS_TABS = ['all', 'New', 'Processing', 'Pending', 'Dispatched', 'Delivered'];
@@ -216,25 +216,43 @@ export default function DashboardPage() {
                 <CardTitle>Order Status</CardTitle>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
-                    <Pie
-                      data={stats.statuses}
-                      nameKey="status"
-                      dataKey="count"
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ status, percent }) => `${status} ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={70}
-                    >
-                      {stats.statuses.map((entry, index) => (
-                        <Cell key={entry.status} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="relative">
+                  <ResponsiveContainer width="100%" height={170}>
+                    <PieChart>
+                      <Pie
+                        data={stats.statuses}
+                        nameKey="status"
+                        dataKey="count"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={54}
+                        outerRadius={78}
+                        paddingAngle={stats.statuses.length > 1 ? 1.5 : 0}
+                        minAngle={3}
+                        stroke="none"
+                      >
+                        {stats.statuses.map((entry, index) => (
+                          <Cell key={entry.status} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value, name) => [`${value} · ${statusShare(value, orderCount)}`, name]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-2xl font-bold leading-none">{orderCount}</span>
+                    <span className="mt-1 text-xs text-muted-foreground">orders</span>
+                  </div>
+                </div>
+                <ul data-status-legend className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2 lg:grid-cols-1">
+                  {stats.statuses.map((entry, index) => (
+                    <li key={entry.status} className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} aria-hidden="true" />
+                      <span className="min-w-0 flex-1 truncate" title={entry.status}>{entry.status}</span>
+                      <span className="shrink-0 tabular-nums font-medium">{entry.count}</span>
+                      <span className="w-9 shrink-0 text-right tabular-nums text-xs text-muted-foreground">{statusShare(entry.count, orderCount)}</span>
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
           </div>

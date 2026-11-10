@@ -22,5 +22,7 @@ router.post(
 );
 router.patch('/:id', ...gate, asyncHandler(users.updateUser));
 router.patch('/:id/status', ...gate, asyncHandler(users.patchUserStatus));
+router.get('/:id/delete-impact', ...gate, asyncHandler(users.userDeleteImpact));
+router.delete('/:id', ...gate, asyncHandler(users.deleteUser));
 
 module.exports = router;

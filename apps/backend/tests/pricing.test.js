@@ -191,17 +191,21 @@ test('a company can pay the UPI link, and a verified Razorpay payment marks the 
     event: 'payment.captured',
     payload: { payment: { entity: {
       id: 'pay_hook',
+      order_id: 'order_hook',
       status: 'captured',
       amount: 100000,
-      notes: { tenantId: String(other._id), period, purpose: 'subscription' },
     } } },
   }));
+  const orderFetch = async () => ({
+    ok: true,
+    json: async () => ({ id: 'order_hook', amount: 100000, notes: { tenantId: String(other._id), period, purpose: 'subscription' } }),
+  });
   await assert.rejects(
     () => applyRazorpayWebhook({ rawBody: payload, headers: { 'x-razorpay-signature': 'bad' } }),
     /Invalid Razorpay signature/,
   );
   const hookSig = crypto.createHmac('sha256', 'hook_secret').update(payload).digest('hex');
-  const applied = await applyRazorpayWebhook({ rawBody: payload, headers: { 'x-razorpay-signature': hookSig } });
+  const applied = await applyRazorpayWebhook({ rawBody: payload, headers: { 'x-razorpay-signature': hookSig } }, { fetchImpl: orderFetch });
   assert.equal(applied.ignored, false);
   assert.equal(applied.tenantId, String(other._id));
 });

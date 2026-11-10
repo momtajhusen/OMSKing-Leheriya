@@ -10,6 +10,8 @@ const subscriptionPaymentSchema = new mongoose.Schema({
   note: { type: String, default: '' },
   razorpayPaymentId: { type: String, default: '' },
   paidAt: { type: Date },
+  endedTrial: { type: Boolean, default: false },
+  trialExpiresAt: { type: Date, default: null },
 }, { timestamps: true });
 
 subscriptionPaymentSchema.index({ tenantId: 1, period: 1 }, { unique: true });

@@ -121,6 +121,36 @@ async function uploadHsn(req, res) {
   }, 'HSN master saved');
 }
 
+async function updateHsn(req, res) {
+  const tenantId = merchantTenant(req);
+  const result = await taxSettings.editHsnRow(tenantId, req.params.hsn, req.body);
+  await recordFromReq(req, {
+    tenantId,
+    action: 'tax.hsn_updated',
+    resourceType: 'tax_gst',
+    resourceId: tenantId,
+    resourceDisplay: `HSN ${result.before.hsn}`,
+    before: result.before,
+    after: result.after,
+  });
+  return successResponse(res, result.saved, 'HSN code saved');
+}
+
+async function deleteHsn(req, res) {
+  const tenantId = merchantTenant(req);
+  const result = await taxSettings.removeHsnRow(tenantId, req.params.hsn);
+  await recordFromReq(req, {
+    tenantId,
+    action: 'tax.hsn_deleted',
+    resourceType: 'tax_gst',
+    resourceId: tenantId,
+    resourceDisplay: `HSN ${result.before.hsn}`,
+    before: result.before,
+    after: null,
+  });
+  return successResponse(res, result.saved, 'HSN code deleted');
+}
+
 function mapKey(row) {
   return {
     id: String(row._id),
@@ -296,6 +326,8 @@ module.exports = {
   getTax,
   patchTax,
   uploadHsn,
+  updateHsn,
+  deleteHsn,
   listApiKeys,
   createApiKey,
   revokeApiKey,

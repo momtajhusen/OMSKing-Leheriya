@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
-import { Save, Plug, Unplug, CheckCircle2 } from 'lucide-react';
+import ConfirmDialog from '../ui/ConfirmDialog';
+import { Save, Plug, Unplug, CheckCircle2, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import api, { apiError } from '../../lib/api';
 import { isChannelConnected } from '../../lib/connectedChannels';
@@ -100,6 +101,7 @@ export default function ChannelSetup({ showPlanNote = true }) {
   const [pick, setPick] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [testing, setTesting] = useState('');
+  const [disconnecting, setDisconnecting] = useState(null);
   const userPicked = useRef(false);
 
   const channel = catalog.find((c) => c.id === pick) || null;
@@ -189,6 +191,24 @@ export default function ChannelSetup({ showPlanNote = true }) {
       toast.error(apiError(err, 'Test failed'));
     } finally {
       setTesting('');
+    }
+  };
+
+  const disconnect = async () => {
+    const target = disconnecting;
+    try {
+      await api.delete(`/channels/${target.id}`);
+      const { data } = await api.get('/channels');
+      hydrate(data.data || []);
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[target.id];
+        return next;
+      });
+      setDisconnecting(null);
+      toast.success(`${target.name} disconnected`);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not disconnect this channel'));
     }
   };
 
@@ -297,11 +317,27 @@ export default function ChannelSetup({ showPlanNote = true }) {
                   <Unplug className="w-4 h-4 mr-2" />
                   {testing === channel.id ? 'Testing…' : 'Test connection'}
                 </Button>
+                {conn?.status && conn.status !== 'Not configured' && (
+                  <Button size="sm" variant="ghost" className="ml-auto text-destructive" onClick={() => setDisconnecting(channel)}>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Disconnect
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(disconnecting)}
+        title={`Disconnect ${disconnecting?.name || 'channel'}?`}
+        confirmLabel="Disconnect"
+        onConfirm={disconnect}
+        onClose={() => setDisconnecting(null)}
+      >
+        The saved keys for this channel are removed and orders stop syncing from it. Orders already imported stay. Nothing is sent to the channel. You can connect it again later by entering the keys.
+      </ConfirmDialog>
     </div>
   );
 }

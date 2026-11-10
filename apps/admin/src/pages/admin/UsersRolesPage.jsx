@@ -4,6 +4,8 @@ import api, { apiError, apiFormError } from '../../lib/api';
 import { ROLES, ROLE_LABELS, MERCHANT_ASSIGNABLE_ROLES } from '../../constants/roles';
 import { PERMISSION_CATALOG, hasPermission } from '../../constants/permissions';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useAuth } from '../../hooks/useAuth';
+import { lastSeen } from '../../utils/format';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
 import Badge from '../../components/ui/Badge';
@@ -11,6 +13,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Modal from '../../components/ui/Modal';
+import UserDeleteDialog from '../../components/users/UserDeleteDialog';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { inviteUserSchema } from '../../lib/validation';
@@ -23,6 +26,8 @@ const MATRIX_ROLES = MERCHANT_ASSIGNABLE_ROLES.filter((role) => role !== ROLES.A
 
 export default function UsersRolesPage() {
   const { canUsers } = usePermissions();
+  const { user } = useAuth();
+  const [removing, setRemoving] = useState(null);
   const [activeTab, setActiveTab] = useState('users');
   const [userList, setUserList] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -230,7 +235,7 @@ export default function UsersRolesPage() {
                       <TableCell>
                         <Badge variant={row.status === 'Active' ? 'outline' : 'secondary'}>{row.status}</Badge>
                       </TableCell>
-                      <TableCell>{row.lastLogin}</TableCell>
+                      <TableCell>{lastSeen(row.lastLogin)}</TableCell>
                       <TableCell>
                         {canUsers ? (
                           <div className="flex gap-1">
@@ -238,6 +243,9 @@ export default function UsersRolesPage() {
                             <Button variant="ghost" size="sm" onClick={() => toggleStatus(row)}>
                               {row.status === 'Active' ? 'Disable' : 'Enable'}
                             </Button>
+                            {row.id !== user?.id && (
+                              <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setRemoving(row)}>Delete</Button>
+                            )}
                           </div>
                         ) : (
                           <span className="text-xs text-muted-foreground">View only</span>
@@ -330,6 +338,12 @@ export default function UsersRolesPage() {
           </Card>
         </div>
       )}
+
+      <UserDeleteDialog
+        user={removing}
+        onClose={() => setRemoving(null)}
+        onDeleted={() => { setRemoving(null); load(); }}
+      />
 
       <Modal
         open={Boolean(roleEdit)}

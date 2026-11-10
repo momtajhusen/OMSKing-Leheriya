@@ -14,6 +14,7 @@ const { stockIn, stockOut, reserveStock } = require('../src/services/inventory.s
 const { ensureDefaultWarehouses, setInventoryAuthority } = require('../src/services/warehouse.service');
 const { upsertConnection } = require('../src/services/channelConnection.service');
 const { channelQty, runInventoryJob } = require('../src/services/inventoryPush.service');
+const { syncOrderReservations } = require('../src/services/orderReserve.service');
 
 let replSet;
 
@@ -35,6 +36,7 @@ function shopifyMock(levels = 7) {
       return { status: 200, headers: {}, text: JSON.stringify({ variant: { inventory_item_id: 55 } }) };
     }
     if (String(url).includes('/inventory_levels/set')) return { status: 200, headers: {}, text: '{}' };
+    if (String(url).includes('/inventory_levels/adjust')) return { status: 200, headers: {}, text: '{}' };
     if (String(url).includes('/inventory_levels.json')) {
       return { status: 200, headers: {}, text: JSON.stringify({ inventory_levels: [{ available: levels }] }) };
     }
@@ -214,4 +216,58 @@ test('Shopify inventory master reads Location A into WH-001 and does not push Sh
     _id: { $ne: job._id },
   });
   assert.deepEqual(queued.map((row) => row.channel).sort(), ['amazon', 'myntra']);
+});
+
+function marketplaceOrder(orderNo, channel, sku, qty) {
+  return {
+    orderNo,
+    channel,
+    externalOrderId: orderNo,
+    status: 'New',
+    items: [{ sku: 'KURTA-RED-L', qty, masterSkuId: sku._id }],
+  };
+}
+
+async function shopifyAdjustJobs(tenantId) {
+  return IntegrationJob.find({ tenantId, channel: 'shopify', jobType: 'inventory_push', 'payload.adjust': { $exists: true } });
+}
+
+test('Shopify master: a new Myntra or Amazon order reduces Shopify Location A by its qty, once, and never sets it', async () => {
+  const { tenant, sku } = await seedSeller();
+  await setInventoryAuthority(tenant._id, 'shopify');
+  await IntegrationJob.deleteMany({ tenantId: tenant._id });
+
+  const myntraOrder = marketplaceOrder('MYN-1', 'Myntra', sku, 2);
+  await syncOrderReservations(String(tenant._id), myntraOrder);
+  await syncOrderReservations(String(tenant._id), myntraOrder);
+  await syncOrderReservations(String(tenant._id), marketplaceOrder('AMZ-1', 'Amazon', sku, 1));
+
+  const jobs = await shopifyAdjustJobs(tenant._id);
+  assert.equal(jobs.length, 2);
+  const shopify = shopifyMock(7);
+  for (const job of jobs) await runInventoryJob(job, { shopifyRequest: shopify.request });
+  const adjusts = shopify.calls.filter((call) => call.url.includes('/inventory_levels/adjust'));
+  assert.deepEqual(
+    adjusts.map((call) => call.body).sort((a, b) => a.available_adjustment - b.available_adjustment),
+    [
+      { location_id: 111, inventory_item_id: 55, available_adjustment: -2 },
+      { location_id: 111, inventory_item_id: 55, available_adjustment: -1 },
+    ],
+  );
+  assert.equal(shopify.calls.some((call) => call.url.includes('/inventory_levels/set')), false);
+  const done = await shopifyAdjustJobs(tenant._id);
+  assert.ok(done.every((job) => job.effectApplied));
+});
+
+test('Shopify master: a Shopify order and OMS master mode never queue a Shopify reduction', async () => {
+  const master = await seedSeller();
+  await setInventoryAuthority(master.tenant._id, 'shopify');
+  await IntegrationJob.deleteMany({ tenantId: master.tenant._id });
+  await syncOrderReservations(String(master.tenant._id), marketplaceOrder('SHP-1', 'Shopify', master.sku, 1));
+  assert.equal((await shopifyAdjustJobs(master.tenant._id)).length, 0);
+
+  const oms = await seedSeller();
+  await IntegrationJob.deleteMany({ tenantId: oms.tenant._id });
+  await syncOrderReservations(String(oms.tenant._id), marketplaceOrder('MYN-2', 'Myntra', oms.sku, 1));
+  assert.equal((await shopifyAdjustJobs(oms.tenant._id)).length, 0);
 });

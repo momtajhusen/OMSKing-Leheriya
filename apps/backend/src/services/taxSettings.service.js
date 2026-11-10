@@ -49,7 +49,7 @@ function publicView(snapshot) {
     defaultGstRate: snapshot.defaultGstRate,
     categories: snapshot.categories,
     hsnCount: snapshot.hsnCount,
-    hsnMaster: snapshot.hsnMaster.slice(0, 50),
+    hsnMaster: snapshot.hsnMaster,
     saved: snapshot.saved,
   };
 }
@@ -164,4 +164,39 @@ async function uploadHsn(tenantId, rows) {
   };
 }
 
-module.exports = { getTax, saveTax, uploadHsn, DEFAULT_TAX };
+async function changeHsnRow(tenantId, hsn, change) {
+  const tenant = await loadTenant(tenantId);
+  const current = view(tenant);
+  const row = current.hsnMaster.find((item) => item.hsn === String(hsn));
+  if (!row) throw new HttpError(404, 'HSN code not found');
+  const before = { ...row };
+  const rows = change
+    ? current.hsnMaster.map((item) => (item === row ? change(item) : item))
+    : current.hsnMaster.filter((item) => item !== row);
+  tenant.settings.taxGst = {
+    configured: true,
+    defaultGstRate: current.defaultGstRate,
+    categories: current.categories,
+    hsnMaster: rows,
+  };
+  tenant.markModified('settings');
+  await tenant.save();
+  const after = change ? rows.find((item) => item.hsn === row.hsn) : null;
+  return { before, after, saved: publicView(view(tenant)) };
+}
+
+function editHsnRow(tenantId, hsn, body = {}) {
+  const description = body.description == null ? null : String(body.description).trim().slice(0, 120);
+  const gstRate = body.gstRate === undefined ? undefined : body.gstRate == null || body.gstRate === '' ? null : rateOrThrow(body.gstRate, 'GST rate');
+  return changeHsnRow(tenantId, hsn, (row) => ({
+    ...row,
+    description: description == null ? row.description : description,
+    gstRate: gstRate === undefined ? row.gstRate : gstRate,
+  }));
+}
+
+function removeHsnRow(tenantId, hsn) {
+  return changeHsnRow(tenantId, hsn, null);
+}
+
+module.exports = { getTax, saveTax, uploadHsn, editHsnRow, removeHsnRow, DEFAULT_TAX };

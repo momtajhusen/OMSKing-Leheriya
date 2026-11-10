@@ -27,6 +27,8 @@ router.patch(
 router.get('/tax', ...company, asyncHandler(settings.getTax));
 router.patch('/tax', ...company, asyncHandler(settings.patchTax));
 router.post('/tax/hsn', ...company, asyncHandler(settings.uploadHsn));
+router.patch('/tax/hsn/:hsn', ...company, asyncHandler(settings.updateHsn));
+router.delete('/tax/hsn/:hsn', ...company, asyncHandler(settings.deleteHsn));
 router.get('/package-defaults', ...company, asyncHandler(settings.getPackageDefaults));
 router.patch('/package-defaults', ...company, asyncHandler(settings.patchPackageDefaults));
 router.get('/couriers', ...company, asyncHandler(settings.listCouriers));

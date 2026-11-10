@@ -12,6 +12,21 @@ const RefreshSession = require('../models/RefreshSession');
 const crypto = require('crypto');
 const Order = require('../models/Order');
 const IntegrationJob = require('../models/IntegrationJob');
+const Product = require('../models/Product');
+const MasterSku = require('../models/MasterSku');
+const Vendor = require('../models/Vendor');
+const Inventory = require('../models/Inventory');
+const InventoryLedger = require('../models/InventoryLedger');
+const ChannelConnection = require('../models/ChannelConnection');
+const SkuMapping = require('../models/SkuMapping');
+const Shipment = require('../models/Shipment');
+const CustomerReturn = require('../models/CustomerReturn');
+const SubscriptionPayment = require('../models/SubscriptionPayment');
+const PasswordReset = require('../models/PasswordReset');
+const ApiKey = require('../models/ApiKey');
+const CourierAccount = require('../models/CourierAccount');
+const Warehouse = require('../models/Warehouse');
+const WarehouseLocationMap = require('../models/WarehouseLocationMap');
 const { ensurePricing, quoteOrders } = require('../services/pricing.service');
 const { orderPlacedMatch } = require('../services/subscription.service');
 const { listPlatformJobs, requeueJob } = require('../services/jobQueue.service');
@@ -94,15 +109,58 @@ async function createTenant(req, res) {
 async function patchTenant(req, res) {
   const tenant = await Tenant.findById(req.params.id);
   if (!tenant || tenant.kind !== 'merchant') throw new HttpError(404, 'Tenant not found');
+  const before = { name: tenant.name, status: tenant.status, plan: tenant.plan };
   if (req.body.status) {
     const raw = String(req.body.status).toLowerCase();
     tenant.status = raw === 'inactive' || raw === 'suspended' ? 'suspended' : raw === 'trial' ? 'trial' : 'active';
   }
   if (req.body.plan) tenant.plan = req.body.plan;
+  if (req.body.name != null) {
+    const name = String(req.body.name).trim();
+    if (name.length < 2) throw new HttpError(400, 'Company name must be at least 2 characters');
+    tenant.name = name.slice(0, 120);
+  }
   await tenant.save();
+  await recordFromReq(req, {
+    tenantId: req.user?.tenantId,
+    action: 'tenant.updated',
+    resourceType: 'tenants',
+    resourceId: tenant._id,
+    resourceDisplay: tenant.name,
+    before,
+    after: { name: tenant.name, status: tenant.status, plan: tenant.plan },
+  });
   const n = await User.countDocuments({ tenantId: tenant._id }).setOptions({ skipTenantFilter: true });
   const { pricing, byTenant } = await billsByTenant();
   return successResponse(res, mapTenant(tenant, n, quoteOrders(byTenant.get(String(tenant._id)) || 0, pricing)), 'Tenant updated');
+}
+
+const BUSINESS_DATA = [Order, Product, MasterSku, Vendor, Inventory, InventoryLedger, ChannelConnection, SkuMapping, Shipment, CustomerReturn, SubscriptionPayment];
+const SETUP_DATA = [PasswordReset, RefreshSession, ApiKey, CourierAccount, WarehouseLocationMap, Warehouse, User, Role];
+
+async function deleteTenant(req, res) {
+  const tenant = await Tenant.findById(req.params.id);
+  if (!tenant || tenant.kind !== 'merchant') throw new HttpError(404, 'Tenant not found');
+  const tenantId = tenant._id;
+  for (const model of BUSINESS_DATA) {
+    if (await model.exists({ tenantId }).setOptions({ skipTenantFilter: true })) {
+      throw new HttpError(409, `${tenant.name} already has orders, products or channel data. Suspend it instead of deleting.`);
+    }
+  }
+  for (const model of SETUP_DATA) {
+    await model.deleteMany({ tenantId }).setOptions({ skipTenantFilter: true });
+  }
+  await Tenant.deleteOne({ _id: tenantId });
+  await recordFromReq(req, {
+    tenantId: req.user?.tenantId,
+    action: 'tenant.deleted',
+    resourceType: 'tenants',
+    resourceId: tenantId,
+    resourceDisplay: tenant.name,
+    before: { name: tenant.name, slug: tenant.slug, status: tenant.status, plan: tenant.plan },
+    after: null,
+  });
+  return successResponse(res, { id: String(tenantId), deleted: true }, 'Subscriber deleted');
 }
 
 async function impersonate(req, res) {
@@ -192,6 +250,7 @@ module.exports = {
   listTenants,
   createTenant,
   patchTenant,
+  deleteTenant,
   impersonate,
   listOpsJobs,
   listOpsLogs,

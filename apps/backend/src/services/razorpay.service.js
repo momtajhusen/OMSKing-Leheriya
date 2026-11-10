@@ -50,9 +50,18 @@ async function fetchRazorpayPayment({ keyId, keySecret, paymentId, fetchImpl }) 
   });
 }
 
+async function fetchRazorpayOrder({ keyId, keySecret, orderId, fetchImpl }) {
+  return razorpayJson(`https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}`, {
+    keyId,
+    keySecret,
+    fetchImpl,
+  });
+}
+
 module.exports = {
   verifyCheckoutSignature,
   verifyWebhookSignature,
   createRazorpayOrder,
   fetchRazorpayPayment,
+  fetchRazorpayOrder,
 };

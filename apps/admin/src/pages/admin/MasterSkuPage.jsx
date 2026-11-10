@@ -9,11 +9,12 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Modal from '../../components/ui/Modal';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { FormBanner } from '../../components/ui/FormBanner';
 import ProductThumb from '../../components/ui/ProductThumb';
-import { Pencil, Plus, Search } from 'lucide-react';
+import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import api, { apiError, apiFormError } from '../../lib/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import Pagination, { PAGE_SIZE } from '../../components/ui/Pagination';
@@ -81,6 +82,7 @@ export default function MasterSkuPage() {
   const [form, setForm] = useState(empty);
   const [edit, setEdit] = useState(null);
   const [banner, setBanner] = useState('');
+  const [removing, setRemoving] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -143,6 +145,18 @@ export default function MasterSkuPage() {
       load();
     } catch (err) {
       setBanner(apiFormError(err).message);
+    }
+  };
+
+  const deleteSku = async () => {
+    try {
+      const { data } = await api.delete(`/master-skus/${removing.id}`);
+      if (data.data?.deleted) toast.success(`${removing.code} deleted`);
+      else toast(`${removing.code} has stock, mappings or orders, so it was set Discontinued instead`);
+      setRemoving(null);
+      load();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not delete this Master SKU'));
     }
   };
 
@@ -247,14 +261,19 @@ export default function MasterSkuPage() {
                     <TableCell>{sku.codeLocked ? 'Yes' : 'No'}</TableCell>
                     {canCatalogEdit && (
                       <TableCell>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => { setEdit({ ...sku }); setBanner(''); setEditOpen(true); }}
-                        >
-                          <Pencil className="w-3 h-3 mr-1" />
-                          Edit
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => { setEdit({ ...sku }); setBanner(''); setEditOpen(true); }}
+                          >
+                            <Pencil className="w-3 h-3 mr-1" />
+                            Edit
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-destructive" aria-label={`Delete ${sku.code}`} onClick={() => setRemoving(sku)}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
                       </TableCell>
                     )}
                   </TableRow>
@@ -319,6 +338,16 @@ export default function MasterSkuPage() {
           <PackageFields value={form} onChange={setForm} />
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(removing)}
+        title={`Delete ${removing?.code || 'Master SKU'}?`}
+        confirmLabel="Delete"
+        onConfirm={deleteSku}
+        onClose={() => setRemoving(null)}
+      >
+        A Master SKU that was never used is removed. If it has stock, channel mappings or orders, it is set Discontinued instead so that history stays correct.
+      </ConfirmDialog>
 
       <Modal
         open={editOpen}

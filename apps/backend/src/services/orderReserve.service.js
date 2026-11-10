@@ -257,7 +257,7 @@ async function syncOrderReservations(tenantId, order, { notify = true } = {}) {
     const baseKey = `${prefix}q${qty}`;
     const idempotencyKey = lineHolds.some((hold) => hold.idempotencyKey === baseKey) ? `${baseKey}:v${lineHolds.length}` : baseKey;
     try {
-      await reserveStock(tenantId, null, {
+      const held = await reserveStock(tenantId, null, {
         masterSkuId: item.masterSkuId,
         channel,
         qty,
@@ -268,6 +268,11 @@ async function syncOrderReservations(tenantId, order, { notify = true } = {}) {
         skipNotify: !notify,
       });
       reserved = true;
+      if (!held.idempotent && !lineHolds.length) {
+        const { queueShopifyDecrement } = require('./inventoryPush.service');
+        await queueShopifyDecrement(tenantId, { channel, masterSkuId: item.masterSkuId, qty, orderRef: order.orderNo })
+          .catch((err) => console.error('[JOBS]', err.message));
+      }
     } catch (err) {
       if (err.statusCode === 409 || err.statusCode === 400) outOfStock = true;
       else throw err;

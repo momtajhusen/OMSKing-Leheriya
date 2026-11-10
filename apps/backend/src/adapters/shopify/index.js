@@ -438,6 +438,33 @@ async function pushInventory(creds, opts = {}) {
   return { sent };
 }
 
+async function adjustInventory(creds, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
+  const locationId = String(opts.locationId || '');
+  if (!locationId || locationId.startsWith('shopify-location-')) {
+    const err = new Error('Shopify stock was not reduced. Location A is still a placeholder. Bind the real Shopify location id first.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const delta = Math.trunc(Number(opts.delta) || 0);
+  if (!delta) return { locationId, delta: 0 };
+  const itemId = await inventoryItemId(shop, token, opts.variantId, request);
+  const res = await request('POST', `https://${shop}/admin/api/2024-10/inventory_levels/adjust.json`, {
+    headers: shopifyHeaders(token),
+    body: { location_id: Number(locationId), inventory_item_id: itemId, available_adjustment: delta },
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Shopify inventory adjust returned ${res.status}. Stock was not reduced.`);
+    err.statusCode = res.status === 401 || res.status === 403 || res.status === 404 || res.status === 422 ? 400 : 502;
+    err.terminal = err.statusCode === 400;
+    throw err;
+  }
+  return { locationId, delta };
+}
+
 async function readVariantCost(creds, opts = {}) {
   const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
   const { shop, token } = requireShop(ready);
@@ -834,6 +861,7 @@ module.exports = {
   pullReturns,
   returnRowsFromOrders,
   pushInventory,
+  adjustInventory,
   readLocationAvailable,
   readVariantCost,
   pushVariantCost,

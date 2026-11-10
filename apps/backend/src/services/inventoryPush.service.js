@@ -143,6 +143,52 @@ async function pullShopifyMaster(tenantId, userId, masterSkuId, qty, deps) {
   return `Shopify Location A available ${available} wrote ${location.warehouseCode}. Amazon and Myntra follow that qty. Shopify was not pushed.`;
 }
 
+const SHOPIFY_DECREMENT_CHANNELS = ['amazon', 'myntra'];
+
+/** Shopify master only: an Amazon or Myntra sale is taken off Shopify Location A, which Shopify does not know about. */
+async function queueShopifyDecrement(tenantId, { channel, masterSkuId, qty, orderRef }) {
+  if (!SHOPIFY_DECREMENT_CHANNELS.includes(channel) || !masterSkuId || !(qty > 0)) return null;
+  if ((await getInventoryAuthority(tenantId)) !== 'shopify') return null;
+  const mapped = await skipTenant(SkuMapping.exists({ tenantId, masterSkuId, channel: 'shopify', isActive: true, syncStatus: 'synced' }));
+  if (!mapped) return null;
+  return enqueue({
+    tenantId,
+    channel: 'shopify',
+    jobType: 'inventory_push',
+    payload: { adjust: { masterSkuId: String(masterSkuId), qty, orderRef: orderRef || '', channel } },
+  });
+}
+
+async function adjustShopifyMaster(job, deps) {
+  const { masterSkuId, qty, orderRef, channel } = job.payload.adjust;
+  let summary;
+  if ((await getInventoryAuthority(job.tenantId)) !== 'shopify') {
+    summary = `Shopify stock was not reduced for ${orderRef}. OMS is inventory master now.`;
+  } else {
+    const stock = await channelQty(job.tenantId, masterSkuId);
+    const mapping = stock.mappings.find((row) => row.channel === 'shopify');
+    const location = stock.shopify.find((row) => row.primary) || stock.shopify[0];
+    if (!mapping || !location) {
+      const err = new Error('Shopify stock was not reduced. A synced listing and Location A are required.');
+      err.terminal = true;
+      throw err;
+    }
+    const creds = await require('./shopifyAuth.service').shopifyCreds(job.tenantId);
+    await shopify.adjustInventory(creds, {
+      variantId: mapping.channelVariantId,
+      locationId: location.locationId,
+      delta: -qty,
+      request: deps.shopifyRequest,
+    });
+    summary = `Shopify Location A reduced by ${qty} for ${channel} order ${orderRef}.`;
+  }
+  await IntegrationJob.updateOne(
+    { _id: job._id },
+    { $set: { shortSummary: summary, recordsTotal: 1, recordsProcessed: 1, effectApplied: true } },
+  ).setOptions({ skipTenantFilter: true });
+  return { summary };
+}
+
 async function pushAmazon(tenantId, masterSkuId, qty, deps) {
   const creds = credsOf(await getConnection(tenantId, 'amazon'));
   const mapping = qty.mappings.find((row) => row.channel === 'amazon');
@@ -202,6 +248,7 @@ async function pushOnce(job, sku, qty, deps) {
 }
 
 async function runInventoryJob(job, deps = {}) {
+  if (job.payload?.adjust) return adjustShopifyMaster(job, deps);
   const masterSkuId = job.payload?.masterSkuId;
   if (!masterSkuId) {
     const maps = await skipTenant(SkuMapping.find({
@@ -261,5 +308,6 @@ async function runInventoryJob(job, deps = {}) {
 module.exports = {
   channelQty,
   queueInventoryPushes,
+  queueShopifyDecrement,
   runInventoryJob,
 };

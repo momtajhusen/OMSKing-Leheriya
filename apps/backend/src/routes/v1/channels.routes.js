@@ -14,6 +14,7 @@ router.get('/shopify/vendors', ...vendorGate, asyncHandler(channels.listShopifyV
 router.get('/status', ...statusGate, asyncHandler(channels.listStatus));
 router.get('/', ...gate, asyncHandler(channels.listConnections));
 router.patch('/:channel', ...gate, asyncHandler(channels.saveConnection));
+router.delete('/:channel', ...gate, asyncHandler(channels.disconnectChannel));
 router.post('/:channel/test', ...gate, asyncHandler(channels.testConnection));
 
 module.exports = router;

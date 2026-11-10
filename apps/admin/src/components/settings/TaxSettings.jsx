@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { Save } from 'lucide-react';
+import { Pencil, Save, Trash2 } from 'lucide-react';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../ui/Table';
 import Button from '../ui/Button';
+import ConfirmDialog from '../ui/ConfirmDialog';
 import api, { apiError } from '../../lib/api';
 
 function parseHsnCsv(text) {
@@ -30,6 +31,8 @@ export default function TaxSettings() {
   const [categories, setCategories] = useState([]);
   const [hsnCount, setHsnCount] = useState(0);
   const [hsnPreview, setHsnPreview] = useState([]);
+  const [hsnEdit, setHsnEdit] = useState(null);
+  const [hsnRemoving, setHsnRemoving] = useState(null);
 
   useEffect(() => {
     api.get('/settings/tax')
@@ -93,6 +96,36 @@ export default function TaxSettings() {
       toast.error(err?.response ? apiError(err, 'Could not upload HSN master') : err.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const showHsn = (tax) => {
+    setHsnCount(tax.hsnCount || 0);
+    setHsnPreview(tax.hsnMaster || []);
+  };
+
+  const saveHsnRow = async () => {
+    try {
+      const { data } = await api.patch(`/settings/tax/hsn/${hsnEdit.hsn}`, {
+        description: hsnEdit.description,
+        gstRate: hsnEdit.gstRate === '' ? null : hsnEdit.gstRate,
+      });
+      showHsn(data.data || {});
+      setHsnEdit(null);
+      toast.success(`HSN ${hsnEdit.hsn} saved`);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not save this HSN code'));
+    }
+  };
+
+  const deleteHsnRow = async () => {
+    try {
+      const { data } = await api.delete(`/settings/tax/hsn/${hsnRemoving.hsn}`);
+      showHsn(data.data || {});
+      toast.success(`HSN ${hsnRemoving.hsn} deleted`);
+      setHsnRemoving(null);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not delete this HSN code'));
     }
   };
 
@@ -177,26 +210,83 @@ export default function TaxSettings() {
           </label>
         </div>
         {hsnPreview.length > 0 && (
+          <div className="max-h-96 overflow-y-auto rounded-lg border border-[hsl(var(--color-border-premium))]">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>HSN</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>GST</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {hsnPreview.slice(0, 8).map((row) => (
+              {hsnPreview.map((row) => (hsnEdit?.hsn === row.hsn ? (
+                <TableRow key={row.hsn}>
+                  <TableCell className="font-mono text-xs">{row.hsn}</TableCell>
+                  <TableCell>
+                    <input
+                      value={hsnEdit.description}
+                      onChange={(e) => setHsnEdit({ ...hsnEdit, description: e.target.value })}
+                      className="premium-input"
+                      aria-label={`Description for HSN ${row.hsn}`}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={hsnEdit.gstRate}
+                      onChange={(e) => setHsnEdit({ ...hsnEdit, gstRate: e.target.value })}
+                      className="premium-input w-24"
+                      aria-label={`GST rate for HSN ${row.hsn}`}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      <Button type="button" size="sm" onClick={saveHsnRow}>Save</Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setHsnEdit(null)}>Cancel</Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : (
                 <TableRow key={row.hsn}>
                   <TableCell className="font-mono text-xs">{row.hsn}</TableCell>
                   <TableCell>{row.description || '—'}</TableCell>
                   <TableCell>{row.gstRate == null ? '—' : `${row.gstRate}%`}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`Edit HSN ${row.hsn}`}
+                        onClick={() => setHsnEdit({ hsn: row.hsn, description: row.description || '', gstRate: row.gstRate ?? '' })}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" className="text-destructive" aria-label={`Delete HSN ${row.hsn}`} onClick={() => setHsnRemoving(row)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              ))}
+              )))}
             </TableBody>
           </Table>
+          </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(hsnRemoving)}
+        title={`Delete HSN ${hsnRemoving?.hsn || ''}?`}
+        onConfirm={deleteHsnRow}
+        onClose={() => setHsnRemoving(null)}
+      >
+        It is removed from the HSN master. Master SKUs that already carry this code keep it until you change them.
+      </ConfirmDialog>
 
       <div className="pt-6 border-t border-[hsl(var(--color-border-premium))]">
         <button type="button" className="premium-button" onClick={save} disabled={busy}>

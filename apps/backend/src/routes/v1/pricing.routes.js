@@ -29,6 +29,13 @@ router.post(
   requirePermission('tenants.manage'),
   asyncHandler(pricing.recordPayment),
 );
+router.delete(
+  '/subscriptions/:tenantId/payments',
+  authMiddleware,
+  tenantMiddleware,
+  requirePermission('tenants.manage'),
+  asyncHandler(pricing.undoPayment),
+);
 router.post(
   '/inquiries',
   body('name').trim().isLength({ min: 2, max: 80 }).withMessage('Name is required'),

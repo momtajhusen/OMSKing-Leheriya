@@ -19,6 +19,11 @@ export const formatDateTime = (date) => {
   return dayjs(date).format('DD MMM YYYY, hh:mm A');
 };
 
+export const lastSeen = (value) => {
+  if (!value || value === 'Never' || !dayjs(value).isValid()) return 'Never';
+  return formatDateTime(value);
+};
+
 // Format percentage
 export const formatPercent = (value) => {
   return `${value.toFixed(1)}%`;

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import api, { apiError } from '../../lib/api';
-import { statusBadgeVariant } from '../../utils/format';
+import { statusBadgeVariant, lastSeen } from '../../utils/format';
 import { useAuth } from '../../hooks/useAuth';
 import { ROLES, ROLE_LABELS } from '../../constants/roles';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
@@ -10,12 +11,15 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Modal from '../../components/ui/Modal';
+import UserDeleteDialog from '../../components/users/UserDeleteDialog';
 import PageLoader from '../../components/ui/PageLoader';
 import { PlatformPage } from '../../components/platform/PlatformChrome';
 import { Shield, Users, Key, Clock, Search, Plus } from 'lucide-react';
 
 export default function AuthPage({ scope = 'tenant' }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const [removing, setRemoving] = useState(null);
   const isPlatform = scope === 'platform' || user?.role === ROLES.PLATFORM_ADMIN;
   const [activeTab, setActiveTab] = useState(isPlatform ? 'sessions' : 'users');
   const [query, setQuery] = useState('');
@@ -112,7 +116,7 @@ export default function AuthPage({ scope = 'tenant' }) {
         <Card>
           <CardHeader>
             <CardTitle>User directory</CardTitle>
-            <CardDescription>Full invite and role edits live under Users & Roles.</CardDescription>
+            <CardDescription>Edit opens Users & Roles. Delete removes the login and signs it out everywhere.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -123,6 +127,7 @@ export default function AuthPage({ scope = 'tenant' }) {
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Login</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -132,7 +137,15 @@ export default function AuthPage({ scope = 'tenant' }) {
                     <TableCell>{row.email}</TableCell>
                     <TableCell><Badge variant="outline">{ROLE_LABELS[row.role] || row.role}</Badge></TableCell>
                     <TableCell><Badge variant={row.status === 'Active' ? 'outline' : 'secondary'}>{row.status}</Badge></TableCell>
-                    <TableCell>{row.lastLogin}</TableCell>
+                    <TableCell className="whitespace-nowrap">{lastSeen(row.lastLogin)}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => navigate('/users-roles')}>Edit</Button>
+                        {row.id !== user?.id && (
+                          <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setRemoving(row)}>Delete</Button>
+                        )}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -181,7 +194,7 @@ export default function AuthPage({ scope = 'tenant' }) {
                     <TableCell><Badge variant="outline">{session.role}</Badge></TableCell>
                     <TableCell>{session.device}</TableCell>
                     <TableCell className="font-mono text-xs">{session.ip}</TableCell>
-                    <TableCell>{session.lastActive}</TableCell>
+                    <TableCell className="whitespace-nowrap">{lastSeen(session.lastActive)}</TableCell>
                     <TableCell>
                       <Badge variant={session.status === 'Active' ? 'outline' : 'secondary'}>{session.status}</Badge>
                     </TableCell>
@@ -295,7 +308,7 @@ export default function AuthPage({ scope = 'tenant' }) {
                     <TableCell className="font-medium">{key.label}</TableCell>
                     <TableCell className="font-mono text-xs">{key.prefix}</TableCell>
                     <TableCell>{key.scope}</TableCell>
-                    <TableCell>{key.lastUsed}</TableCell>
+                    <TableCell className="whitespace-nowrap">{lastSeen(key.lastUsed)}</TableCell>
                     <TableCell><Badge variant={statusBadgeVariant(key.status)}>{key.status}</Badge></TableCell>
                     <TableCell>
                       {key.status === 'Active' && (
@@ -387,6 +400,15 @@ export default function AuthPage({ scope = 'tenant' }) {
           </CardContent>
         </Card>
       )}
+
+      <UserDeleteDialog
+        user={removing}
+        onClose={() => setRemoving(null)}
+        onDeleted={(gone) => {
+          setDirectory((prev) => prev.filter((row) => row.id !== gone.id));
+          setRemoving(null);
+        }}
+      />
 
       <Modal
         open={keyOpen}

@@ -14,6 +14,7 @@ import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import PageLoader from '../../components/ui/PageLoader';
 import Modal from '../../components/ui/Modal';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { Building2, Plus, CheckCircle } from 'lucide-react';
 import { PlatformPage, PlatformSheet } from '../../components/platform/PlatformChrome';
 
@@ -30,6 +31,9 @@ export default function TenantMgmtPage() {
   const [picked, setPicked] = useState([]);
   const [planTenant, setPlanTenant] = useState(null);
   const [nextPlan, setNextPlan] = useState('growth');
+  const [renaming, setRenaming] = useState(null);
+  const [nextName, setNextName] = useState('');
+  const [removing, setRemoving] = useState(null);
   const [loading, setLoading] = useState(true);
   const [wizardBanner, setWizardBanner] = useState('');
   const [wizardErrors, setWizardErrors] = useState({});
@@ -115,6 +119,28 @@ export default function TenantMgmtPage() {
       loadTenants();
     } catch (err) {
       toast.error(apiError(err));
+    }
+  };
+
+  const saveName = async () => {
+    try {
+      await api.patch(`/tenants/${renaming.id}`, { name: nextName.trim() });
+      toast.success('Company name saved');
+      setRenaming(null);
+      loadTenants();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not rename this company'));
+    }
+  };
+
+  const deleteTenant = async () => {
+    try {
+      await api.delete(`/tenants/${removing.id}`);
+      toast.success(`${removing.name} deleted`);
+      setRemoving(null);
+      loadTenants();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not delete this subscriber'));
     }
   };
 
@@ -317,12 +343,14 @@ export default function TenantMgmtPage() {
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           <Button variant="ghost" size="sm" onClick={() => openMerchant(tenant)}>Open</Button>
+                          <Button variant="ghost" size="sm" onClick={() => { setRenaming(tenant); setNextName(tenant.name); }}>Rename</Button>
                           <Button variant="ghost" size="sm" onClick={() => { setPlanTenant(tenant); setNextPlan('growth'); }}>Plan</Button>
                           {tenant.status === 'Suspended' ? (
                             <Button variant="ghost" size="sm" onClick={() => setStatus(tenant, 'Active')}>Activate</Button>
                           ) : (
                             <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setStatus(tenant, 'Suspended')}>Suspend</Button>
                           )}
+                          <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setRemoving(tenant)}>Delete</Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -351,6 +379,31 @@ export default function TenantMgmtPage() {
           ))}
         </Select>
       </Modal>
+
+      <Modal
+        open={Boolean(renaming)}
+        onOpenChange={(open) => !open && setRenaming(null)}
+        title="Rename company"
+        description={renaming ? renaming.name : ''}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setRenaming(null)}>Cancel</Button>
+            <Button onClick={saveName} disabled={nextName.trim().length < 2}>Save name</Button>
+          </>
+        }
+      >
+        <Input value={nextName} onChange={(e) => setNextName(e.target.value)} aria-label="Company name" />
+      </Modal>
+
+      <ConfirmDialog
+        open={Boolean(removing)}
+        title={`Delete ${removing?.name || 'subscriber'}?`}
+        confirmLabel="Delete subscriber"
+        onConfirm={deleteTenant}
+        onClose={() => setRemoving(null)}
+      >
+        Only a company added by mistake can be deleted: its logins, roles and warehouses are removed. If it already has orders, products or a connected channel, it is kept and you are asked to Suspend it instead.
+      </ConfirmDialog>
     </PlatformPage>
   );
 }

@@ -21,5 +21,6 @@ router.post(
   asyncHandler(masterSkus.createMasterSku),
 );
 router.patch('/:id', ...edit, asyncHandler(masterSkus.updateMasterSku));
+router.delete('/:id', ...edit, asyncHandler(masterSkus.deleteMasterSku));
 
 module.exports = router;

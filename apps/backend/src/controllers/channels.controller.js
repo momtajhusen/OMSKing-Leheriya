@@ -76,6 +76,28 @@ async function saveConnection(req, res) {
   return successResponse(res, toDto(row), 'Channel saved');
 }
 
+async function disconnectChannel(req, res) {
+  const tenantId = merchantTenant(req);
+  const channel = String(req.params.channel || '').toLowerCase();
+  const { isKnownChannel } = require('../channels/registry');
+  if (!isKnownChannel(channel)) throw new HttpError(400, 'Unknown channel');
+  const existing = await getConnection(tenantId, channel);
+  if (!existing) throw new HttpError(404, 'This channel is not connected');
+  const before = channelSnap(toDto(existing));
+  const ChannelConnection = require('../models/ChannelConnection');
+  await ChannelConnection.deleteOne({ _id: existing._id, tenantId }).setOptions({ skipTenantFilter: true });
+  await recordFromReq(req, {
+    tenantId,
+    action: 'channel.disconnected',
+    resourceType: 'channels',
+    resourceId: existing._id,
+    resourceDisplay: channel,
+    before,
+    after: null,
+  });
+  return successResponse(res, { channel, disconnected: true }, 'Channel disconnected. Its saved keys were removed.');
+}
+
 async function testConnection(req, res) {
   const tenantId = merchantTenant(req);
   const channel = String(req.params.channel || '').toLowerCase();
@@ -121,4 +143,4 @@ async function listShopifyVendors(req, res) {
   return successResponse(res, names, 'Shopify vendors');
 }
 
-module.exports = { listConnections, listStatus, saveConnection, testConnection, listShopifyVendors };
+module.exports = { listConnections, listStatus, saveConnection, disconnectChannel, testConnection, listShopifyVendors };
