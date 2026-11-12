@@ -4,6 +4,8 @@ import {
   Bell,
   Sun,
   Moon,
+  Maximize,
+  Minimize,
   Search,
   PackageCheck,
   Store,
@@ -24,6 +26,7 @@ import { cn } from '../../lib/utils';
 import useThemeStore from '../../stores/themeStore';
 import useUIStore from '../../stores/uiStore';
 import { useAuth } from '../../hooks/useAuth';
+import useFullscreen from '../../hooks/useFullscreen';
 import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator } from '../ui/DropdownMenu';
 import Breadcrumbs from '../ui/Breadcrumbs';
 import Button from '../ui/Button';
@@ -83,6 +86,7 @@ const IN_APP_TYPES = {
 function AdminHeader() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useThemeStore();
+  const fullscreen = useFullscreen();
   const { toggleSidebar, breadcrumbs, mobileOpen, setMobileOpen, activeRole } = useUIStore();
   const { logout, user, effectiveRole } = useAuth();
   const { canOpenPath } = usePermissions();
@@ -265,6 +269,19 @@ function AdminHeader() {
             </DropdownMenuItem>
           </div>
         </DropdownMenu>
+
+        {fullscreen.supported && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={fullscreen.toggle}
+            className="hidden sm:inline-flex hover:bg-[hsl(var(--color-muted))]"
+            aria-label={fullscreen.active ? 'Exit full screen' : 'Full screen'}
+            title={fullscreen.active ? 'Exit full screen' : 'Full screen'}
+          >
+            {fullscreen.active ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+          </Button>
+        )}
 
         <Button
           variant="ghost"

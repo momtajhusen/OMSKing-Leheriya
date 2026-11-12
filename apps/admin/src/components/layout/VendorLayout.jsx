@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
-  Package, ShoppingCart, RotateCcw, Settings, LayoutDashboard, LogOut, Sun, Moon, Menu, X,
+  Package, ShoppingCart, RotateCcw, Settings, LayoutDashboard, LogOut, Sun, Moon, Maximize, Minimize, Menu, X,
 } from 'lucide-react';
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
 import PageFade from '../motion/PageFade';
 import useScrollTopOnNavigate from '../../hooks/useScrollTopOnNavigate';
+import useFullscreen from '../../hooks/useFullscreen';
 import { usePermissions } from '../../hooks/usePermissions';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
@@ -26,6 +27,7 @@ const TABS = vendorRoutes.slice(0, 4);
 
 function VendorLayout() {
   const { theme, toggleTheme } = useThemeStore();
+  const fullscreen = useFullscreen();
   const location = useLocation();
   useScrollTopOnNavigate();
   const navigate = useNavigate();
@@ -117,6 +119,17 @@ function VendorLayout() {
             </div>
             <div className="flex items-center gap-1">
               <ReportButton mode="merchant" />
+              {fullscreen.supported && (
+                <button
+                  type="button"
+                  onClick={fullscreen.toggle}
+                  className="hidden rounded-lg p-2 hover:bg-muted sm:block"
+                  aria-label={fullscreen.active ? 'Exit full screen' : 'Full screen'}
+                  title={fullscreen.active ? 'Exit full screen' : 'Full screen'}
+                >
+                  {fullscreen.active ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                </button>
+              )}
               <button type="button" onClick={toggleTheme} className="rounded-lg p-2 hover:bg-muted" aria-label="Toggle theme">
                 {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
               </button>

@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
-  LayoutDashboard, Building2, Shield, LogOut, Sun, Moon, Activity, ListTodo,
+  LayoutDashboard, Building2, Shield, LogOut, Sun, Moon, Maximize, Minimize, Activity, ListTodo,
   FileWarning, Settings, CreditCard, Users, Menu, X, CalendarClock, ListChecks, Images,
 } from 'lucide-react';
 import useThemeStore from '../../stores/themeStore';
 import { useAuth } from '../../hooks/useAuth';
 import PageFade from '../motion/PageFade';
 import useScrollTopOnNavigate from '../../hooks/useScrollTopOnNavigate';
+import useFullscreen from '../../hooks/useFullscreen';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfilePhotoButton, useProfilePhoto } from '../account/ProfilePhoto';
 import ReportButton from '../report/ReportButton';
@@ -73,6 +74,7 @@ export default function PlatformLayout() {
   useScrollTopOnNavigate();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useThemeStore();
+  const fullscreen = useFullscreen();
   const { logout, user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -169,6 +171,17 @@ export default function PlatformLayout() {
             </div>
             <div className="flex items-center gap-1">
               <ReportButton mode="platform" />
+              {fullscreen.supported && (
+                <button
+                  type="button"
+                  onClick={fullscreen.toggle}
+                  className="hidden rounded-lg p-2 hover:bg-muted sm:block"
+                  aria-label={fullscreen.active ? 'Exit full screen' : 'Full screen'}
+                  title={fullscreen.active ? 'Exit full screen' : 'Full screen'}
+                >
+                  {fullscreen.active ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                </button>
+              )}
               <button type="button" onClick={toggleTheme} className="rounded-lg p-2 hover:bg-muted" aria-label="Toggle theme">
                 {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
               </button>
