@@ -151,6 +151,7 @@ orderSchema.index(
   },
 );
 orderSchema.index({ tenantId: 1, 'subOrders.id': 1 });
+orderSchema.index({ tenantId: 1, orderDate: -1, createdAt: -1 });
 orderSchema.plugin(tenantPlugin);
 
 const SHIPPED_STATUS = /^(shipped|in transit|out for delivery|delivered)$/i;

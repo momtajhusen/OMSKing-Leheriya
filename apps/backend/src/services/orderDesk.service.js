@@ -168,9 +168,14 @@ function applyDeskRules(orders, pools = {}) {
 }
 
 async function stockPools(tenantId) {
-  const warehouses = await Warehouse.find({ tenantId, status: 'active' }).setOptions({ skipTenantFilter: true });
+  const [warehouses, rows] = await Promise.all([
+    Warehouse.find({ tenantId, status: 'active' }).select('type').lean().setOptions({ skipTenantFilter: true }),
+    Inventory.find({ tenantId })
+      .select('warehouseId masterSkuId physicalQty virtualQty reservedQty channelOnly channelHeld')
+      .lean()
+      .setOptions({ skipTenantFilter: true }),
+  ]);
   const byId = new Map(warehouses.map((row) => [String(row._id), row]));
-  const rows = await Inventory.find({ tenantId }).setOptions({ skipTenantFilter: true });
   const physical = new Map();
   const virtual = new Map();
   const { channelIds } = require('../channels/registry');

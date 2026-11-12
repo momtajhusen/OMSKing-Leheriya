@@ -79,7 +79,7 @@ async function withScans(tenantId, orders) {
     tenantId,
     orderNo: { $in: orders.map((order) => order.id) },
     status: 'booked',
-  }).select('orderNo deliveryStatus trackingEvents').setOptions({ skipTenantFilter: true });
+  }).select({ orderNo: 1, deliveryStatus: 1, trackingEvents: { $slice: -1 } }).lean().setOptions({ skipTenantFilter: true });
   const byNo = new Map();
   rows.forEach((row) => {
     const events = row.trackingEvents || [];

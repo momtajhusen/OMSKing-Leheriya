@@ -269,9 +269,7 @@ const useOrderStore = create((set, get) => ({
     const started = { generation: get().generation || 0, tenantId: activeTenantId() };
     const current = () => ({ generation: get().generation || 0, tenantId: activeTenantId() });
     try {
-      const { data } = await api.get('/orders');
-      if (!sameCompanySnapshot(started, current())) return get().orders;
-      await loadConnectedChannels();
+      const [{ data }] = await Promise.all([api.get('/orders'), loadConnectedChannels()]);
       if (!sameCompanySnapshot(started, current())) return get().orders;
       const rows = ordersOnConnectedChannels(hydrate(data.data || []), useChannelStore.getState());
       if (!sameCompanySnapshot(started, current())) return get().orders;
