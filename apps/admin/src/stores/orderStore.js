@@ -19,9 +19,14 @@ function stripHtml(data) {
 
 if (typeof localStorage !== 'undefined') localStorage.removeItem('omsking-order-desk');
 
+export const OPEN_ORDER_STATUSES = ['New', 'Pending', 'Processing', 'Packed', 'Ready to Ship', 'Unfulfillable'];
+
 const useOrderStore = create((set, get) => ({
   orders: [],
   loaded: false,
+  /** Open orders only, for desk pages to render before the full list arrives. Unused once `loaded`. */
+  openOrders: [],
+  openLoaded: false,
   error: '',
   generation: 0,
 
@@ -38,6 +43,14 @@ const useOrderStore = create((set, get) => ({
         ? get().orders.map((order) => (order.id === next.id ? next : order))
         : [next, ...get().orders],
     });
+    if (!get().loaded && get().openLoaded) {
+      const open = get().openOrders;
+      set({
+        openOrders: open.some((order) => order.id === next.id)
+          ? open.map((order) => (order.id === next.id ? next : order))
+          : [next, ...open],
+      });
+    }
     return next;
   },
 
@@ -246,6 +259,8 @@ const useOrderStore = create((set, get) => ({
     set((state) => ({
       orders: [],
       loaded: false,
+      openOrders: [],
+      openLoaded: false,
       error: '',
       generation: (state.generation || 0) + 1,
     }));
@@ -263,6 +278,24 @@ const useOrderStore = create((set, get) => ({
     } catch {
       return null;
     }
+  },
+
+  /** Fast first paint for desk pages: open orders only (a small fraction of the full list). */
+  hydrateOpen: async () => {
+    if (get().loaded) return get().orders;
+    const started = { generation: get().generation || 0, tenantId: activeTenantId() };
+    try {
+      const [{ data }] = await Promise.all([
+        api.get('/orders', { params: { status: OPEN_ORDER_STATUSES.join(',') } }),
+        loadConnectedChannels(),
+      ]);
+      const now = { generation: get().generation || 0, tenantId: activeTenantId() };
+      if (get().loaded || !sameCompanySnapshot(started, now)) return get().orders;
+      set({ openOrders: ordersOnConnectedChannels(hydrate(data.data || []), useChannelStore.getState()), openLoaded: true });
+    } catch {
+      // The full list load reports the error.
+    }
+    return get().openOrders;
   },
 
   hydrateFromApi: async () => {

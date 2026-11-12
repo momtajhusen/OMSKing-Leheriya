@@ -209,11 +209,12 @@ function expandVendorLines(orderList) {
 export default function FulfilmentPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('available');
-  const orderList = useOrderStore((s) => s.orders);
+  const orderList = useOrderStore((s) => (s.loaded ? s.orders : s.openOrders));
   const setOrderStatus = useOrderStore((s) => s.setStatus);
   const assignSubOrder = useOrderStore((s) => s.assignSubOrder);
   const vendorUpdate = useOrderStore((s) => s.vendorUpdate);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+  const hydrateOpen = useOrderStore((s) => s.hydrateOpen);
   const [assignments, setAssignments] = useState({});
   const [busyKey, setBusyKey] = useState('');
   const [holdOrder, setHoldOrder] = useState(null);
@@ -225,12 +226,13 @@ export default function FulfilmentPage() {
   const allVendors = useVendorStore((s) => s.vendors);
   const loadVendors = useVendorStore((s) => s.load);
   const activeVendors = useMemo(() => allVendors.filter((vendor) => !vendor.removed && vendor.status === 'Active'), [allVendors]);
-  const loading = !useOrderStore((s) => s.loaded);
+  const loading = !useOrderStore((s) => s.loaded || s.openLoaded);
 
   useEffect(() => {
+    hydrateOpen();
     hydrateFromApi();
     loadVendors();
-  }, [hydrateFromApi, loadVendors]);
+  }, [hydrateOpen, hydrateFromApi, loadVendors]);
 
   const openStatuses = ['New', 'Pending', 'Processing', 'Packed', 'Ready to Ship'];
   const openOrders = useMemo(() => orderList.filter((o) => openStatuses.includes(o.status) && o.status !== 'Unfulfillable' && !o.mappingFailed), [orderList]);
