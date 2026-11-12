@@ -219,32 +219,32 @@ export default function ProductsPage() {
                   <TableHead>Product</TableHead>
                   <TableHead>Master SKU</TableHead>
                   <TableHead>HSN</TableHead>
-                  <TableHead>GST %</TableHead>
-                  <TableHead>Price</TableHead>
-                  <TableHead className="text-right">In Stock (Shopify Offline/Amazon/Myntra)</TableHead>
-                  <TableHead className="text-right">In Stock (Virtual)</TableHead>
+                  <TableHead className="text-right">GST</TableHead>
+                  <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-right" title="In stock at WH-001: Shopify Offline, Amazon and Myntra">Offline</TableHead>
+                  <TableHead className="text-right" title="In stock at WH-002 (Virtual)">Virtual</TableHead>
                   <TableHead>Status</TableHead>
-                  {canCatalogEdit && <TableHead />}
+                  {canCatalogEdit && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {productVariantRows(rows).map(({ key, product, variant: v }) => (
                   <TableRow key={key}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
+                    <TableCell className="min-w-[18rem] max-w-[24rem] align-middle">
+                      <div className="flex !flex-nowrap items-center gap-3">
                         <ProductThumb name={product.name} sku={v?.code || product.name} src={rowImage(product, v)} size="lg" />
-                        <div>
-                          <div className="font-medium">{product.name}</div>
+                        <div className="min-w-0">
+                          <div className="line-clamp-2 font-medium leading-snug" title={product.name}>{product.name}</div>
                           {variantLabel(v) && <div className="text-xs">{variantLabel(v)}</div>}
-                          <div className="text-xs text-muted-foreground">
+                          <div className="truncate text-xs text-muted-foreground">
                             {[product.brand, product.category].filter(Boolean).join(' · ') || '—'}
                           </div>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="max-w-none whitespace-nowrap align-middle">
                       {v ? (
-                        <div className="flex items-center gap-1 font-mono text-xs">
+                        <div className="flex !flex-nowrap items-center gap-1 font-mono text-xs">
                           {v.code}
                           <button
                             type="button"
@@ -264,34 +264,42 @@ export default function ProductsPage() {
                         </div>
                       ) : '—'}
                     </TableCell>
-                    <TableCell>{product.hsnCode || '—'}</TableCell>
-                    <TableCell>{product.gstRatePercent}%</TableCell>
-                    <TableCell>{formatINR(v?.sellingPrice || 0)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{v?.stock?.offline ?? 0}</TableCell>
-                    <TableCell className="text-right tabular-nums">{v?.stock?.virtual ?? 0}</TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap align-middle text-muted-foreground">{product.hsnCode || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right align-middle tabular-nums">{product.gstRatePercent}%</TableCell>
+                    <TableCell className="max-w-none whitespace-nowrap text-right align-middle font-medium tabular-nums">{formatINR(v?.sellingPrice || 0)}</TableCell>
+                    <TableCell className={cn('whitespace-nowrap text-right align-middle tabular-nums', !v?.stock?.offline && 'text-muted-foreground')}>{v?.stock?.offline ?? 0}</TableCell>
+                    <TableCell className={cn('whitespace-nowrap text-right align-middle tabular-nums', !v?.stock?.virtual && 'text-muted-foreground')}>{v?.stock?.virtual ?? 0}</TableCell>
+                    <TableCell className="align-middle">
                       <Badge variant={statusBadgeVariant(product.status === 'active' ? 'Active' : product.status)}>
                         {product.status}
                       </Badge>
                     </TableCell>
                     {canCatalogEdit && (
-                      <TableCell>
-                        <div className="flex gap-2">
+                      <TableCell className="max-w-none align-middle">
+                        <div className="flex !flex-nowrap justify-end gap-1">
                           <Button
                             size="sm"
-                            variant="outline"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            title="Edit product"
+                            aria-label={`Edit ${product.name}`}
                             onClick={() => {
                               setEdit({ ...product, imagesText: (product.images || []).join('\n') });
                               setBanner('');
                               setEditOpen(true);
                             }}
                           >
-                            <Pencil className="w-3 h-3 mr-1" />
-                            Edit
+                            <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => removeProduct(product)}>
-                            <Trash2 className="w-3 h-3 mr-1" />
-                            Delete
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                            title="Delete product"
+                            aria-label={`Delete ${product.name}`}
+                            onClick={() => removeProduct(product)}
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>

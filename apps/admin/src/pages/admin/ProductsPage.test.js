@@ -23,9 +23,10 @@ test('each Master SKU row shows that variant\'s own image', () => {
   assert.match(page, /<ProductThumb [^>]*src=\{rowImage\(product, v\)\}/);
 });
 
-test('product list shows In Stock (Shopify Offline/Amazon/Myntra) and In Stock (Virtual) per Master SKU', () => {
-  assert.match(page, /<TableHead[^>]*>In Stock \(Shopify Offline\/Amazon\/Myntra\)<\/TableHead>/);
-  assert.match(page, /<TableHead[^>]*>In Stock \(Virtual\)<\/TableHead>/);
+test('product list shows short Offline and Virtual stock columns per Master SKU, with the full meaning on hover', () => {
+  assert.match(page, /<TableHead[^>]*title="In stock at WH-001: Shopify Offline, Amazon and Myntra"[^>]*>Offline<\/TableHead>/);
+  assert.match(page, /<TableHead[^>]*title="In stock at WH-002 \(Virtual\)"[^>]*>Virtual<\/TableHead>/);
+  assert.doesNotMatch(page, /In Stock \(Shopify Offline\/Amazon\/Myntra\)/);
   assert.match(page, /\{v\?\.stock\?\.offline \?\? 0\}/);
   assert.match(page, /\{v\?\.stock\?\.virtual \?\? 0\}/);
 });
