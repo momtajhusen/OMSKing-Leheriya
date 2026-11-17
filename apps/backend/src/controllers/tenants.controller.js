@@ -5,6 +5,7 @@ const { HttpError } = require('../utils/httpError');
 const { successResponse } = require('../utils/response');
 const { publicUser, accessPayload } = require('../lib/userDto');
 const { provisionMerchant } = require('../services/tenantOnboard.service');
+const { assertStrongPassword } = require('../lib/password');
 const { sendMail, assertMailConfigured } = require('../lib/mailer');
 const { accountCreatedEmail, mailboxTestEmail } = require('../lib/mailTemplates');
 const { signAccessToken, signRefreshToken, verifyRefresh, setRefreshCookie, hashToken, deviceFromUa } = require('../lib/tokens');
@@ -83,6 +84,7 @@ async function listTenants(req, res) {
 
 async function createTenant(req, res) {
   await assertMailConfigured();
+  if (req.body.password) assertStrongPassword(req.body.password);
   const password = req.body.password || `Welcome-${Math.random().toString(36).slice(2, 8)}A1`;
   const { tenant } = await provisionMerchant({
     name: req.body.name,

@@ -10,6 +10,9 @@ const { bookPaymentMode } = require('./orderDesk.service');
 const { codCollectAmount } = require('../utils/payment');
 const { orderPackage } = require('./packageDefaults.service');
 const delhivery = require('../adapters/couriers/delhivery');
+const amazonShipping = require('../adapters/couriers/amazonShipping');
+const bluedart = require('../adapters/couriers/bluedart');
+const maruti = require('../adapters/couriers/maruti');
 const shopify = require('../adapters/shopify');
 const myntra = require('../adapters/myntra');
 const { amazonEasyShipLabel } = require('./amazonLabel.service');
@@ -45,7 +48,15 @@ async function pickupWarehouse(tenantId) {
     err.terminal = true;
     throw err;
   }
-  return { address, phone: row.contactPhone };
+  return {
+    address,
+    phone: row.contactPhone,
+    name: row.name,
+    line1: row.address.line1,
+    city: row.address.city,
+    state: row.address.state,
+    pincode: row.address.pincode,
+  };
 }
 
 async function saveShipment(doc) {
@@ -206,6 +217,9 @@ async function bookOtherCourierNow(tenantId, orderNo, { courier, awb } = {}, dep
   const code = String(courier || '').trim();
   const account = await skip(CourierAccount.findOne({ tenantId, code, status: 'active' }));
   if (!account || /^delhivery/.test(code)) throw new HttpError(400, 'This courier is not enabled for this company.');
+  if (code === AMAZON_SHIPPING) return bookAmazonShippingNow(tenantId, order, account, deps);
+  if (code === BLUE_DART && bluedartApiReady(account, deps)) return bookBluedartNow(tenantId, order, account, deps);
+  if (code === SHREE_MARUTI && marutiApiReady(account, deps)) return bookMarutiNow(tenantId, order, account, deps);
   const tracking = String(awb || '').trim();
   if (!tracking) throw new HttpError(400, `Enter the ${account.name} AWB from the courier portal.`);
   const pay = bookPaymentMode(order.paymentMode);
@@ -243,6 +257,262 @@ async function bookOtherCourierNow(tenantId, orderNo, { courier, awb } = {}, dep
   return shipment;
 }
 
+const AMAZON_SHIPPING = 'amazon-shipping';
+const BLUE_DART = 'bluedart';
+const SHREE_MARUTI = 'shree-maruti';
+
+function amazonShippingCreds(account, deps) {
+  if (deps.amazonShippingCreds) return deps.amazonShippingCreds;
+  if (!account) throw new HttpError(400, 'Amazon Shipping is not set up in Settings › Couriers. Amazon was not called.');
+  const { decryptObject } = require('../lib/secretBox');
+  return decryptObject(account.credentialsEnc);
+}
+
+function bluedartCreds(account, deps) {
+  if (deps.bluedartCreds) return deps.bluedartCreds;
+  if (!account) throw new HttpError(400, 'Bluedart is not set up in Settings › Couriers. Blue Dart was not called.');
+  const { decryptObject } = require('../lib/secretBox');
+  return decryptObject(account.credentialsEnc);
+}
+
+/** Own Bluedart with gateway + profile secrets books by API; platform or incomplete credentials stay on typed AWB. */
+function bluedartApiReady(account, deps = {}) {
+  if (deps.bluedartCreds) return true;
+  if (!account || account.source !== 'own' || !account.credentialsEnc) return false;
+  const creds = bluedartCreds(account, {});
+  return Boolean(
+    String(creds.clientId || '').trim()
+    && String(creds.clientSecret || '').trim()
+    && String(creds.loginId || '').trim()
+    && String(creds.licenceKey || '').trim()
+    && String(creds.customerCode || '').trim()
+    && (String(creds.apiMode || creds.accountMode || '').trim()),
+  );
+}
+
+function marutiCreds(account, deps) {
+  if (deps.marutiCreds) return deps.marutiCreds;
+  if (!account) throw new HttpError(400, 'Shree Maruti is not set up in Settings › Couriers. Shree Maruti was not called.');
+  const { decryptObject } = require('../lib/secretBox');
+  return decryptObject(account.credentialsEnc);
+}
+
+/** Own Shree Maruti with Innofulfill secrets books by API; incomplete credentials stay on typed AWB. */
+function marutiApiReady(account, deps = {}) {
+  if (deps.marutiCreds) return true;
+  if (!account || account.source !== 'own' || !account.credentialsEnc) return false;
+  const creds = marutiCreds(account, {});
+  return Boolean(
+    String(creds.email || '').trim()
+    && String(creds.password || '').trim()
+    && String(creds.apiKey || '').trim()
+    && String(creds.userId || '').trim()
+    && String(creds.accountTenantId || '').trim()
+    && String(creds.apiMode || '').trim(),
+  );
+}
+
+/** Shree Maruti books by API: one AWB + label PDF per order; a retry after a failed Shopify fulfil reuses the booked AWB. */
+async function bookMarutiNow(tenantId, order, account, deps = {}) {
+  const pay = bookPaymentMode(order.paymentMode);
+  if (pay === 'Void') throw new HttpError(400, 'This payment is Void. Shree Maruti was not called, and it is not booked as COD.');
+  let shipment = await skip(Shipment.findOne({ tenantId, orderNo: order.orderNo, status: 'booked' }));
+  if (shipment && (shipment.courier !== SHREE_MARUTI || shipment.shopifyFulfillmentId)) {
+    throw new HttpError(400, 'This order already has a booked AWB. Cancel it first.');
+  }
+  const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
+  if (!shopify.hasShopifyAuth(shopCreds)) throw new HttpError(400, 'Shopify shop URL and admin token are missing. Shree Maruti was not called.');
+  if (!shipment) {
+    const pincode = pinOf(order);
+    if (!/^\d{6}$/.test(pincode)) throw new HttpError(400, 'This order has no 6-digit delivery pincode, so Shree Maruti was not called.');
+    const pickup = await pickupWarehouse(tenantId);
+    const pack = await orderPackage(tenantId, order.items || []);
+    const booked = await maruti.book(marutiCreds(account, deps), {
+      ...pack,
+      name: order.customer || 'Customer',
+      address: order.address || order.city,
+      city: cityOf(order),
+      state: order.shipState || '',
+      pincode,
+      phone: order.phone || pickup.phone,
+      email: order.email,
+      orderNo: order.orderNo,
+      paymentMode: pay,
+      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo,
+      quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
+      amount: order.total || 0,
+      codAmount: pay === 'COD' ? codCollectAmount(order) : 0,
+      pickup,
+    }, { request: deps.marutiRequest });
+    shipment = await saveShipment({
+      tenantId,
+      orderNo: order.orderNo,
+      channel: 'shopify',
+      courier: SHREE_MARUTI,
+      awb: booked.awb,
+      status: 'booked',
+      warehouseCode: 'WH-001',
+      labelPdf: booked.labelPdf,
+      channelPackageId: booked.shipmentId,
+      bookedAt: new Date(),
+    });
+  }
+  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+    orderId: order.externalOrderId || order.orderNo,
+    trackingNumber: shipment.awb,
+    company: account.name,
+    request: deps.shopifyRequest,
+  });
+  shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
+  await shipment.save();
+  order.awb = shipment.awb;
+  order.courier = account.name;
+  order.labelPaymentMode = pay;
+  order.status = 'Dispatched';
+  order.labelGeneratedAt = new Date();
+  await order.save();
+  return shipment;
+}
+
+/** Amazon Shipping books by API: one label per order, and a retry after a failed Shopify fulfil reuses the booked AWB. */
+async function bookAmazonShippingNow(tenantId, order, account, deps = {}) {
+  const pay = bookPaymentMode(order.paymentMode);
+  if (pay === 'Void') throw new HttpError(400, 'This payment is Void. Amazon Shipping was not called, and it is not booked as COD.');
+  let shipment = await skip(Shipment.findOne({ tenantId, orderNo: order.orderNo, status: 'booked' }));
+  if (shipment && (shipment.courier !== AMAZON_SHIPPING || shipment.shopifyFulfillmentId)) {
+    throw new HttpError(400, 'This order already has a booked AWB. Cancel it first.');
+  }
+  const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
+  if (!shopify.hasShopifyAuth(shopCreds)) throw new HttpError(400, 'Shopify shop URL and admin token are missing. Amazon Shipping was not called.');
+  if (!shipment) {
+    const pincode = pinOf(order);
+    if (!/^\d{6}$/.test(pincode)) throw new HttpError(400, 'This order has no 6-digit delivery pincode, so Amazon Shipping was not called.');
+    const pickup = await pickupWarehouse(tenantId);
+    const pack = await orderPackage(tenantId, order.items || []);
+    const booked = await amazonShipping.book(amazonShippingCreds(account, deps), {
+      ...pack,
+      name: order.customer || 'Customer',
+      address: order.address || order.city,
+      city: cityOf(order),
+      state: order.shipState || '',
+      pincode,
+      phone: order.phone || pickup.phone,
+      email: order.email,
+      orderNo: order.orderNo,
+      paymentMode: pay,
+      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo,
+      quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
+      amount: order.total || 0,
+      codAmount: pay === 'COD' ? codCollectAmount(order) : 0,
+      pickup,
+    }, { request: deps.amazonShippingRequest });
+    shipment = await saveShipment({
+      tenantId,
+      orderNo: order.orderNo,
+      channel: 'shopify',
+      courier: AMAZON_SHIPPING,
+      awb: booked.awb,
+      status: 'booked',
+      warehouseCode: 'WH-001',
+      labelPdf: booked.labelPdf,
+      channelPackageId: booked.shipmentId,
+      carrierId: booked.carrierId,
+      bookedAt: new Date(),
+    });
+  }
+  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+    orderId: order.externalOrderId || order.orderNo,
+    trackingNumber: shipment.awb,
+    company: account.name,
+    request: deps.shopifyRequest,
+  });
+  shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
+  await shipment.save();
+  order.awb = shipment.awb;
+  order.courier = account.name;
+  order.labelPaymentMode = pay;
+  order.status = 'Dispatched';
+  order.labelGeneratedAt = new Date();
+  await order.save();
+  return shipment;
+}
+
+/** Blue Dart books by API: one waybill + label PDF per order; a retry after a failed Shopify fulfil reuses the booked AWB. */
+async function bookBluedartNow(tenantId, order, account, deps = {}) {
+  const pay = bookPaymentMode(order.paymentMode);
+  if (pay === 'Void') throw new HttpError(400, 'This payment is Void. Blue Dart was not called, and it is not booked as COD.');
+  let shipment = await skip(Shipment.findOne({ tenantId, orderNo: order.orderNo, status: 'booked' }));
+  if (shipment && (shipment.courier !== BLUE_DART || shipment.shopifyFulfillmentId)) {
+    throw new HttpError(400, 'This order already has a booked AWB. Cancel it first.');
+  }
+  const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
+  if (!shopify.hasShopifyAuth(shopCreds)) throw new HttpError(400, 'Shopify shop URL and admin token are missing. Blue Dart was not called.');
+  if (!shipment) {
+    const pincode = pinOf(order);
+    if (!/^\d{6}$/.test(pincode)) throw new HttpError(400, 'This order has no 6-digit delivery pincode, so Blue Dart was not called.');
+    const pickup = await pickupWarehouse(tenantId);
+    const pack = await orderPackage(tenantId, order.items || []);
+    const booked = await bluedart.book(bluedartCreds(account, deps), {
+      ...pack,
+      name: order.customer || 'Customer',
+      address: order.address || order.city,
+      city: cityOf(order),
+      state: order.shipState || '',
+      pincode,
+      phone: order.phone || pickup.phone,
+      orderNo: order.orderNo,
+      paymentMode: pay,
+      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo,
+      quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
+      amount: order.total || 0,
+      codAmount: pay === 'COD' ? codCollectAmount(order) : 0,
+      pickup,
+    }, { request: deps.bluedartRequest });
+    shipment = await saveShipment({
+      tenantId,
+      orderNo: order.orderNo,
+      channel: 'shopify',
+      courier: BLUE_DART,
+      awb: booked.awb,
+      status: 'booked',
+      warehouseCode: 'WH-001',
+      labelPdf: booked.labelPdf,
+      channelPackageId: booked.shipmentId,
+      bookedAt: new Date(),
+    });
+  }
+  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+    orderId: order.externalOrderId || order.orderNo,
+    trackingNumber: shipment.awb,
+    company: account.name,
+    request: deps.shopifyRequest,
+  });
+  shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
+  await shipment.save();
+  order.awb = shipment.awb;
+  order.courier = account.name;
+  order.labelPaymentMode = pay;
+  order.status = 'Dispatched';
+  order.labelGeneratedAt = new Date();
+  await order.save();
+  return shipment;
+}
+
+/** The stored courier label PDF of a Shopify order booked by API; no courier is called. */
+async function courierLabelPdf(tenantId, orderNo) {
+  const shipment = await skip(Shipment.findOne({
+    tenantId, orderNo, status: 'booked', courier: { $in: [AMAZON_SHIPPING, BLUE_DART, SHREE_MARUTI] },
+  }));
+  if (!shipment) throw new HttpError(404, 'This order has no courier label PDF yet.');
+  if (!shipment.labelPdf) {
+    const who = shipment.courier === BLUE_DART ? 'Blue Dart'
+      : shipment.courier === SHREE_MARUTI ? 'Shree Maruti'
+        : 'Amazon Shipping';
+    throw new HttpError(404, `${who} sent no label PDF for this parcel.`);
+  }
+  return shipment.labelPdf;
+}
+
 async function bookingCouriers(tenantId) {
   const CourierAccount = require('../models/CourierAccount');
   const rows = await skip(CourierAccount.find({ tenantId, status: 'active' }).sort({ priority: 1, name: 1 }));
@@ -251,7 +521,12 @@ async function bookingCouriers(tenantId) {
   const delhiveryRow = rows.find((row) => row.code === 'delhivery') || rows.find((row) => /^delhivery/.test(row.code));
   return [
     { code: 'delhivery', name: 'Delhivery', api: true, rateHalfKg: Number(delhiveryRow?.rateHalfKg) || 0 },
-    ...others.map((row) => ({ code: row.code, name: row.name, api: false, rateHalfKg: Number(row.rateHalfKg) || 0 })),
+    ...others.map((row) => ({
+      code: row.code,
+      name: row.name,
+      api: row.code === AMAZON_SHIPPING || bluedartApiReady(row) || marutiApiReady(row),
+      rateHalfKg: Number(row.rateHalfKg) || 0,
+    })),
   ];
 }
 
@@ -281,14 +556,30 @@ async function courierRates(tenantId, orderNo) {
 async function cancelShopifyLabel(tenantId, orderNo, { releaseReserve = false, deps = {} } = {}) {
   const order = await skip(Order.findOne({ tenantId, orderNo }));
   if (!order) throw new HttpError(404, 'Order not found');
-  const shipment = await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked', courier: 'delhivery' }));
-  if (!shipment) throw new HttpError(400, 'This order has no Delhivery AWB to cancel.');
+  const shipment = await skip(Shipment.findOne({
+    tenantId, orderNo, status: 'booked', courier: { $in: ['delhivery', AMAZON_SHIPPING, BLUE_DART, SHREE_MARUTI] },
+  }));
+  if (!shipment) throw new HttpError(400, 'This order has no Delhivery, Amazon Shipping, Blue Dart, or Shree Maruti AWB to cancel.');
   if (leftWarehouse(order) || MOVED_SCANS.includes(shipment.deliveryStatus)) {
     throw new HttpError(400, 'The courier already picked this parcel up, so the label cannot be cancelled. Mark it RTO instead.');
   }
   if (!shipment.courierCancelledAt) {
-    const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
-    await delhivery.cancelAwb(creds, shipment.awb, { request: deps.delhiveryRequest });
+    if (shipment.courier === AMAZON_SHIPPING) {
+      const CourierAccount = require('../models/CourierAccount');
+      const account = deps.amazonShippingCreds ? null : await skip(CourierAccount.findOne({ tenantId, code: AMAZON_SHIPPING }));
+      await amazonShipping.cancel(amazonShippingCreds(account, deps), shipment.channelPackageId, { request: deps.amazonShippingRequest });
+    } else if (shipment.courier === BLUE_DART) {
+      const CourierAccount = require('../models/CourierAccount');
+      const account = deps.bluedartCreds ? null : await skip(CourierAccount.findOne({ tenantId, code: BLUE_DART, status: 'active' }));
+      await bluedart.cancel(bluedartCreds(account, deps), shipment.awb, { request: deps.bluedartRequest });
+    } else if (shipment.courier === SHREE_MARUTI) {
+      const CourierAccount = require('../models/CourierAccount');
+      const account = deps.marutiCreds ? null : await skip(CourierAccount.findOne({ tenantId, code: SHREE_MARUTI, status: 'active' }));
+      await maruti.cancel(marutiCreds(account, deps), { awb: shipment.awb, shipmentId: shipment.channelPackageId }, { request: deps.marutiRequest });
+    } else {
+      const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
+      await delhivery.cancelAwb(creds, shipment.awb, { request: deps.delhiveryRequest });
+    }
     shipment.courierCancelledAt = new Date();
     await shipment.save();
   }
@@ -529,4 +820,5 @@ module.exports = {
   courierRates,
   rateEstimate,
   assertStatusChange,
+  courierLabelPdf,
 };

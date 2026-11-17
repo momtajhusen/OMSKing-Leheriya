@@ -12,6 +12,7 @@ const shipmentSchema = new mongoose.Schema({
   shopifyFulfillmentId: { type: String, default: '' },
   labelPdf: { type: Buffer, default: null },
   channelPackageId: { type: String, default: '' },
+  carrierId: { type: String, default: '' },
   reserveReleased: { type: Boolean, default: false },
   bookedAt: { type: Date },
   cancelledAt: { type: Date },

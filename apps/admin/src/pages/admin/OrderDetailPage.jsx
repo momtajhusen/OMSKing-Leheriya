@@ -465,6 +465,24 @@ export default function OrderDetailPage() {
               Amazon label
             </Button>
           )}
+          {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && order.courier === 'Amazon Shipping' && order.awb && (
+            <Button variant="outline" onClick={printAmazonLabel}>
+              <Printer className="w-4 h-4 mr-2" />
+              Amazon Shipping label
+            </Button>
+          )}
+          {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && /^blue\s*dart$/i.test(order.courier || '') && order.awb && (
+            <Button variant="outline" onClick={printAmazonLabel}>
+              <Printer className="w-4 h-4 mr-2" />
+              Blue Dart label
+            </Button>
+          )}
+          {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && /shree[-\s]?maruti|^maruti$/i.test(order.courier || '') && order.awb && (
+            <Button variant="outline" onClick={printAmazonLabel}>
+              <Printer className="w-4 h-4 mr-2" />
+              Shree Maruti label
+            </Button>
+          )}
           {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
             <Button disabled={busy === 'label'} onClick={openLabel}>
               <Printer className="w-4 h-4 mr-2" />
@@ -1000,7 +1018,7 @@ export default function OrderDetailPage() {
           )}
           <p className="text-sm text-muted-foreground">
             {picked.api
-              ? 'Delhivery is booked by API from WH-001 and the label opens. The tracking number is sent to Shopify.'
+              ? `${picked.name} is booked by API from WH-001 and the label is saved. The tracking number is sent to Shopify.`
               : `Book the shipment on the ${picked.name} portal, then enter its AWB here. The tracking number is sent to Shopify. Couriers are enabled in Settings › Couriers.`}
           </p>
         </div>

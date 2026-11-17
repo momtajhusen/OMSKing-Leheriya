@@ -95,6 +95,24 @@ test('the label courier defaults to Delhivery and only lists the company courier
   assert.equal(labelRequest(couriers[1], ' ').error, 'Enter the Bluedart AWB');
 });
 
+test('Blue Dart own account is booked by API: no typed AWB, the request names the courier and the option says API', () => {
+  const blue = { code: 'bluedart', name: 'Bluedart', api: true, estimate: null };
+  assert.deepEqual(labelRequest(blue, ''), { body: { courier: 'bluedart' } });
+  assert.equal(courierOptionText(blue), 'Bluedart · no rate (API)');
+});
+
+test('Shree Maruti own account is booked by API: no typed AWB, the request names the courier and the option says API', () => {
+  const maruti = { code: 'shree-maruti', name: 'Shree Maruti', api: true, estimate: null };
+  assert.deepEqual(labelRequest(maruti, ''), { body: { courier: 'shree-maruti' } });
+  assert.equal(courierOptionText(maruti), 'Shree Maruti · no rate (API)');
+});
+
+test('Amazon Shipping is booked by API: no typed AWB, the request names the courier and the option says API', () => {
+  const amazon = { code: 'amazon-shipping', name: 'Amazon Shipping', api: true, estimate: null };
+  assert.deepEqual(labelRequest(amazon, ''), { body: { courier: 'amazon-shipping' } });
+  assert.equal(courierOptionText(amazon), 'Amazon Shipping · no rate (API)');
+});
+
 test('each label courier shows its rate-card estimate before booking', () => {
   const delhivery = { code: 'delhivery', name: 'Delhivery', api: true, estimate: { chargeableKg: 0.75, slabs: 2, amount: 160 } };
   const xb = { code: 'xpressbees', name: 'Xpressbees', api: false, estimate: null };

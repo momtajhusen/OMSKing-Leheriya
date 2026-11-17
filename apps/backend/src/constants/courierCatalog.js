@@ -81,8 +81,11 @@ const OWN = [
     code: 'bluedart',
     name: 'Bluedart',
     capabilities: ['forward', 'return', 'ndr'],
-    blurb: 'Login ID, licence key, and customer code from the Bluedart developer profile.',
+    blurb: 'Apigee Client ID and Client secret for the JWT login, plus Login ID, licence key, and customer code from the Bluedart developer profile. Set API environment to live or sandbox.',
     fields: [
+      { key: 'apiMode', label: 'API environment', type: 'text', required: false, placeholder: 'live' },
+      { key: 'clientId', label: 'Client ID', type: 'text', required: true, placeholder: 'Apigee / gateway Client ID' },
+      { key: 'clientSecret', label: 'Client secret', type: 'password', required: true, placeholder: 'Apigee / gateway client secret' },
       { key: 'loginId', label: 'Login ID', type: 'text', required: true, placeholder: 'Bluedart login ID' },
       { key: 'licenceKey', label: 'Licence key', type: 'password', required: true, placeholder: 'Licence key' },
       { key: 'trackingLicenceKey', label: 'Tracking licence key', type: 'password', required: false, placeholder: 'Tracking licence key' },
@@ -144,8 +147,10 @@ const OWN = [
     code: 'shree-maruti',
     name: 'Shree Maruti',
     capabilities: ['forward'],
-    blurb: 'Email, password, API key, user ID, and tenant ID from the Shree Maruti (Innofulfill) account, same as in Shipway.',
+    blurb: 'Email, password, API key, user ID, and tenant ID from the Shree Maruti (Innofulfill) account, same as in Shipway. Set API environment to live or sandbox. Optional API base URL overrides the default Innofulfill host.',
     fields: [
+      { key: 'apiMode', label: 'API environment', type: 'text', required: false, placeholder: 'live' },
+      { key: 'apiBaseUrl', label: 'API base URL', type: 'text', required: false, placeholder: 'https://api.innofulfill.com' },
       { key: 'email', label: 'Email', type: 'text', required: true, placeholder: 'Innofulfill login email' },
       { key: 'password', label: 'Password', type: 'password', required: true, placeholder: 'Innofulfill password' },
       { key: 'apiKey', label: 'API key', type: 'password', required: true, placeholder: 'innofulfill_live_…' },
@@ -159,7 +164,7 @@ const OWN = [
     code: 'amazon-shipping',
     name: 'Amazon Shipping',
     capabilities: ['forward'],
-    blurb: 'Use this only for the store’s own Amazon Shipping account, not the OMSKing account.',
+    blurb: 'Use this only for the store’s own Amazon Shipping account, not the OMSKing account. The SP-API app needs the Amazon Logistics role; Direct-to-Consumer Shipping is not needed for Shopify or website orders.',
     fields: [
       { key: 'apiMode', label: 'API environment', type: 'text', required: false, placeholder: 'sandbox' },
       { key: 'applicationName', label: 'Application name', type: 'text', required: false, placeholder: 'SP-API app name' },
@@ -181,6 +186,21 @@ const SECRET_KEYS = new Set([
   'apiToken', 'token', 'password', 'licenceKey', 'trackingLicenceKey', 'apiKey', 'secretKey', 'clientSecret', 'refreshToken',
 ]);
 
+/** Own-account secrets that mean a courier API can run (Delhivery token, Blue Dart licence, Amazon refresh, …). */
+function hasCourierSecret(creds) {
+  return Boolean(String(
+    creds?.apiToken
+    || creds?.token
+    || creds?.licenceKey
+    || creds?.clientSecret
+    || creds?.refreshToken
+    || creds?.apiKey
+    || creds?.secretKey
+    || creds?.password
+    || '',
+  ).trim());
+}
+
 function findPlatform(code) {
   return PLATFORM.find((item) => item.code === code) || null;
 }
@@ -194,6 +214,7 @@ module.exports = {
   OWN,
   CUSTOM_FIELDS,
   SECRET_KEYS,
+  hasCourierSecret,
   findPlatform,
   findOwn,
 };

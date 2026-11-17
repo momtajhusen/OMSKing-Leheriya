@@ -4,7 +4,7 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const RefreshSession = require('../models/RefreshSession');
-const { hashPassword } = require('../lib/password');
+const { hashPassword, assertStrongPassword } = require('../lib/password');
 const { HttpError } = require('../utils/httpError');
 const { successResponse } = require('../utils/response');
 const { merchantTenant } = require('./products.controller');
@@ -156,10 +156,7 @@ async function updateVendor(req, res) {
 
 function assertLoginPassword(password) {
   const value = String(password || '');
-  if (value.length < 8) throw new HttpError(400, 'Password must be at least 8 characters');
-  if (!/[A-Z]/.test(value)) throw new HttpError(400, 'Add at least one uppercase letter');
-  if (!/[a-z]/.test(value)) throw new HttpError(400, 'Add at least one lowercase letter');
-  if (!/[0-9]/.test(value)) throw new HttpError(400, 'Add at least one number');
+  assertStrongPassword(value);
   return value;
 }
 

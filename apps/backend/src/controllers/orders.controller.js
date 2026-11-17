@@ -336,15 +336,25 @@ async function generateLabel(req, res) {
     return successResponse(res, await decorateOne(tenantId, labelled), 'Amazon Easy Ship label made');
   }
   const subOrderId = req.body?.subOrderId || req.query.subOrderId;
-  const { bookShopify, bookOtherCourier } = require('../services/ship.service');
+  const { bookShopify, bookOtherCourier, courierLabelPdf } = require('../services/ship.service');
   const courier = String(req.body?.courier || 'delhivery');
   if (courier === 'delhivery') await bookShopify(tenantId, order.orderNo);
   else await bookOtherCourier(tenantId, order.orderNo, { courier, awb: req.body?.awb });
   const fresh = await findMaster(tenantId, order.orderNo);
   const dto = await decorateOne(tenantId, fresh);
+  let labelPdfBase64 = null;
+  if (courier === 'amazon-shipping' || courier === 'bluedart' || courier === 'shree-maruti') {
+    try {
+      const pdf = await courierLabelPdf(tenantId, fresh.orderNo);
+      labelPdfBase64 = Buffer.isBuffer(pdf) ? pdf.toString('base64') : null;
+    } catch {
+      labelPdfBase64 = null;
+    }
+  }
   return successResponse(res, {
     ...dto,
     labelHtml: labelHtml(dto, subOrderId),
+    ...(labelPdfBase64 ? { labelPdfBase64 } : {}),
   }, 'Label generated');
 }
 
@@ -373,6 +383,7 @@ async function cancelLabel(req, res) {
     return successResponse(res, await decorateOne(tenantId, cleared), 'Amazon label cancelled in OMSKing. Easy Ship has no cancel call, so the next label moves the same Amazon package to a new pickup slot.');
   }
   const { cancelShopifyLabel } = require('../services/ship.service');
+  const courierName = order.courier === 'Amazon Shipping' ? 'Amazon Shipping' : 'Delhivery';
   await cancelShopifyLabel(tenantId, order.orderNo, { releaseReserve: false });
   const cancelled = await findMaster(tenantId, order.orderNo);
   await recordFromReq(req, {
@@ -384,7 +395,7 @@ async function cancelLabel(req, res) {
     before,
     after: { status: cancelled.status, awb: '' },
   });
-  return successResponse(res, await decorateOne(tenantId, cancelled), 'Label cancelled. Delhivery AWB is cancelled and Shopify is unfulfilled. The stock reserve stays until the order itself is cancelled.');
+  return successResponse(res, await decorateOne(tenantId, cancelled), `Label cancelled. ${courierName} AWB is cancelled and Shopify is unfulfilled. The stock reserve stays until the order itself is cancelled.`);
 }
 
 async function markPaid(req, res) {
@@ -1048,9 +1059,13 @@ async function amazonLabel(req, res) {
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
   const { amazonLabelPdf } = require('../services/amazonLabel.service');
-  const pdf = await amazonLabelPdf(tenantId, order.orderNo);
+  const { courierLabelPdf } = require('../services/ship.service');
+  const pdf = order.channel === 'Amazon'
+    ? await amazonLabelPdf(tenantId, order.orderNo)
+    : await courierLabelPdf(tenantId, order.orderNo);
+  const tag = order.channel === 'Amazon' ? 'amazon' : String(order.courier || 'courier').toLowerCase().replace(/\s+/g, '-');
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="amazon-label-${String(order.orderNo).replace(/[^\w.-]/g, '_')}.pdf"`);
+  res.setHeader('Content-Disposition', `inline; filename="${tag}-label-${String(order.orderNo).replace(/[^\w.-]/g, '_')}.pdf"`);
   return res.send(pdf);
 }
 

@@ -296,14 +296,14 @@ test('super admin can set a vendor login password, and the password is not retur
   const opsEmail = `ops-pass-${Date.now()}@example.com`;
   await staff(created.tenant._id, created.roles, 'operations', opsEmail);
   const ops = await login(opsEmail);
-  const refused = await api('POST', `/api/v1/vendors/${vendor._id}/password`, { token: ops, json: { password: 'VendorPass1' } });
+  const refused = await api('POST', `/api/v1/vendors/${vendor._id}/password`, { token: ops, json: { password: 'Vendor-Pass-12' } });
   assert.equal(refused.status, 403);
   const owner = await login(created.owner.email);
-  const set = await api('POST', `/api/v1/vendors/${vendor._id}/password`, { token: owner, json: { password: 'VendorPass1' } });
+  const set = await api('POST', `/api/v1/vendors/${vendor._id}/password`, { token: owner, json: { password: 'Vendor-Pass-12' } });
   assert.equal(set.status, 201, JSON.stringify(set.body));
   assert.equal(set.body.data.email, email);
-  assert.equal(JSON.stringify(set.body).includes('VendorPass1'), false);
-  const vendorToken = await login(email, 'VendorPass1');
+  assert.equal(JSON.stringify(set.body).includes('Vendor-Pass-12'), false);
+  const vendorToken = await login(email, 'Vendor-Pass-12');
   assert.ok(vendorToken);
 });
 

@@ -2,7 +2,7 @@ const CourierAccount = require('../models/CourierAccount');
 const { encryptObject, decryptObject } = require('../lib/secretBox');
 const { HttpError } = require('../utils/httpError');
 const {
-  PLATFORM, OWN, CUSTOM_FIELDS, SECRET_KEYS, findPlatform, findOwn,
+  PLATFORM, OWN, CUSTOM_FIELDS, SECRET_KEYS, hasCourierSecret, findPlatform, findOwn,
 } = require('../constants/courierCatalog');
 
 const CAPABILITIES = new Set(['forward', 'return', 'ndr']);
@@ -83,7 +83,7 @@ async function activeCourierCreds(tenantId, code) {
   const rows = await CourierAccount.find({ tenantId, code, status: 'active' }).setOptions({ skipTenantFilter: true });
   const ready = rows
     .map((row) => ({ row, creds: decryptObject(row.credentialsEnc) }))
-    .filter((item) => String(item.creds.apiToken || item.creds.token || '').trim());
+    .filter((item) => hasCourierSecret(item.creds));
   const own = ready.find((item) => item.row.source === 'own');
   return (own || ready[0] || { creds: {} }).creds;
 }

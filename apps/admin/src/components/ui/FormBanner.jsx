@@ -36,10 +36,11 @@ export function FormBanner({ tone = 'error', title, children }) {
 
 export function PasswordHints({ value = '' }) {
   const checks = [
-    { ok: value.length >= 8, label: 'At least 8 characters' },
+    { ok: value.length >= 12, label: 'At least 12 characters' },
     { ok: /[A-Z]/.test(value), label: 'One uppercase letter' },
     { ok: /[a-z]/.test(value), label: 'One lowercase letter' },
     { ok: /[0-9]/.test(value), label: 'One number' },
+    { ok: /[^A-Za-z0-9]/.test(value), label: 'One special character (! @ # -)' },
   ];
   return (
     <ul className="space-y-1 rounded-lg bg-muted/60 p-3 text-xs">

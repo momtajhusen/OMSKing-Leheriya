@@ -101,6 +101,7 @@ export default function ChannelSetup({ showPlanNote = true }) {
   const [pick, setPick] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [testing, setTesting] = useState('');
+  const [authorizing, setAuthorizing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(null);
   const userPicked = useRef(false);
 
@@ -191,6 +192,17 @@ export default function ChannelSetup({ showPlanNote = true }) {
       toast.error(apiError(err, 'Test failed'));
     } finally {
       setTesting('');
+    }
+  };
+
+  const authorizeAmazon = async () => {
+    setAuthorizing(true);
+    try {
+      const { data } = await api.get('/channels/amazon/authorize');
+      window.location.assign(data.data.url);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not open Amazon'));
+      setAuthorizing(false);
     }
   };
 
@@ -292,6 +304,17 @@ export default function ChannelSetup({ showPlanNote = true }) {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              {channel.id === 'amazon' && (
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[hsl(var(--color-border-premium))] p-3">
+                  <Button size="sm" loading={authorizing} onClick={authorizeAmazon}>
+                    <Plug className="w-4 h-4 mr-2" />
+                    Authorize with Amazon
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Sign in to Seller Central India and approve OMSKing. Keys are saved and Amazon switches to Live. Or enter the keys below.
+                  </p>
+                </div>
+              )}
               <FieldGrid
                 title="Required"
                 fields={requiredFields}

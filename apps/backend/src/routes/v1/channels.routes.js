@@ -13,6 +13,8 @@ const vendorGate = [authMiddleware, tenantMiddleware, vendorScope('vendors'), re
 router.get('/shopify/vendors', ...vendorGate, asyncHandler(channels.listShopifyVendors));
 router.get('/status', ...statusGate, asyncHandler(channels.listStatus));
 router.get('/', ...gate, asyncHandler(channels.listConnections));
+router.get('/amazon/authorize', ...gate, asyncHandler(channels.startAmazonAuth));
+router.post('/amazon/authorize', ...gate, asyncHandler(channels.completeAmazonAuth));
 router.patch('/:channel', ...gate, asyncHandler(channels.saveConnection));
 router.delete('/:channel', ...gate, asyncHandler(channels.disconnectChannel));
 router.post('/:channel/test', ...gate, asyncHandler(channels.testConnection));

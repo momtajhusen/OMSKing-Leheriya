@@ -350,8 +350,10 @@ export default function AuthPage({ scope = 'tenant' }) {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted-foreground">Ask for an email OTP at every sign-in</p>
-              <Button
+              <p className="text-sm text-muted-foreground">
+                {user?.twoFactorRequired ? 'Every account enters an email OTP at sign-in. This is always on.' : 'Ask for an email OTP at every sign-in'}
+              </p>
+              {!user?.twoFactorRequired && <Button
                 variant={twoFa ? 'default' : 'outline'}
                 onClick={async () => {
                   try {
@@ -372,7 +374,7 @@ export default function AuthPage({ scope = 'tenant' }) {
                 }}
               >
                 {twoFa ? 'Turn off' : 'Send OTP to turn on'}
-              </Button>
+              </Button>}
             </div>
             {twoFaPending && !twoFa && (
               <form

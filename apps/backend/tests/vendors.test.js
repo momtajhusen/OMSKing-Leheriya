@@ -183,25 +183,25 @@ test('super admin can set a vendor login password', async () => {
     () => call(vendors.setVendorPassword, {
       user: { id: null, role: 'operations' },
       params: { id: row.id },
-      body: { password: 'VendorPass1' },
+      body: { password: 'Vendor-Pass-12' },
     }),
     /Super Admin/,
   );
   await assert.rejects(
     () => call(vendors.setVendorPassword, { params: { id: row.id }, body: { password: 'short' } }),
-    /at least 8/,
+    /at least 12/,
   );
-  const created = await call(vendors.setVendorPassword, { params: { id: row.id }, body: { password: 'VendorPass1' } });
+  const created = await call(vendors.setVendorPassword, { params: { id: row.id }, body: { password: 'Vendor-Pass-12' } });
   assert.equal(created.email, 'looms@example.com');
   assert.equal(created.created, true);
   const user = await User.findOne({ tenantId: tenant._id, email: 'looms@example.com' }).setOptions({ skipTenantFilter: true });
   assert.equal(String(user.roleId), String(role._id));
   assert.equal(String(user.assignedVendorIds[0]), row.id);
-  assert.equal(await bcrypt.compare('VendorPass1', user.passwordHash), true);
+  assert.equal(await bcrypt.compare('Vendor-Pass-12', user.passwordHash), true);
 
-  const updated = await call(vendors.setVendorPassword, { params: { id: row.id }, body: { password: 'VendorPass2' } });
+  const updated = await call(vendors.setVendorPassword, { params: { id: row.id }, body: { password: 'Vendor-Pass-34' } });
   assert.equal(updated.created, false);
   const again = await User.findById(user._id).setOptions({ skipTenantFilter: true });
-  assert.equal(await bcrypt.compare('VendorPass2', again.passwordHash), true);
+  assert.equal(await bcrypt.compare('Vendor-Pass-34', again.passwordHash), true);
   assert.equal(again.refreshTokenVersion, 1);
 });

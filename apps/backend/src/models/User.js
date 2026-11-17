@@ -15,7 +15,13 @@ const userSchema = new mongoose.Schema({
   refreshTokenVersion: { type: Number, default: 0 },
   assignedVendorIds: [{ type: mongoose.Schema.Types.ObjectId }],
   twoFactorEnabled: { type: Boolean, default: false },
+  passwordChangedAt: Date,
 }, { timestamps: true });
+
+userSchema.pre('save', function stampPasswordChange(next) {
+  if (this.isModified('passwordHash')) this.passwordChangedAt = new Date();
+  next();
+});
 
 userSchema.index({ tenantId: 1, email: 1 }, { unique: true });
 userSchema.plugin(tenantPlugin);

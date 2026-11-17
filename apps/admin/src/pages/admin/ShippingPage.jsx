@@ -426,7 +426,11 @@ export default function ShippingPage() {
                           )}
                           {!row.marketplace && ['Ready', 'Label generated'].includes(row.shipStatus) && can(PERMISSIONS.SHIPPING_GENERATE) && (
                             <>
-                              <Button variant="ghost" size="sm" disabled={busy === row.id} onClick={() => generateLabel(row.id)}>Reprint</Button>
+                              {/^(Amazon Shipping|Bluedart|Blue Dart|Shree Maruti|Maruti)$/i.test(row.courier || '') ? (
+                                <Button variant="ghost" size="sm" disabled={busy === row.id} onClick={() => printAmazonLabel(row)}>Print label</Button>
+                              ) : (
+                                <Button variant="ghost" size="sm" disabled={busy === row.id} onClick={() => generateLabel(row.id)}>Reprint</Button>
+                              )}
                               <Button variant="outline" size="sm" disabled={busy === row.id} onClick={() => markDispatched(row)}>Mark dispatched</Button>
                               {can(PERMISSIONS.SHIPPING_CANCEL) && (
                                 <Button variant="ghost" size="sm" disabled={busy === row.id} onClick={() => cancelOwnLabel(row)}>Cancel label</Button>

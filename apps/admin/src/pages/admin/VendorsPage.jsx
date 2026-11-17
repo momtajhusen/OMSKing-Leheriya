@@ -27,8 +27,8 @@ const emptyVendor = { name: '', location: '', phone: '', email: '', telegramGrou
 function passwordProblem(password, confirm) {
   if (!password && !confirm) return '';
   if (password !== confirm) return 'Password and confirm password do not match';
-  if (password.length < 8 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
-    return 'Password needs 8 characters, an uppercase letter, a lowercase letter, and a number';
+  if (password.length < 12 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    return 'Password needs 12 characters, an uppercase letter, a lowercase letter, a number, and a special character';
   }
   return '';
 }

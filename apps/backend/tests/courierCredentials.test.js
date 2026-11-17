@@ -79,6 +79,9 @@ test('Bluedart licence keys stay encrypted and the account fields from the mail 
     code: 'bluedart',
     mode: 'air',
     credentials: {
+      apiMode: 'live',
+      clientId: 'bd-client-id',
+      clientSecret: 'bd-client-secret',
       loginId: 'DEL79448',
       licenceKey: 'licence-secret',
       trackingLicenceKey: 'tracking-secret',
@@ -94,7 +97,9 @@ test('Bluedart licence keys stay encrypted and the account fields from the mail 
     },
   });
   assert.equal(dto.credentials.loginId, 'DEL79448');
+  assert.equal(dto.credentials.clientId, 'bd-client-id');
   assert.equal(dto.credentials.licenceKey, '');
+  assert.equal(dto.credentials.clientSecret, '');
   assert.equal(dto.credentials.trackingLicenceKey, '');
   assert.equal(dto.credentials.originArea, 'DEL');
   assert.equal(dto.credentials.vendorCode, '871102');
@@ -102,11 +107,13 @@ test('Bluedart licence keys stay encrypted and the account fields from the mail 
   assert.equal(dto.mode, 'air');
   assert.equal(JSON.stringify(dto).includes('tracking-secret'), false);
   assert.equal(JSON.stringify(dto).includes('licence-secret'), false);
+  assert.equal(JSON.stringify(dto).includes('bd-client-secret'), false);
 
   const stored = await CourierAccount.findOne({ tenantId: row._id, source: 'own', code: 'bluedart' });
   const creds = decryptObject(stored.credentialsEnc);
   assert.equal(creds.trackingLicenceKey, 'tracking-secret');
   assert.equal(creds.licenceKey, 'licence-secret');
+  assert.equal(creds.clientSecret, 'bd-client-secret');
 });
 
 test('Amazon Shipping sandbox token is stored on the courier account, not as a live seller connection', async () => {

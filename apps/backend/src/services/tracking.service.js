@@ -3,6 +3,9 @@ const Shipment = require('../models/Shipment');
 const NdrCase = require('../models/NdrCase');
 const { HttpError } = require('../utils/httpError');
 const delhivery = require('../adapters/couriers/delhivery');
+const amazonShipping = require('../adapters/couriers/amazonShipping');
+const bluedart = require('../adapters/couriers/bluedart');
+const maruti = require('../adapters/couriers/maruti');
 
 function skip(query) {
   return query.setOptions({ skipTenantFilter: true });
@@ -124,11 +127,48 @@ async function applyTracking(tenantId, { orderNo, awb, status, detail, attempt, 
   return { order, shipment, duplicate: false, orderCount: after, orderId };
 }
 
+const AMAZON_SHIPPING = 'amazon-shipping';
+
+const BLUE_DART = 'bluedart';
+const SHREE_MARUTI = 'shree-maruti';
+
+/** Which courier API tracks this order: 'delhivery', 'amazon-shipping', 'bluedart', 'shree-maruti', or '' (marketplace or typed AWB). */
+function trackingCourier(order) {
+  const name = String(order.courier || '').trim().toLowerCase();
+  if (name === 'amazon shipping') return AMAZON_SHIPPING;
+  if (name === 'bluedart' || name === 'blue dart') return BLUE_DART;
+  if (name === 'shree maruti' || name === 'shree-maruti' || name === 'maruti') return SHREE_MARUTI;
+  if (/delhivery/.test(name)) return 'delhivery';
+  if (!name && String(order.channel || '').toLowerCase() === 'shopify') return 'delhivery';
+  return '';
+}
+
+async function amazonShippingCreds(tenantId) {
+  const CourierAccount = require('../models/CourierAccount');
+  const { decryptObject } = require('../lib/secretBox');
+  const row = await skip(CourierAccount.findOne({ tenantId, code: AMAZON_SHIPPING, status: 'active' }));
+  const creds = row ? decryptObject(row.credentialsEnc) : null;
+  return creds && String(creds.refreshToken || '').trim() ? creds : null;
+}
+
+async function bluedartTrackCreds(tenantId) {
+  const { activeCourierCreds } = require('./courierAccount.service');
+  const creds = await activeCourierCreds(tenantId, BLUE_DART);
+  return creds && String(creds.licenceKey || '').trim() && String(creds.loginId || '').trim() ? creds : null;
+}
+
+async function marutiTrackCreds(tenantId) {
+  const { activeCourierCreds } = require('./courierAccount.service');
+  const creds = await activeCourierCreds(tenantId, SHREE_MARUTI);
+  return creds && String(creds.apiKey || '').trim() && String(creds.email || '').trim() ? creds : null;
+}
+
 async function pollDelhivery(tenantId, orderNo, deps = {}) {
   const order = await skip(Order.findOne({ tenantId, orderNo }));
   if (!order) throw new HttpError(404, 'Order not found');
-  if (String(order.channel || '').toLowerCase() !== 'shopify' && String(order.courier || '').toLowerCase() !== 'delhivery') {
-    const err = new HttpError(400, `${order.channel} tracking stays on the marketplace. Delhivery was not called.`);
+  if (trackingCourier(order) !== 'delhivery') {
+    const where = String(order.channel || '').toLowerCase() === 'shopify' ? `${order.courier} tracking is not on Delhivery` : `${order.channel} tracking stays on the marketplace`;
+    const err = new HttpError(400, `${where}. Delhivery was not called.`);
     err.terminal = true;
     throw err;
   }
@@ -138,6 +178,80 @@ async function pollDelhivery(tenantId, orderNo, deps = {}) {
   const applied = [];
   for (const event of events) {
     applied.push(await applyTracking(tenantId, { orderNo, awb: order.awb, ...event }, deps));
+  }
+  return { orderNo, applied: applied.length };
+}
+
+async function pollAmazonShipping(tenantId, orderNo, deps = {}) {
+  const order = await skip(Order.findOne({ tenantId, orderNo }));
+  if (!order) throw new HttpError(404, 'Order not found');
+  const shipment = await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked', courier: AMAZON_SHIPPING }));
+  if (!shipment?.awb || !shipment.carrierId) {
+    const err = new HttpError(400, 'This order has no Amazon Shipping tracking id. Amazon was not called.');
+    err.terminal = true;
+    throw err;
+  }
+  const creds = deps.amazonShippingCreds || await amazonShippingCreds(tenantId);
+  const { events } = await amazonShipping.track(creds, { trackingId: shipment.awb, carrierId: shipment.carrierId }, { request: deps.amazonShippingRequest });
+  const applied = [];
+  for (const event of events) {
+    applied.push(await applyTracking(tenantId, { orderNo, awb: shipment.awb, ...event }, deps));
+  }
+  return { orderNo, applied: applied.length };
+}
+
+async function pollBluedart(tenantId, orderNo, deps = {}) {
+  const order = await skip(Order.findOne({ tenantId, orderNo }));
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (trackingCourier(order) !== BLUE_DART) {
+    const err = new HttpError(400, `${order.courier || 'This courier'} tracking is not on Blue Dart. Blue Dart was not called.`);
+    err.terminal = true;
+    throw err;
+  }
+  const awb = String(order.awb || '').trim();
+  if (!awb) {
+    const err = new HttpError(400, 'This order has no Blue Dart AWB. Blue Dart was not called.');
+    err.terminal = true;
+    throw err;
+  }
+  const creds = deps.bluedartCreds || await bluedartTrackCreds(tenantId);
+  if (!creds) {
+    const err = new HttpError(400, 'Bluedart credentials are missing. Blue Dart was not called.');
+    err.terminal = true;
+    throw err;
+  }
+  const { events } = await bluedart.track(creds, awb, { request: deps.bluedartRequest });
+  const applied = [];
+  for (const event of events) {
+    applied.push(await applyTracking(tenantId, { orderNo, awb, ...event }, deps));
+  }
+  return { orderNo, applied: applied.length };
+}
+
+async function pollMaruti(tenantId, orderNo, deps = {}) {
+  const order = await skip(Order.findOne({ tenantId, orderNo }));
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (trackingCourier(order) !== SHREE_MARUTI) {
+    const err = new HttpError(400, `${order.courier || 'This courier'} tracking is not on Shree Maruti. Shree Maruti was not called.`);
+    err.terminal = true;
+    throw err;
+  }
+  const awb = String(order.awb || '').trim();
+  if (!awb) {
+    const err = new HttpError(400, 'This order has no Shree Maruti AWB. Shree Maruti was not called.');
+    err.terminal = true;
+    throw err;
+  }
+  const creds = deps.marutiCreds || await marutiTrackCreds(tenantId);
+  if (!creds) {
+    const err = new HttpError(400, 'Shree Maruti credentials are missing. Shree Maruti was not called.');
+    err.terminal = true;
+    throw err;
+  }
+  const { events } = await maruti.track(creds, awb, { request: deps.marutiRequest });
+  const applied = [];
+  for (const event of events) {
+    applied.push(await applyTracking(tenantId, { orderNo, awb, ...event }, deps));
   }
   return { orderNo, applied: applied.length };
 }
@@ -185,21 +299,39 @@ async function convertNdrToRto(tenantId, orderNo) {
 async function pollOpenShipments(tenantId, deps = {}) {
   const { activeCourierCreds } = require('./courierAccount.service');
   const creds = deps.delhiveryCreds || await activeCourierCreds(tenantId, 'delhivery');
-  if (!String(creds?.apiToken || '').trim()) {
+  const delhiveryReady = Boolean(String(creds?.apiToken || '').trim());
+  const amazonCreds = deps.amazonShippingCreds || await amazonShippingCreds(tenantId);
+  const blueCreds = deps.bluedartCreds || await bluedartTrackCreds(tenantId);
+  const marutiCreds = deps.marutiCreds || await marutiTrackCreds(tenantId);
+  if (!delhiveryReady && !amazonCreds && !blueCreds && !marutiCreds) {
     return { checked: 0, failed: 0, skipped: 'courier' };
   }
   const orders = await skip(Order.find({
     tenantId,
     awb: { $nin: ['', null] },
     status: { $in: ['Dispatched', 'Ready to Ship', 'Packed'] },
-    $or: [{ channel: 'Shopify' }, { courier: /delhivery/i }],
+    $or: [
+      { channel: 'Shopify' },
+      { courier: /delhivery/i },
+      { courier: /blue\s*dart/i },
+      { courier: /shree[-\s]?maruti/i },
+      { courier: /^maruti$/i },
+    ],
   }).limit(50));
   const results = [];
   let failed = 0;
   for (const order of orders) {
-    if (String(order.channel).toLowerCase() !== 'shopify' && !/delhivery/i.test(order.courier || '')) continue;
+    const courier = trackingCourier(order);
     try {
-      results.push(await pollDelhivery(tenantId, order.orderNo, { ...deps, delhiveryCreds: creds }));
+      if (courier === 'delhivery' && delhiveryReady) {
+        results.push(await pollDelhivery(tenantId, order.orderNo, { ...deps, delhiveryCreds: creds }));
+      } else if (courier === AMAZON_SHIPPING && amazonCreds) {
+        results.push(await pollAmazonShipping(tenantId, order.orderNo, { ...deps, amazonShippingCreds: amazonCreds }));
+      } else if (courier === BLUE_DART && blueCreds) {
+        results.push(await pollBluedart(tenantId, order.orderNo, { ...deps, bluedartCreds: blueCreds }));
+      } else if (courier === SHREE_MARUTI && marutiCreds) {
+        results.push(await pollMaruti(tenantId, order.orderNo, { ...deps, marutiCreds }));
+      }
     } catch (err) {
       failed += 1;
     }
@@ -209,7 +341,7 @@ async function pollOpenShipments(tenantId, deps = {}) {
 
 async function pollActiveCouriers() {
   const CourierAccount = require('../models/CourierAccount');
-  const rows = await CourierAccount.find({ source: 'own', code: 'delhivery', status: 'active' })
+  const rows = await CourierAccount.find({ source: 'own', code: { $in: ['delhivery', AMAZON_SHIPPING, BLUE_DART, SHREE_MARUTI] }, status: 'active' })
     .select('tenantId')
     .setOptions({ skipTenantFilter: true });
   const seen = new Set();
@@ -240,6 +372,9 @@ async function listNdr(tenantId) {
 module.exports = {
   applyTracking,
   pollDelhivery,
+  pollAmazonShipping,
+  pollBluedart,
+  pollMaruti,
   pollOpenShipments,
   pollActiveCouriers,
   reattemptNdr,

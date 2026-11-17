@@ -168,7 +168,8 @@ const useOrderStore = create((set, get) => ({
     if (!orderId) return { error: 'Order not found' };
     try {
       const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/label`, { ...extra, ...(subOrderId ? { subOrderId } : {}) });
-      openPrintHtml(data.data.labelHtml);
+      if (data.data?.labelPdfBase64) openPdfBase64(data.data.labelPdfBase64, `label-${orderId}.pdf`);
+      else openPrintHtml(data.data.labelHtml);
       return get().putOrder(data.data);
     } catch (err) {
       return { error: apiError(err, 'Could not generate label') };

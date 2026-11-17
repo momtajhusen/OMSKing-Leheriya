@@ -22,6 +22,7 @@ const PlatformSetupPage = lazy(() => import('../pages/platform/PlatformSetupPage
 const PlatformWebsiteImagesPage = lazy(() => import('../pages/platform/PlatformWebsiteImagesPage'));
 const LegalPage = lazy(() => import('../pages/public/LegalPage'));
 const OrderDetailPage = lazy(() => import('../pages/admin/OrderDetailPage'));
+const AmazonAuthCallbackPage = lazy(() => import('../pages/admin/AmazonAuthCallbackPage'));
 const ProductStockPage = lazy(() => import('../pages/admin/ProductStockPage'));
 const SetupGuidePage = lazy(() => import('../pages/admin/SetupGuidePage'));
 
@@ -493,6 +494,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<LoadingFallback />}>
             <OrderDetailPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/channels/amazon/callback',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <AmazonAuthCallbackPage />
           </Suspense>
         ),
       },

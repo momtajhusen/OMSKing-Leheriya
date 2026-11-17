@@ -576,4 +576,7 @@ module.exports = {
   probeConnection,
   pushInventory,
   easyShip,
+  httpsCall,
+  accessToken,
+  lwaDetail,
 };

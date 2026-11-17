@@ -61,7 +61,8 @@ export function courierChoice(couriers, code) {
 /** "Delhivery · ₹160 (default)" / "Xpressbees · no rate (enter AWB)" for the courier dropdown. */
 export function courierOptionText(courier) {
   const rate = courier.estimate ? `₹${courier.estimate.amount}` : 'no rate';
-  return `${courier.name} · ${rate}${courier.api ? ' (default)' : ' (enter AWB)'}`;
+  const how = courier.code === 'delhivery' ? ' (default)' : (courier.api ? ' (API)' : ' (enter AWB)');
+  return `${courier.name} · ${rate}${how}`;
 }
 
 /** One line under the dropdown explaining the picked courier's estimate. */
@@ -74,7 +75,7 @@ export function rateNote(courier, pack) {
 
 /** Label request body: Delhivery is booked by API ({}); any other courier sends its code and the AWB from its portal. */
 export function labelRequest(picked, awb) {
-  if (picked.api) return { body: {} };
+  if (picked.api) return { body: picked.code === 'delhivery' ? {} : { courier: picked.code } };
   const tracking = String(awb || '').trim();
   if (!tracking) return { error: `Enter the ${picked.name} AWB` };
   return { body: { courier: picked.code, awb: tracking } };

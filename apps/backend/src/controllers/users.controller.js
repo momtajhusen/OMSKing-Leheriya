@@ -1,4 +1,4 @@
-const { hashPassword } = require('../lib/password');
+const { hashPassword, assertStrongPassword } = require('../lib/password');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const RefreshSession = require('../models/RefreshSession');
@@ -96,6 +96,7 @@ async function createUser(req, res) {
   if (!(await mailboxOf(tenantId))) {
     throw new HttpError(503, 'Save this company Gmail in Settings before inviting a user. Another company mailbox is not used.');
   }
+  if (password) assertStrongPassword(password);
   const temp = password || `Invite-${Math.random().toString(36).slice(2, 10)}A1`;
   const user = await User.create({
     tenantId,

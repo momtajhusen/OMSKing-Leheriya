@@ -128,6 +128,29 @@ async function testConnection(req, res) {
   return successResponse(res, { ...toDto(current), ok: result.ok, incomplete: Boolean(result.incomplete) }, result.message);
 }
 
+async function startAmazonAuth(req, res) {
+  const tenantId = merchantTenant(req);
+  const { authorizeUrl } = require('../services/amazonAuth.service');
+  return successResponse(res, { url: authorizeUrl(tenantId, req.user.id) }, 'Open Amazon to authorize OMSKing');
+}
+
+async function completeAmazonAuth(req, res) {
+  const tenantId = merchantTenant(req);
+  const { completeAuthorization } = require('../services/amazonAuth.service');
+  const before = channelSnap(toDto(await getConnection(tenantId, 'amazon')));
+  const row = await completeAuthorization(tenantId, req.user.id, req.body || {});
+  await recordFromReq(req, {
+    tenantId,
+    action: 'channel.authorized',
+    resourceType: 'channels',
+    resourceId: row._id,
+    resourceDisplay: 'amazon',
+    before,
+    after: { ...channelSnap(toDto(row)), secretsUpdated: true },
+  });
+  return successResponse(res, toDto(row), 'Amazon connected');
+}
+
 async function listShopifyVendors(req, res) {
   const tenantId = merchantTenant(req);
   const row = await getConnection(tenantId, 'shopify');
@@ -143,4 +166,6 @@ async function listShopifyVendors(req, res) {
   return successResponse(res, names, 'Shopify vendors');
 }
 
-module.exports = { listConnections, listStatus, saveConnection, disconnectChannel, testConnection, listShopifyVendors };
+module.exports = {
+  listConnections, listStatus, saveConnection, disconnectChannel, testConnection, listShopifyVendors, startAmazonAuth, completeAmazonAuth,
+};

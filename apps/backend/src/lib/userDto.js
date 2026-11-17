@@ -1,3 +1,5 @@
+const config = require('../config');
+
 function publicUser(user, tenant, extras = {}) {
   const role = extras.roleCode || user.roleId?.code;
   const permissions = extras.permissions || user.roleId?.permissions || [];
@@ -17,7 +19,8 @@ function publicUser(user, tenant, extras = {}) {
     planExpiresAt: extras.planExpiresAt || tenant?.planExpiresAt || user.tenantId?.planExpiresAt || null,
     impersonating: Boolean(extras.impersonating),
     assignedVendorIds: (user.assignedVendorIds || []).map(String),
-    twoFactorEnabled: Boolean(user.twoFactorEnabled),
+    twoFactorEnabled: Boolean(user.twoFactorEnabled) || Boolean(config.auth?.requireLoginOtp),
+    twoFactorRequired: Boolean(config.auth?.requireLoginOtp),
     avatarUrl: user.avatarUrl || '',
     status: user.status,
     lastLoginAt: user.lastLoginAt,

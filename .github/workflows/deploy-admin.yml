@@ -1,0 +1,55 @@
+name: Deploy admin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/admin/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/deploy-admin.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-admin
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FTP_SERVER: ${{ secrets.FTP_SERVER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build admin
+        run: pnpm --filter @omsking/admin build
+        env:
+          VITE_API_BASE_URL: https://omskingapi.codersalpha.com/api/v1
+
+      - name: Upload to Hostinger (FTP)
+        if: env.FTP_SERVER != ''
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: apps/admin/dist/
+          # This FTP account already opens inside public_html
+          server-dir: ./
+
+      - name: FTP secrets missing
+        if: env.FTP_SERVER == ''
+        run: echo "::warning::Set FTP_SERVER, FTP_USERNAME and FTP_PASSWORD repo secrets to upload the admin build to Hostinger."

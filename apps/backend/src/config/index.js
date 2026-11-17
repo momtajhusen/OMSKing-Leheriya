@@ -19,6 +19,10 @@ const config = {
     .map((s) => s.trim())
     .filter(Boolean),
   channelEncryptionKey: process.env.CHANNEL_ENCRYPTION_KEY || '',
+  auth: {
+    // Amazon SP-API Data Protection Policy: every sign-in needs a second factor (email OTP).
+    requireLoginOtp: process.env.REQUIRE_LOGIN_OTP !== 'false',
+  },
   demoLogin: process.env.DEMO_LOGIN === 'true' || (process.env.NODE_ENV || 'development') !== 'production',
   // A development backend sends Developer Support (/support) to the live API: the subscriber inbox as the live
   // developer account, the merchant chat as the live client account.

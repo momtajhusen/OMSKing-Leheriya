@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { hashPassword } = require('../lib/password');
+const { hashPassword, passwordExpired, PASSWORD_MAX_AGE_DAYS } = require('../lib/password');
 const crypto = require('crypto');
 const User = require('../models/User');
 const Tenant = require('../models/Tenant');
@@ -81,6 +81,17 @@ function pickAccount(users, workspace) {
   return users[0] || null;
 }
 
+function loginOtpRequired(user) {
+  return Boolean(user.twoFactorEnabled || config.auth?.requireLoginOtp);
+}
+
+function assertPasswordFresh(user) {
+  if (!passwordExpired(user)) return;
+  const err = new HttpError(403, `Your password is more than ${PASSWORD_MAX_AGE_DAYS} days old. Use Forgot password to set a new one.`);
+  err.data = { passwordExpired: true, email: user.email };
+  throw err;
+}
+
 async function login(req, res) {
   const email = String(req.body.email || '').toLowerCase().trim();
   const password = req.body.password || '';
@@ -108,7 +119,9 @@ async function login(req, res) {
     throw new HttpError(403, await expiredTrialMessage(tenant));
   }
 
-  if (user.twoFactorEnabled) {
+  assertPasswordFresh(user);
+
+  if (loginOtpRequired(user)) {
     await issueEmailOtp({ user, purpose: 'login', required: true });
     return successResponse(res, { twoFactorRequired: true, email: user.email }, 'OTP sent to your email');
   }
@@ -236,7 +249,8 @@ async function verifyLogin(req, res) {
   if (!matched.length) throw new HttpError(401, 'Invalid email or password');
   const user = pickAccount(matched, req.body.workspace);
   if (!user || user.status === 'disabled') throw new HttpError(401, 'Invalid email or password');
-  if (!user.twoFactorEnabled) throw new HttpError(400, 'Sign-in OTP is not turned on for this account');
+  if (!loginOtpRequired(user)) throw new HttpError(400, 'Sign-in OTP is not turned on for this account');
+  assertPasswordFresh(user);
   await takeEmailOtp({ user, purpose: 'login', otp: String(req.body.otp || '').trim() });
   const tenant = user.tenantId;
   if (tenant.kind === 'merchant' && tenant.status === 'suspended') throw new HttpError(403, 'This tenant is suspended');
@@ -315,6 +329,9 @@ async function patchMe(req, res) {
   if (!user) throw new HttpError(401, 'User not found');
   if (req.body.twoFactorEnabled === true) {
     throw new HttpError(400, 'Enter the OTP from Gmail to turn on sign-in verification.');
+  }
+  if (req.body.twoFactorEnabled === false && config.auth?.requireLoginOtp) {
+    throw new HttpError(400, 'Sign-in OTP is required for every account and cannot be turned off.');
   }
   if (typeof req.body.twoFactorEnabled === 'boolean' && user.twoFactorEnabled !== req.body.twoFactorEnabled) {
     const before = { twoFactorEnabled: Boolean(user.twoFactorEnabled) };
