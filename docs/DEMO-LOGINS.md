@@ -7,7 +7,7 @@ Accounts are created in Mongo by `make seed`. They are **not shown on the login 
 | Role | Email | Opens |
 |---|---|---|
 | Platform Admin (SaaS owner) | `platform@omsking.com` | `/platform` — all subscribers |
-| Merchant Super Admin | `superadmin@omsking.com` | `/dashboard` — Leheriya only |
+| Merchant Super Admin | `omsking19@gmail.com` | `/dashboard` — Leheriya only |
 | Operations | `ops@leheriya.com` | `/dashboard` |
 | Vendor | `vendor@omsking.com` | `/vendor/orders` |
 | Other-tenant Super Admin | `ravi@suratsilks.com` | `/dashboard` — Surat Silks only (isolation check) |

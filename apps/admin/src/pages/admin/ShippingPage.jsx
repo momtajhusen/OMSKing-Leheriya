@@ -4,7 +4,7 @@ import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
 import { formatDate, statusBadgeVariant } from '../../utils/format';
 import { isChannelManaged, packetIdOf, openMyntraDocument, openAmazonLabel } from '../../lib/channelOrders';
-import { canHandOver, manifestFile, pickupSlotText, shipmentStatus, splitLabelOrders, trackingOf } from '../../lib/shippingStatus';
+import { canHandOver, manifestFile, pickupSlotText, shipmentMatchesCourier, shipmentStatus, splitLabelOrders, trackingOf } from '../../lib/shippingStatus';
 import { downloadCsv } from '../../lib/orderMetrics';
 import { paymentModeOf, prepaidLabelledCod } from '../../lib/labelPayment';
 import api, { apiError } from '../../lib/api';
@@ -62,6 +62,7 @@ export default function ShippingPage() {
   const [readiness, setReadiness] = useState(null);
   const [alertSeen, setAlertSeen] = useState('');
   const [courierCode, setCourierCode] = useState('delhivery');
+  const [courierFilter, setCourierFilter] = useState('all');
   const [awb, setAwb] = useState('');
   const bookingCouriers = readiness?.couriers?.length ? readiness.couriers : [{ code: 'delhivery', name: 'Delhivery', api: true }];
   const picked = bookingCouriers.find((courier) => courier.code === courierCode) || bookingCouriers[0];
@@ -87,13 +88,19 @@ export default function ShippingPage() {
   const mismatchKey = codMismatch.map((row) => row.id).join(',');
 
   const filtered = useMemo(() => shipments.filter((row) => {
+    if (!shipmentMatchesCourier(row, courierFilter)) return false;
     if (activeTab === 'all') return true;
     if (activeTab === 'exceptions') return row.shipStatus === 'Exception';
     return row.shipStatus === activeTab;
-  }), [shipments, activeTab]);
+  }), [shipments, activeTab, courierFilter]);
   const paged = useClientPage(filtered);
+  const courierHistoryCount = (code) => shipments.filter((row) => shipmentMatchesCourier(row, code)).length;
 
-  const count = (status) => shipments.filter((row) => row.shipStatus === status).length;
+  const scoped = useMemo(
+    () => shipments.filter((row) => shipmentMatchesCourier(row, courierFilter)),
+    [shipments, courierFilter],
+  );
+  const count = (status) => scoped.filter((row) => row.shipStatus === status).length;
 
   const syncShipments = async () => {
     setSyncing(true);
@@ -225,7 +232,7 @@ export default function ShippingPage() {
   };
 
   const tabCount = (id) => {
-    if (id === 'all') return shipments.length;
+    if (id === 'all') return scoped.length;
     if (id === 'exceptions') return count('Exception');
     return count(id);
   };
@@ -307,6 +314,25 @@ export default function ShippingPage() {
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
+        <Button variant={courierFilter === 'all' ? 'default' : 'outline'} size="sm" className="hover:translate-y-0" onClick={() => setCourierFilter('all')}>
+          All couriers
+          <span className="ml-1.5 tabular-nums opacity-70">{shipments.length}</span>
+        </Button>
+        {bookingCouriers.map((courier) => (
+          <Button
+            key={`filter-${courier.code}`}
+            variant={courierFilter === courier.code ? 'default' : 'outline'}
+            size="sm"
+            className="hover:translate-y-0"
+            onClick={() => setCourierFilter(courier.code)}
+          >
+            {courier.name}
+            <span className="ml-1.5 tabular-nums opacity-70">{courierHistoryCount(courier.code)}</span>
+          </Button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
         {TABS.map((tab) => (
           <Button key={tab.id} variant={activeTab === tab.id ? 'default' : 'outline'} size="sm" className="hover:translate-y-0" onClick={() => setActiveTab(tab.id)}>
             {tab.label}
@@ -318,7 +344,11 @@ export default function ShippingPage() {
       <Card>
         <CardHeader>
           <CardTitle>Shipments ({filtered.length})</CardTitle>
-          <CardDescription>Marketplace scans come from the channel. Own-courier scans update when you sync.</CardDescription>
+          <CardDescription>
+            {courierFilter === 'all'
+              ? 'Marketplace scans come from the channel. Own-courier scans update when you sync.'
+              : `Showing ${bookingCouriers.find((c) => c.code === courierFilter)?.name || courierFilter} only.`}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? (

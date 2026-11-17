@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  amazonLabelStep, courierChoice, courierOptionText, labelRequest, rateNote, pickupSlotText, shipmentStatus, splitLabelOrders, canHandOver, manifestFile, MANIFEST_COLUMNS,
+  amazonLabelStep, courierChoice, courierDeskCard, courierKey, courierOptionText, labelRequest, rateNote, pickupSlotText, shipmentMatchesCourier, shipmentStatus, splitLabelOrders, canHandOver, manifestFile, MANIFEST_COLUMNS,
 } from './shippingStatus.js';
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -121,4 +121,17 @@ test('each label courier shows its rate-card estimate before booking', () => {
   assert.equal(rateNote(delhivery, { weightGrams: 500 }), 'Estimated ₹160 for 0.75 kg (2 × 0.5 kg). Rate card from Settings › Couriers; the courier bills the final amount.');
   assert.equal(rateNote(xb, { weightGrams: 500 }), 'No rate saved for Xpressbees. Add its ₹ per 0.5 kg in Settings › Couriers.');
   assert.equal(rateNote(delhivery, null), 'Package weight is missing, so no rate. Add item weights or the default package in Settings.');
+});
+
+test('courier history filters match display names and codes', () => {
+  assert.equal(courierKey('Blue Dart'), 'bluedart');
+  assert.equal(courierKey('Shree Maruti'), 'shree-maruti');
+  assert.equal(shipmentMatchesCourier({ courier: 'Bluedart' }, 'bluedart'), true);
+  assert.equal(shipmentMatchesCourier({ courier: 'Delhivery' }, 'shree-maruti'), false);
+  assert.equal(shipmentMatchesCourier({ courier: 'Delhivery' }, 'all'), true);
+  const api = courierDeskCard({ code: 'shree-maruti', name: 'Shree Maruti', api: true, note: 'API books AWB.' });
+  assert.equal(api.badge, 'API book + label');
+  const page = read('../pages/admin/ShippingPage.jsx');
+  assert.doesNotMatch(page, /Courier desk/);
+  assert.match(page, /courierFilter/);
 });

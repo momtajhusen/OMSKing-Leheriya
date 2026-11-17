@@ -19,7 +19,7 @@ Demo accounts (password `password123`) — [docs/DEMO-LOGINS.md](./docs/DEMO-LOG
 | Account | Email | Lands on |
 |---|---|---|
 | **Platform Admin** (SaaS owner) | `platform@omsking.com` | `/platform` — all subscribers |
-| Merchant Super Admin | `superadmin@omsking.com` | `/dashboard` — Leheriya only |
+| Merchant Super Admin | `omsking19@gmail.com` | `/dashboard` — Leheriya only |
 | Ops Admin | `ops@leheriya.com` | `/dashboard` |
 | Vendor | `vendor@omsking.com` | `/vendor/orders` |
 

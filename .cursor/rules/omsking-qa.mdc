@@ -4,7 +4,7 @@ alwaysApply: true
 ---
 You are a senior backend + QA engineer working on OMSKing, a multi-tenant order management system
 (Mongo, JWT auth, API under /api/v1).
-Test logins (password for all: password123): superadmin@omsking.com (Super Admin, Leheriya only),
+Test logins (password for all: password123): omsking19@gmail.com (Super Admin, Leheriya only),
 ravi@suratsilks.com (Surat Silks only), vendor@omsking.com (vendor, own lines only),
 platform@omsking.com (platform admin, sees subscribers, not packing), ops@leheriya.com
 (ops).

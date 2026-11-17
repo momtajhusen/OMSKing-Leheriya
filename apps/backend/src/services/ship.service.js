@@ -513,13 +513,34 @@ async function courierLabelPdf(tenantId, orderNo) {
   return shipment.labelPdf;
 }
 
+/** Short Super-Admin desk line: how this courier books and what still blocks API label. */
+function courierDeskNote(code, api) {
+  if (code === 'delhivery') return 'API books AWB + label from WH-001.';
+  if (code === SHREE_MARUTI) {
+    return api
+      ? 'API books AWB + Innofulfill shipping label PDF.'
+      : 'Add Innofulfill email, password, API key, user id and tenant id in Settings › Couriers.';
+  }
+  if (code === AMAZON_SHIPPING) {
+    return api
+      ? 'API books Amazon Shipping (sandbox or live from Settings).'
+      : 'Add Amazon Shipping LWA client id, secret and refresh token in Settings › Couriers.';
+  }
+  if (code === BLUE_DART) {
+    return api
+      ? 'API books AWB + Blue Dart label PDF.'
+      : 'Tracking works with Login ID + licence. API book/label needs Apigee Client ID + Client secret in Settings › Couriers. Until then enter AWB from the Blue Dart portal.';
+  }
+  return api ? 'API booking is on.' : 'Enter the AWB from the courier portal (no API book).';
+}
+
 async function bookingCouriers(tenantId) {
   const CourierAccount = require('../models/CourierAccount');
   const rows = await skip(CourierAccount.find({ tenantId, status: 'active' }).sort({ priority: 1, name: 1 }));
   const seen = new Set(['delhivery']);
   const others = rows.filter((row) => !/^delhivery/.test(row.code) && !seen.has(row.code) && seen.add(row.code));
   const delhiveryRow = rows.find((row) => row.code === 'delhivery') || rows.find((row) => /^delhivery/.test(row.code));
-  return [
+  const list = [
     { code: 'delhivery', name: 'Delhivery', api: true, rateHalfKg: Number(delhiveryRow?.rateHalfKg) || 0 },
     ...others.map((row) => ({
       code: row.code,
@@ -528,6 +549,11 @@ async function bookingCouriers(tenantId) {
       rateHalfKg: Number(row.rateHalfKg) || 0,
     })),
   ];
+  return list.map((row) => ({
+    ...row,
+    bookHow: row.api ? 'api' : 'awb',
+    note: courierDeskNote(row.code, row.api),
+  }));
 }
 
 /** Rate-card estimate: rate per 0.5 kg × 0.5 kg slabs of the heavier of actual and volumetric (L×B×H / 5000) weight. */

@@ -92,7 +92,7 @@ export default function AuditLogsPage() {
       {error && <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
 
       <Card>
-        <CardContent className="p-3">
+        <CardContent className="p-3 space-y-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -103,6 +103,28 @@ export default function AuditLogsPage() {
               className="w-full pl-10 pr-4 py-2 border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] rounded-lg text-sm"
             />
           </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: '', label: 'All' },
+              { id: 'courier', label: 'Couriers' },
+              { id: 'label', label: 'Labels / AWB' },
+              { id: 'ship', label: 'Shipping' },
+            ].map((chip) => (
+              <Button
+                key={chip.id || 'all'}
+                type="button"
+                size="sm"
+                variant={query === chip.id || (!query && !chip.id) ? 'default' : 'outline'}
+                className="hover:translate-y-0"
+                onClick={() => setQuery(chip.id)}
+              >
+                {chip.label}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Couriers / Labels chips show Settings courier changes and label cancel history Super Admin needs when checking Delhivery, Blue Dart, Maruti and Amazon Shipping.
+          </p>
         </CardContent>
       </Card>
 

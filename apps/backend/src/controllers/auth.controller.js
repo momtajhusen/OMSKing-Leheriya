@@ -134,7 +134,7 @@ async function login(req, res) {
 }
 
 const DEMO_ACCOUNTS = {
-  merchant: { email: 'superadmin@omsking.com', label: 'Merchant demo' },
+  merchant: { email: 'omsking19@gmail.com', label: 'Merchant demo' },
   platform: { email: 'platform@omsking.com', label: 'Platform demo' },
   vendor: { email: 'vendor@omsking.com', label: 'Vendor demo' },
 };

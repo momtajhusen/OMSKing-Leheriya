@@ -81,6 +81,37 @@ export function labelRequest(picked, awb) {
   return { body: { courier: picked.code, awb: tracking } };
 }
 
+/** Normalize courier names/codes so Shipping history filters match order.courier display names. */
+export function courierKey(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'blue dart' || raw === 'bluedart') return 'bluedart';
+  if (raw === 'shree maruti' || raw === 'maruti' || raw === 'shree-maruti') return 'shree-maruti';
+  if (raw === 'amazon shipping' || raw === 'amazon-shipping') return 'amazon-shipping';
+  if (raw.startsWith('delhivery')) return 'delhivery';
+  return raw.replace(/\s+/g, '-');
+}
+
+/** One Super-Admin desk card: how this courier books and the plain-language note from readiness. */
+export function courierDeskCard(courier) {
+  const api = Boolean(courier?.api);
+  return {
+    code: courier?.code || '',
+    name: courier?.name || 'Courier',
+    api,
+    bookHow: courier?.bookHow || (api ? 'api' : 'awb'),
+    badge: api ? 'API book + label' : 'Enter AWB',
+    note: courier?.note || (api ? 'API booking is on.' : 'Enter the AWB from the courier portal.'),
+  };
+}
+
+/** True when this shipment belongs to the selected courier filter (or filter is all). */
+export function shipmentMatchesCourier(order, courierFilter) {
+  if (!courierFilter || courierFilter === 'all') return true;
+  return courierKey(order?.courier) === courierKey(courierFilter)
+    || courierKey(order?.courierCode) === courierKey(courierFilter);
+}
+
 const DAY = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
 const TIME = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
 

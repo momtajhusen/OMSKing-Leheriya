@@ -72,14 +72,28 @@ function apiType(creds) {
 
 function assertCreds(creds) {
   const missing = [
-    ['clientId', 'Client ID'],
-    ['clientSecret', 'Client secret'],
+    ['clientId', 'Client ID (Apigee)'],
+    ['clientSecret', 'Client secret (Apigee)'],
     ['loginId', 'Login ID'],
     ['licenceKey', 'Licence key'],
     ['customerCode', 'Customer code (prepaid)'],
   ].filter(([key]) => !String(creds?.[key] || '').trim()).map(([, label]) => label);
   if (missing.length) {
-    throw refuse(`Blue Dart was not called. The ${missing.join(', ')} is missing in Settings › Couriers › Bluedart.`);
+    throw refuse(`Blue Dart was not called. The ${missing.join(', ')} is missing in Settings › Couriers › Bluedart. API booking needs Apigee Client ID and Client secret from the DHL developer app.`);
+  }
+  if (!modeOf(creds)) {
+    throw refuse('Blue Dart was not called. Set API environment (or Account mode) to live or sandbox in Settings › Couriers › Bluedart.');
+  }
+}
+
+function hasApigee(creds) {
+  return Boolean(String(creds?.clientId || '').trim() && String(creds?.clientSecret || '').trim());
+}
+
+function assertTrackCreds(creds) {
+  if (!String(creds?.loginId || '').trim()
+    || !(String(creds?.trackingLicenceKey || '').trim() || String(creds?.licenceKey || '').trim())) {
+    throw refuse('Blue Dart was not called. Login ID and licence key are missing in Settings › Couriers › Bluedart.');
   }
   if (!modeOf(creds)) {
     throw refuse('Blue Dart was not called. Set API environment (or Account mode) to live or sandbox in Settings › Couriers › Bluedart.');
@@ -294,24 +308,7 @@ function shipmentRows(payload) {
   return Array.isArray(shipment) ? shipment : [shipment];
 }
 
-/** Blue Dart scans in the same { status, detail, eventKey } shape Delhivery tracking returns. */
-async function track(creds, awb, opts = {}) {
-  const tracking = String(awb || '').trim();
-  if (!tracking) throw refuse('Blue Dart tracking needs an AWB.');
-  const call = await session(creds, opts);
-  const licence = String(creds.trackingLicenceKey || creds.licenceKey).trim();
-  const qs = new URLSearchParams({
-    handler: 'tnt',
-    action: 'custawbquery',
-    loginid: String(creds.loginId).trim(),
-    awb: 'awb',
-    numbers: tracking,
-    format: 'json',
-    lickey: licence,
-    verno: '1',
-    scan: '1',
-  });
-  const payload = await call('tracking', 'GET', `/tracking/v1/shipment?${qs}`);
+function eventsFromPayload(tracking, payload) {
   const events = [];
   for (const row of shipmentRows(payload)) {
     const scans = Array.isArray(row.Scans) ? row.Scans : (row.Scans ? [row.Scans] : []);
@@ -331,6 +328,65 @@ async function track(creds, awb, opts = {}) {
       if (status) events.push({ status, detail: String(row.Status || ''), eventKey: `${tracking}:${status}:current` });
     }
   }
+  return events;
+}
+
+/** Shipway-style Login ID + licence key tracking (no Apigee JWT). */
+async function trackLegacy(creds, awb, opts = {}) {
+  assertTrackCreds(creds);
+  const tracking = String(awb || '').trim();
+  const gated = withApiMode(creds);
+  const request = gatedRequest(gated, opts.request, httpCall, { allowSandbox: true });
+  const licence = String(creds.trackingLicenceKey || creds.licenceKey).trim();
+  const qs = new URLSearchParams({
+    handler: 'tnt',
+    action: 'custawbquery',
+    loginid: String(creds.loginId).trim(),
+    awb: 'awb',
+    numbers: tracking,
+    format: 'json',
+    lickey: licence,
+    verno: '1',
+    scan: '1',
+  });
+  const url = `https://api.bluedart.com/servlet/RoutingServlet?${qs}`;
+  const res = await request('GET', url, { headers: { Accept: 'application/json' } });
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Blue Dart tracking returned ${res.status}. ${detailOf(res.text) || 'Nothing was saved.'}`);
+    err.statusCode = [400, 401, 403, 404].includes(res.status) ? 400 : 502;
+    err.terminal = err.statusCode === 400;
+    throw err;
+  }
+  const payload = parseJson(res.text);
+  if (payload.ShipmentData?.Error && !payload.ShipmentData?.Shipment) {
+    return { status: '', events: [] };
+  }
+  const events = eventsFromPayload(tracking, payload);
+  return { status: events.at(-1)?.status || '', events };
+}
+
+/** Blue Dart scans in the same { status, detail, eventKey } shape Delhivery tracking returns. */
+async function track(creds, awb, opts = {}) {
+  const tracking = String(awb || '').trim();
+  if (!tracking) throw refuse('Blue Dart tracking needs an AWB.');
+  // Apigee JWT path when Client ID/Secret are present; otherwise Shipway-style RoutingServlet.
+  if (!hasApigee(creds)) return trackLegacy(creds, tracking, opts);
+
+  const call = await session(creds, opts);
+  const licence = String(creds.trackingLicenceKey || creds.licenceKey).trim();
+  const qs = new URLSearchParams({
+    handler: 'tnt',
+    action: 'custawbquery',
+    loginid: String(creds.loginId).trim(),
+    awb: 'awb',
+    numbers: tracking,
+    format: 'json',
+    lickey: licence,
+    verno: '1',
+    scan: '1',
+  });
+  const payload = await call('tracking', 'GET', `/tracking/v1/shipment?${qs}`);
+  const events = eventsFromPayload(tracking, payload);
   return { status: events.at(-1)?.status || '', events };
 }
 
@@ -342,4 +398,5 @@ module.exports = {
   modeOf,
   mapScanStatus,
   httpCall,
+  hasApigee,
 };

@@ -81,11 +81,11 @@ const OWN = [
     code: 'bluedart',
     name: 'Bluedart',
     capabilities: ['forward', 'return', 'ndr'],
-    blurb: 'Apigee Client ID and Client secret for the JWT login, plus Login ID, licence key, and customer code from the Bluedart developer profile. Set API environment to live or sandbox.',
+    blurb: 'Shipway-style Login ID, licence key, and customer code enable the account and typed AWB. API booking also needs Apigee Client ID and Client secret from the DHL developer app (not in the Shipway pack). Set API environment to live or sandbox.',
     fields: [
       { key: 'apiMode', label: 'API environment', type: 'text', required: false, placeholder: 'live' },
-      { key: 'clientId', label: 'Client ID', type: 'text', required: true, placeholder: 'Apigee / gateway Client ID' },
-      { key: 'clientSecret', label: 'Client secret', type: 'password', required: true, placeholder: 'Apigee / gateway client secret' },
+      { key: 'clientId', label: 'Client ID (API booking)', type: 'text', required: false, placeholder: 'Apigee Client ID — needed for GenerateWayBill' },
+      { key: 'clientSecret', label: 'Client secret (API booking)', type: 'password', required: false, placeholder: 'Apigee client secret — needed for GenerateWayBill' },
       { key: 'loginId', label: 'Login ID', type: 'text', required: true, placeholder: 'Bluedart login ID' },
       { key: 'licenceKey', label: 'Licence key', type: 'password', required: true, placeholder: 'Licence key' },
       { key: 'trackingLicenceKey', label: 'Tracking licence key', type: 'password', required: false, placeholder: 'Tracking licence key' },
@@ -150,7 +150,7 @@ const OWN = [
     blurb: 'Email, password, API key, user ID, and tenant ID from the Shree Maruti (Innofulfill) account, same as in Shipway. Set API environment to live or sandbox. Optional API base URL overrides the default Innofulfill host.',
     fields: [
       { key: 'apiMode', label: 'API environment', type: 'text', required: false, placeholder: 'live' },
-      { key: 'apiBaseUrl', label: 'API base URL', type: 'text', required: false, placeholder: 'https://api.innofulfill.com' },
+      { key: 'apiBaseUrl', label: 'API base URL', type: 'text', required: false, placeholder: 'https://apis.innofulfill.com' },
       { key: 'email', label: 'Email', type: 'text', required: true, placeholder: 'Innofulfill login email' },
       { key: 'password', label: 'Password', type: 'password', required: true, placeholder: 'Innofulfill password' },
       { key: 'apiKey', label: 'API key', type: 'password', required: true, placeholder: 'innofulfill_live_…' },

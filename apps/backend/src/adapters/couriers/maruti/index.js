@@ -2,8 +2,11 @@ const https = require('https');
 const { URL } = require('url');
 const { gatedRequest } = require('../../liveGate');
 
-/** Default Innofulfill / Shree Maruti host. Override with credentials.apiBaseUrl when the merchant pack names another host. */
-const DEFAULT_HOST = 'https://api.innofulfill.com';
+/**
+ * Official Innofulfill API host (from docs.innofulfill.com + portal JS).
+ * Older guesses used api.innofulfill.com (API Gateway 403). Override with credentials.apiBaseUrl if needed.
+ */
+const DEFAULT_HOST = 'https://apis.innofulfill.com';
 
 function httpCall(method, url, { headers = {}, body } = {}) {
   const payload = body == null ? null : (typeof body === 'string' ? body : JSON.stringify(body));
@@ -30,7 +33,10 @@ function httpCall(method, url, { headers = {}, body } = {}) {
     }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8'), headers: res.headers }));
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        resolve({ status: res.statusCode, text: buffer.toString('utf8'), buffer, headers: res.headers });
+      });
     });
     req.on('timeout', () => {
       req.destroy();
@@ -89,10 +95,11 @@ function parseJson(text) {
 
 function detailOf(text) {
   const json = parseJson(text);
-  const msg = json.message || json.error || json.Message || json.msg
-    || json.data?.message || json.errors?.[0]?.message || json.errors?.[0];
-  if (msg) return String(typeof msg === 'string' ? msg : JSON.stringify(msg)).slice(0, 240);
-  return String(text || '').trim().slice(0, 240);
+  if (json.message) return String(json.message);
+  if (json.error) return String(typeof json.error === 'string' ? json.error : json.error.message || JSON.stringify(json.error));
+  if (json.errors?.message) return String(json.errors.message);
+  const raw = String(text || '').trim();
+  return raw.slice(0, 240);
 }
 
 function pick(obj, keys) {
@@ -108,41 +115,23 @@ function pick(obj, keys) {
   return '';
 }
 
-async function accessToken(creds, request) {
-  const res = await request('POST', `${host(creds)}/api/v1/auth/login`, {
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: {
-      email: String(creds.email).trim(),
-      password: String(creds.password).trim(),
-      api_key: String(creds.apiKey).trim(),
-      user_id: String(creds.userId).trim(),
-      tenant_id: String(creds.accountTenantId).trim(),
-    },
-  });
-  if (res.status < 200 || res.status >= 300) {
-    throw refuse(`Shree Maruti login returned ${res.status}. ${detailOf(res.text) || 'Check email, password, and API key.'}`);
-  }
-  const json = parseJson(res.text);
-  const token = String(pick(json, ['token', 'access_token', 'accessToken', 'data.token', 'data.access_token', 'Bearer Token']) || '').trim();
-  if (!token) throw refuse('Shree Maruti login sent no access token. Nothing was booked.');
-  return token;
+/** Docs: gateway routes accept `api-key` header instead of Bearer + tenantid. */
+function authHeaders(creds, { json = false } = {}) {
+  return {
+    Accept: 'application/json',
+    'api-key': String(creds.apiKey).trim(),
+    tenantid: String(creds.accountTenantId).trim(),
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+  };
 }
 
 async function session(creds, opts = {}) {
   assertCreds(creds);
   const gated = withApiMode(creds);
   const request = gatedRequest(gated, opts.request, httpCall, { allowSandbox: true });
-  const token = await accessToken(gated, request);
   return async (what, method, path, body) => {
     const res = await request(method, `${host(gated)}${path}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'x-api-key': String(gated.apiKey).trim(),
-        'x-user-id': String(gated.userId).trim(),
-        'x-tenant-id': String(gated.accountTenantId).trim(),
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
+      headers: authHeaders(gated, { json: body !== undefined }),
       ...(body !== undefined ? { body } : {}),
     });
     if (res.status < 200 || res.status >= 300) {
@@ -175,15 +164,39 @@ async function downloadLabel(url, request) {
   if (u.protocol !== 'https:') return null;
   const res = await request('GET', String(url), { headers: { Accept: 'application/pdf,*/*' } });
   if (res.status < 200 || res.status >= 300) return null;
-  const bytes = Buffer.from(res.text || '', 'binary');
+  const bytes = Buffer.isBuffer(res.buffer) ? res.buffer : Buffer.from(res.text || '', 'binary');
   return bytes.slice(0, 4).toString() === '%PDF' ? bytes : labelBuffer(res.text);
+}
+
+function labelUrlOf(obj) {
+  return String(pick(obj, [
+    'shippingLabelUrl', 'shipping_label_url', 'labelUrl', 'label_url',
+    'shipping_label_url', 'label_link', 'url',
+  ]) || '').trim();
 }
 
 function kg(weightGrams) {
   return Math.max(0.1, Math.round((Number(weightGrams) || 0) / 100) / 10);
 }
 
-/** Create a Shree Maruti / Innofulfill shipment and return AWB + label PDF when the API sends one. */
+function addr(type, party = {}) {
+  const street = String(party.line1 || party.address1 || party.address || party.street || '').trim();
+  return {
+    type,
+    zip: String(party.pincode || party.zip || '').trim(),
+    name: String(party.name || '').trim() || 'Customer',
+    phone: String(party.phone || '').replace(/\D/g, '').slice(-10),
+    email: party.email || undefined,
+    street,
+    landmark: String(party.address2 || party.landmark || '').trim() || undefined,
+    city: String(party.city || '').trim(),
+    state: String(party.state || '').trim(),
+    country: String(party.country || 'India').trim() || 'India',
+    addressName: street || String(party.addressName || '').trim(),
+  };
+}
+
+/** Create a Shree Maruti / Innofulfill ECOMM shipment and return AWB + label PDF when available. */
 async function book(creds, shipment, opts = {}) {
   assertCreds(creds);
   if (!(shipment.weightGrams > 0 && shipment.lengthCm > 0 && shipment.breadthCm > 0 && shipment.heightCm > 0)) {
@@ -196,45 +209,98 @@ async function book(creds, shipment, opts = {}) {
   if (!/^\d{6}$/.test(pickupPin)) throw refuse('WH-001 needs a 6-digit pincode before Shree Maruti is called.');
   const cod = shipment.paymentMode === 'COD';
   const call = await session(creds, opts);
-  const { json } = await call('create order', 'POST', '/api/v1/orders', {
-    order_id: String(shipment.orderNo),
-    order_type: String(creds.orderType || 'Forward').trim() || 'Forward',
-    parcel_category: String(creds.parcelCategory || 'Ecomm').trim() || 'Ecomm',
-    payment_mode: cod ? 'COD' : 'Prepaid',
-    cod_amount: cod ? Math.round((Number(shipment.codAmount ?? shipment.amount) || 0) * 100) / 100 : 0,
-    order_amount: Math.round((Number(shipment.amount) || 0) * 100) / 100,
-    consignee: {
-      name: String(shipment.name || 'Customer').slice(0, 50),
-      address: String(shipment.address || '').slice(0, 200),
-      city: String(shipment.city || ''),
-      state: String(shipment.state || ''),
-      pincode,
-      phone: String(shipment.phone || '').replace(/\D/g, '').slice(-10),
-      email: shipment.email || undefined,
+  const weightKg = kg(shipment.weightGrams);
+  const parcelCategory = String(creds.parcelCategory || 'ECOMM').trim().toUpperCase() || 'ECOMM';
+  const orderType = String(creds.orderType || 'FORWARD').trim().toUpperCase() || 'FORWARD';
+  const deliveryMode = String(creds.deliveryMode || shipment.mode || 'SURFACE').trim().toUpperCase() || 'SURFACE';
+  const referenceId = String(shipment.orderNo || shipment.reference || '').trim();
+  const { json } = await call('create order', 'POST', '/gateway/booking-service/orders', {
+    referenceId: referenceId || undefined,
+    amount: Number(shipment.codAmount || shipment.orderValue || 0) || 0,
+    orderDate: new Date().toISOString(),
+    orderType,
+    orderStatus: 'CONFIRMED',
+    parcelCategory,
+    deliveryPromise: parcelCategory,
+    deliveryMode: deliveryMode === 'AIR' ? 'AIR' : 'SURFACE',
+    autoManifest: false,
+    addresses: [
+      addr('PICKUP', pickup),
+      addr('DELIVERY', {
+        name: shipment.name || shipment.customerName,
+        phone: shipment.phone,
+        email: shipment.email,
+        address: shipment.address || shipment.address1,
+        address2: shipment.address2,
+        city: shipment.city,
+        state: shipment.state,
+        pincode,
+        country: shipment.country,
+      }),
+      addr('BILLING', {
+        name: shipment.name || shipment.customerName,
+        phone: shipment.phone,
+        email: shipment.email,
+        address: shipment.address || shipment.address1,
+        address2: shipment.address2,
+        city: shipment.city,
+        state: shipment.state,
+        pincode,
+        country: shipment.country,
+      }),
+      addr('RETURN', pickup),
+    ],
+    shipments: [{
+      dimensions: {
+        length: Number(shipment.lengthCm),
+        width: Number(shipment.breadthCm),
+        height: Number(shipment.heightCm),
+      },
+      shipmentStatus: 'CONFIRMED',
+      physicalWeight: weightKg,
+      physicalWeightUnit: 'KG',
+      items: (Array.isArray(shipment.items) && shipment.items.length
+        ? shipment.items
+        : [{ name: shipment.description || 'Item', qty: shipment.quantity || 1, price: shipment.amount || 0 }]
+      ).map((item) => ({
+        name: item.name || item.sku || 'Item',
+        quantity: Number(item.qty || item.quantity || 1) || 1,
+        unitPrice: Number(item.price || 0) || 0,
+        sku: item.sku || undefined,
+      })),
+    }],
+    payment: {
+      type: cod ? 'COD' : 'PREPAID',
+      currency: 'INR',
+      paymentMethod: cod ? 'COD' : 'ONLINE',
     },
-    pickup: {
-      name: String(pickup.name || 'Shipper').slice(0, 50),
-      address: String(pickup.line1 || pickup.address || '').slice(0, 200),
-      city: String(pickup.city || ''),
-      state: String(pickup.state || ''),
-      pincode: pickupPin,
-      phone: String(pickup.phone || '').replace(/\D/g, '').slice(-10),
-    },
-    package: {
-      weight_kg: kg(shipment.weightGrams),
-      length_cm: Number(shipment.lengthCm) || 1,
-      breadth_cm: Number(shipment.breadthCm) || 1,
-      height_cm: Number(shipment.heightCm) || 1,
-      quantity: Math.max(1, Number(shipment.quantity) || 1),
-      description: String(shipment.description || shipment.orderNo).slice(0, 200),
-    },
+    metadata: { source: 'omsking', orderNo: referenceId || undefined },
   });
   const data = json.data || json.result || json;
-  const awb = String(pick(data, ['awb', 'awb_number', 'awbNumber', 'tracking_number', 'trackingNumber', 'waybill']) || '').trim();
-  const shipmentId = String(pick(data, ['order_id', 'orderId', 'shipment_id', 'shipmentId', 'id']) || awb).trim();
+  const shipmentRow = Array.isArray(data.shipments) ? data.shipments[0] : data.shipments;
+  const awb = String(pick(shipmentRow || data, ['awbNumber', 'awb', 'awb_number', 'tracking_number', 'trackingNumber', 'waybill']) || '').trim();
+  const shipmentId = String(pick(data, ['orderId', 'order_id', 'shipment_id', 'shipmentId', 'id']) || awb).trim();
   if (!awb) throw refuse(`Shree Maruti did not return an AWB. ${detailOf(JSON.stringify(json)) || 'Nothing was booked.'}`);
+
   let labelPdf = labelBuffer(pick(data, ['label_base64', 'labelBase64', 'label_pdf', 'labelPdf', 'label']));
-  const labelUrl = String(pick(data, ['label_url', 'labelUrl', 'shipping_label_url', 'label_link']) || '').trim();
+  let labelUrl = labelUrlOf(data);
+  if (!labelPdf && shipmentId) {
+    try {
+      const labelRes = await call('label', 'POST', '/gateway/pdf-generator/shipping-label', {
+        orderId: shipmentId,
+        tenantId: String(creds.accountTenantId).trim(),
+        userId: String(creds.userId).trim(),
+      });
+      const labelData = labelRes.json.data || labelRes.json.result || labelRes.json;
+      labelPdf = labelBuffer(typeof labelData === 'string' ? labelData : pick(labelData, ['pdf', 'label', 'base64', 'content']));
+      if (!labelPdf && labelRes.res?.headers?.['content-type']?.includes('pdf')) {
+        labelPdf = labelBuffer(labelRes.res.buffer || labelRes.res.text);
+      }
+      if (!labelUrl) labelUrl = labelUrlOf(typeof labelData === 'object' ? labelData : {});
+    } catch {
+      /* label is best-effort; AWB is already booked */
+    }
+  }
   if (!labelPdf && labelUrl) {
     const gated = withApiMode(creds);
     const request = gatedRequest(gated, opts.request, httpCall, { allowSandbox: true });
@@ -249,15 +315,13 @@ async function book(creds, shipment, opts = {}) {
 }
 
 async function cancel(creds, { awb, shipmentId } = {}, opts = {}) {
-  const tracking = String(awb || '').trim();
-  const id = String(shipmentId || tracking).trim();
-  if (!tracking && !id) throw refuse('Shree Maruti cancel needs an AWB.');
+  const id = String(shipmentId || '').trim();
+  if (!id) throw refuse('Shree Maruti cancel needs an Innofulfill order ID.');
   const call = await session(creds, opts);
-  await call('cancel', 'POST', '/api/v1/orders/cancel', {
-    awb: tracking || undefined,
-    order_id: id || undefined,
+  await call('cancel', 'POST', '/gateway/booking-service/orders/cancel/bulk', {
+    orders: [{ orderId: id, reason: 'Cancelled from OMSKing' }],
   });
-  return { cancelled: true, awb: tracking || id };
+  return { cancelled: true, awb: String(awb || '').trim() || id, shipmentId: id };
 }
 
 const SCAN_STATUS = [
@@ -265,8 +329,8 @@ const SCAN_STATUS = [
   [/undeliver|consignee|refused|not available|ndr|delivery attempt/i, 'ndr'],
   [/out for delivery/i, 'out_for_delivery'],
   [/delivered/i, 'delivered'],
-  [/transit|arrived|departed|hub|in scan|reached/i, 'in_transit'],
-  [/picked|pickup|manifest/i, 'picked_up'],
+  [/transit|arrived|departed|hub|in scan|reached|processing/i, 'in_transit'],
+  [/picked|pickup|manifest|confirmed/i, 'picked_up'],
 ];
 
 function mapScanStatus(text) {
@@ -282,28 +346,45 @@ async function track(creds, awb, opts = {}) {
   const tracking = String(awb || '').trim();
   if (!tracking) throw refuse('Shree Maruti tracking needs an AWB.');
   const call = await session(creds, opts);
-  const { json } = await call('tracking', 'GET', `/api/v1/tracking/${encodeURIComponent(tracking)}`);
-  const data = json.data || json.result || json;
-  const scans = data.scans || data.history || data.tracking_history || data.events || [];
+  const { json } = await call('tracking', 'GET', `/gateway/tracking-v2/api/tracking/awb/${encodeURIComponent(tracking)}`);
+  const data = json.data || json.result || json.orderInformation || json;
+  const scans = data.statuses || data.scans || data.history || data.tracking_history || data.events
+    || data.trackingHistory || data.partnerTracking || [];
   const list = Array.isArray(scans) ? scans : [];
   const events = list.map((row) => {
-    const detail = String(row.status || row.scan || row.Scan || row.message || row.remark || '');
+    const detail = String(row.status || row.statusName || row.scan || row.Scan || row.message || row.remark || row.event || '');
     const status = mapScanStatus(detail || row.status_code || row.code);
     if (!status) return null;
-    const when = row.time || row.datetime || row.date || row.ScanDateTime || status;
+    const when = row.time || row.datetime || row.date || row.timestamp || row.ScanDateTime || status;
     return { status, detail, eventKey: `${tracking}:${when}:${status}` };
   }).filter(Boolean);
   if (!events.length) {
-    const status = mapScanStatus(data.status || data.current_status || data.shipment_status);
-    if (status) events.push({ status, detail: String(data.status || data.current_status || ''), eventKey: `${tracking}:${status}:current` });
+    const detail = String(data.status || data.current_status || data.shipment_status || data.currentStatus || data.orderStatus || '');
+    const status = mapScanStatus(detail);
+    if (status) events.push({ status, detail, eventKey: `${tracking}:${status}:current` });
   }
   return { status: events.at(-1)?.status || '', events };
+}
+
+/** Read-only serviceability check (no shipment). */
+async function checkServiceability(creds, { fromPincode, toPincode, paymentMode = 'PREPAID' } = {}, opts = {}) {
+  assertCreds(creds);
+  const call = await session(creds, opts);
+  const { json } = await call('serviceability', 'POST', '/gateway/serviceability/ecomm', {
+    fromPincode: Number(fromPincode),
+    toPincode: Number(toPincode),
+    paymentMode: paymentMode === 'COD' ? 'COD' : 'PREPAID',
+    operationType: 'PICKUP_DELIVERY',
+    carriers: ['SMILE'],
+  });
+  return json;
 }
 
 module.exports = {
   book,
   cancel,
   track,
+  checkServiceability,
   host,
   modeOf,
   mapScanStatus,

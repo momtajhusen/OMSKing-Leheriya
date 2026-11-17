@@ -39,8 +39,8 @@ const creds = {
   apiKey: 'innofulfill_test_key',
   userId: 'user-1',
   accountTenantId: 'tenant-1',
-  orderType: 'Forward',
-  parcelCategory: 'Ecomm',
+  orderType: 'FORWARD',
+  parcelCategory: 'ECOMM',
 };
 const shopCreds = { shopUrl: 'shop.example', adminToken: 'shpat_test', apiMode: 'live' };
 
@@ -51,13 +51,10 @@ function marutiMock({ bookStatus = 200, trackStatus = 'Delivered' } = {}) {
       ? JSON.parse(opts.body)
       : (opts.body && typeof opts.body === 'object' ? opts.body : opts.body);
     calls.push({ method, url, headers: opts.headers || {}, body });
-    if (url.endsWith('/api/v1/auth/login')) {
-      assert.equal(method, 'POST');
-      assert.equal(body.email, 'ops@example.com');
-      assert.equal(body.api_key, 'innofulfill_test_key');
-      return { status: 200, text: JSON.stringify({ token: 'maruti-jwt' }) };
+    if (url.includes('/gateway/booking-service/orders/cancel/bulk')) {
+      return { status: 200, text: JSON.stringify({ data: { cancelledCount: 1 } }) };
     }
-    if (url.endsWith('/api/v1/orders') && method === 'POST') {
+    if (url.endsWith('/gateway/booking-service/orders') && method === 'POST') {
       if (bookStatus !== 200) {
         return { status: bookStatus, text: JSON.stringify({ message: 'Pincode not serviceable' }) };
       }
@@ -65,23 +62,31 @@ function marutiMock({ bookStatus = 200, trackStatus = 'Delivered' } = {}) {
         status: 200,
         text: JSON.stringify({
           data: {
-            awb: 'SM123456789',
-            order_id: 'IF-9001',
-            label_base64: PDF.toString('base64'),
+            orderId: 'IF-9001',
+            shipments: [{ awbNumber: 'SM123456789' }],
           },
         }),
       };
     }
-    if (url.endsWith('/api/v1/orders/cancel')) {
-      return { status: 200, text: JSON.stringify({ data: { cancelled: true } }) };
+    if (url.endsWith('/gateway/pdf-generator/shipping-label') && method === 'POST') {
+      return {
+        status: 200,
+        text: JSON.stringify({
+          status: 'success',
+          data: { shippingLabelUrl: 'https://innofulfill-prod-files.s3.ap-south-1.amazonaws.com/test-label.pdf' },
+        }),
+      };
     }
-    if (url.includes('/api/v1/tracking/')) {
+    if (url.includes('innofulfill-prod-files.s3') && method === 'GET') {
+      return { status: 200, text: PDF.toString('binary'), buffer: PDF, headers: { 'content-type': 'application/pdf' } };
+    }
+    if (url.includes('/gateway/tracking-v2/api/tracking/awb/')) {
       return {
         status: 200,
         text: JSON.stringify({
           data: {
             status: trackStatus,
-            scans: [
+            statuses: [
               { status: 'Picked Up', time: 't1' },
               { status: 'In Transit', time: 't2' },
               { status: trackStatus, time: 't3' },
@@ -145,27 +150,29 @@ async function shopifyOrder(tenantId, orderNo) {
   });
 }
 
-test('Shree Maruti book logs in, creates an order, and returns AWB with label PDF', async () => {
+test('Shree Maruti books via gateway with api-key auth and returns AWB with label PDF', async () => {
   const mock = marutiMock();
   const booked = await maruti.book(creds, parcel, { request: mock.request });
   assert.equal(booked.awb, 'SM123456789');
   assert.equal(booked.shipmentId, 'IF-9001');
   assert.ok(Buffer.isBuffer(booked.labelPdf));
   assert.equal(booked.labelPdf.toString(), PDF.toString());
-  const [login, create] = mock.calls;
-  assert.equal(login.url, 'https://api.innofulfill.com/api/v1/auth/login');
-  assert.equal(create.headers.Authorization, 'Bearer maruti-jwt');
-  assert.equal(create.headers['x-api-key'], 'innofulfill_test_key');
-  assert.equal(create.headers['x-tenant-id'], 'tenant-1');
-  assert.equal(create.body.consignee.pincode, '302001');
-  assert.equal(create.body.order_id, 'SHP-SM');
+  const create = mock.calls.find((call) => call.url.endsWith('/gateway/booking-service/orders'));
+  assert.equal(create.url, 'https://apis.innofulfill.com/gateway/booking-service/orders');
+  assert.equal(create.headers['api-key'], 'innofulfill_test_key');
+  assert.equal(create.headers.tenantid, 'tenant-1');
+  assert.equal(create.body.parcelCategory, 'ECOMM');
+  assert.equal(create.body.addresses.find((row) => row.type === 'DELIVERY').zip, '302001');
+  assert.equal(create.body.referenceId, 'SHP-SM');
+  assert.ok(mock.calls.some((call) => call.url.endsWith('/gateway/pdf-generator/shipping-label')));
 });
 
 test('Shree Maruti asks for COD amount on COD parcels', async () => {
   const mock = marutiMock();
   await maruti.book(creds, { ...parcel, paymentMode: 'COD', codAmount: 1299 }, { request: mock.request });
-  assert.equal(mock.calls[1].body.payment_mode, 'COD');
-  assert.equal(mock.calls[1].body.cod_amount, 1299);
+  const create = mock.calls.find((call) => call.url.endsWith('/gateway/booking-service/orders'));
+  assert.equal(create.body.payment.type, 'COD');
+  assert.equal(create.body.amount, 1299);
 });
 
 test('Shree Maruti is never called without API environment or Innofulfill credentials', async () => {
@@ -176,14 +183,14 @@ test('Shree Maruti is never called without API environment or Innofulfill creden
   assert.equal(mock.calls.length, 0);
 });
 
-test('Shree Maruti cancel and tracking call the Innofulfill endpoints', async () => {
+test('Shree Maruti cancel and tracking call the official gateway endpoints', async () => {
   const mock = marutiMock();
   await maruti.cancel(creds, { awb: 'SM123456789', shipmentId: 'IF-9001' }, { request: mock.request });
-  const cancel = mock.calls.find((call) => call.url.endsWith('/orders/cancel'));
+  const cancel = mock.calls.find((call) => call.url.endsWith('/orders/cancel/bulk'));
   assert.equal(cancel.method, 'POST');
-  assert.equal(cancel.body.awb, 'SM123456789');
+  assert.equal(cancel.body.orders[0].orderId, 'IF-9001');
   const tracked = await maruti.track(creds, 'SM123456789', { request: mock.request });
-  assert.match(mock.calls.at(-1).url, /\/api\/v1\/tracking\/SM123456789$/);
+  assert.match(mock.calls.at(-1).url, /\/gateway\/tracking-v2\/api\/tracking\/awb\/SM123456789$/);
   assert.deepEqual(tracked.events.map((row) => row.status), ['picked_up', 'in_transit', 'delivered']);
 });
 
@@ -246,13 +253,13 @@ test('a failed Shopify fulfil after Shree Maruti booked resumes without creating
   await assert.rejects(() => bookOtherCourier(tenant._id, 'SHP-SM-RETRY', { courier: 'shree-maruti' }, {
     marutiCreds: creds, marutiRequest: mock.request, shopifyCreds: shopCreds, shopifyRequest,
   }), /Shopify down/);
-  assert.equal(mock.calls.filter((call) => call.url.endsWith('/api/v1/orders')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.endsWith('/gateway/booking-service/orders')).length, 1);
   const shipment = await bookOtherCourier(tenant._id, 'SHP-SM-RETRY', { courier: 'shree-maruti' }, {
     marutiCreds: creds, marutiRequest: mock.request, shopifyCreds: shopCreds, shopifyRequest,
   });
   assert.equal(shipment.awb, 'SM123456789');
   assert.equal(shipment.shopifyFulfillmentId, '99');
-  assert.equal(mock.calls.filter((call) => call.url.endsWith('/api/v1/orders')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.endsWith('/gateway/booking-service/orders')).length, 1);
 });
 
 test('cancelling a Shree Maruti label calls cancel and clears the order AWB', async () => {
@@ -270,7 +277,7 @@ test('cancelling a Shree Maruti label calls cancel and clears the order AWB', as
   await cancelShopifyLabel(tenant._id, 'SHP-SM-CXL', {
     deps: { marutiCreds: creds, marutiRequest: mock.request, shopifyCreds: shopCreds, shopifyRequest: shopify.request },
   });
-  assert.ok(mock.calls.some((call) => call.url.endsWith('/orders/cancel')));
+  assert.ok(mock.calls.some((call) => call.url.endsWith('/orders/cancel/bulk')));
   const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-SM-CXL' });
   assert.equal(order.awb, '');
   assert.equal(order.status, 'New');
@@ -293,7 +300,7 @@ test('open-shipment tracking matches Shree Maruti by display name and code', asy
     delhiveryCreds: {},
   });
   assert.equal(result.checked, 1);
-  assert.ok(mock.calls.some((call) => call.url.includes('/api/v1/tracking/')));
+  assert.ok(mock.calls.some((call) => call.url.includes('/gateway/tracking-v2/api/tracking/awb/')));
   const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-SM-TRK' });
   assert.equal(order.status, 'Delivered');
 });

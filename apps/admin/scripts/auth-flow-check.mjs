@@ -37,7 +37,7 @@ ok('ops is merchant role', MERCHANT_ROLES.includes(ROLES.ADMIN));
 ok('vendor home', homePathForRole(ROLES.VENDOR) === '/vendor/orders');
 
 const platform = findDemoAccount('platform@omsking.com', DEMO_PASSWORD);
-const merchant = findDemoAccount('superadmin@omsking.com', DEMO_PASSWORD);
+const merchant = findDemoAccount('omsking19@gmail.com', DEMO_PASSWORD);
 const ops = findDemoAccount('ops@leheriya.com', DEMO_PASSWORD);
 const vendor = findDemoAccount('vendor@omsking.com', DEMO_PASSWORD);
 

@@ -157,6 +157,21 @@ test('hasCourierSecret treats Blue Dart licenceKey as ready, not only apiToken',
   assert.equal(hasCourierSecret({ loginId: 'DEL79448' }), false);
 });
 
+test('Shipway-only Blue Dart credentials keep API booking off until Apigee Client ID is set', async () => {
+  const tenant = await seller();
+  await CourierAccount.create({
+    tenantId: tenant._id, source: 'own', code: 'bluedart', name: 'Bluedart', status: 'active',
+    credentialsEnc: encryptObject({
+      apiMode: 'live',
+      loginId: 'DEL79448',
+      licenceKey: 'licence-only',
+      customerCode: '871102',
+    }),
+  });
+  const readiness = await shippingReadiness(tenant._id);
+  assert.equal(readiness.couriers.find((row) => row.code === 'bluedart')?.api, false);
+});
+
 test('Blue Dart book logs in, generates a waybill, and returns AWB with label PDF', async () => {
   const blue = blueMock();
   const booked = await bluedart.book(creds, parcel, { request: blue.request });
@@ -202,6 +217,35 @@ test('Blue Dart cancel and tracking call the gateway endpoints', async () => {
   const tracked = await bluedart.track(creds, 'BD89186876973', { request: blue.request });
   assert.match(blue.calls.at(-1).url, /tracking\/v1\/shipment\?/);
   assert.deepEqual(tracked.events.map((row) => row.status), ['picked_up', 'in_transit', 'delivered']);
+});
+
+test('Shipway-only Blue Dart tracks via RoutingServlet without Apigee Client ID', async () => {
+  const calls = [];
+  const request = async (method, url) => {
+    calls.push({ method, url });
+    assert.match(url, /api\.bluedart\.com\/servlet\/RoutingServlet/);
+    return {
+      status: 200,
+      text: JSON.stringify({
+        ShipmentData: {
+          Shipment: {
+            Status: 'SHIPMENT DELIVERED',
+            WaybillNo: 'BD123',
+            Scans: [{ ScanDetail: { Scan: 'SHIPMENT DELIVERED', ScanDate: '2026-11-17', ScanTime: '10:00' } }],
+          },
+        },
+      }),
+    };
+  };
+  const tracked = await bluedart.track({
+    apiMode: 'live',
+    loginId: 'DEL79448',
+    licenceKey: 'lic',
+    trackingLicenceKey: 'track-lic',
+  }, 'BD123', { request });
+  assert.equal(calls[0].method, 'GET');
+  assert.equal(tracked.status, 'delivered');
+  assert.equal(tracked.events.length, 1);
 });
 
 test('Blue Dart tracking codes map to OMSKing scan statuses', () => {

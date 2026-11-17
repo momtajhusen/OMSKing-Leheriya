@@ -65,3 +65,11 @@ test('delivered shipments offer Book reverse, which books the reverse pickup', (
 test('the Exceptions / RTO card counts both', () => {
   assert.match(page, /label="Exceptions \/ RTO" value=\{count\('Exception'\) \+ count\('RTO'\)\}/);
 });
+
+test('Shipping filters shipment history by courier without a large courier desk card', () => {
+  assert.doesNotMatch(page, /Courier desk/);
+  assert.doesNotMatch(page, /courierDeskCard/);
+  assert.match(page, /courierFilter/);
+  assert.match(page, /All couriers/);
+  assert.match(page, /shipmentMatchesCourier/);
+});

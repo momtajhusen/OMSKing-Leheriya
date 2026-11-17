@@ -58,7 +58,7 @@ async function seed() {
     const created = await provisionMerchant({
       name: 'Leheriya Creations',
       slug: 'leheriya',
-      ownerEmail: 'superadmin@omsking.com',
+      ownerEmail: 'omsking19@gmail.com',
       ownerName: 'Leheriya Super Admin',
       password: PASSWORD,
       plan: 'enterprise',
@@ -136,7 +136,7 @@ async function seed() {
   console.log('[SEED] Phase 2 accounts (password: password123)');
   console.log('[SEED] Warehouses WH-001 / WH-002. Catalog, stock and orders come from channel sync, not seeds.');
   console.log('  platform@omsking.com → /platform');
-  console.log('  superadmin@omsking.com → /dashboard (Leheriya)');
+  console.log('  omsking19@gmail.com → /dashboard (Leheriya)');
   console.log('  ops@leheriya.com → /dashboard');
   console.log('  vendor@omsking.com → /vendor/orders');
   console.log('  ravi@suratsilks.com → /dashboard (Surat Silks isolation)');

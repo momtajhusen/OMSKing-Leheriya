@@ -116,6 +116,31 @@ test('Bluedart licence keys stay encrypted and the account fields from the mail 
   assert.equal(creds.clientSecret, 'bd-client-secret');
 });
 
+test('Bluedart Shipway pack saves without Apigee Client ID or Client secret', async () => {
+  const row = await tenant();
+  const dto = await createCourier(row._id, null, {
+    source: 'own',
+    code: 'bluedart',
+    mode: 'air',
+    credentials: {
+      apiMode: 'live',
+      loginId: 'DEL79448',
+      licenceKey: 'licence-only',
+      customerCode: '871102',
+      vendorCode: '871102',
+      originArea: 'DEL',
+    },
+  });
+  assert.equal(dto.credentials.loginId, 'DEL79448');
+  assert.equal(String(dto.credentials.clientId || ''), '');
+  assert.equal(dto.credentials.licenceKey, '');
+  const stored = await CourierAccount.findOne({ tenantId: row._id, source: 'own', code: 'bluedart' });
+  const creds = decryptObject(stored.credentialsEnc);
+  assert.equal(creds.licenceKey, 'licence-only');
+  assert.equal(String(creds.clientId || ''), '');
+  assert.equal(String(creds.clientSecret || ''), '');
+});
+
 test('Amazon Shipping sandbox token is stored on the courier account, not as a live seller connection', async () => {
   const row = await tenant();
   const dto = await createCourier(row._id, null, {
