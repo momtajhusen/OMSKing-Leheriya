@@ -31,10 +31,17 @@ jobs:
             git config --global --add safe.directory /home/ubuntu/Momtaj_Projects/omskingleheriya_backend || true
             git fetch origin main
             git reset --hard origin/main
-            git clean -fd -e .env -e '.env.*' -e 'apps/backend/.env' -e 'apps/backend/.env.*'
+            git clean -fd -e .env -e '.env.*' -e 'apps/backend/.env' -e 'apps/backend/.env.*' -e ecosystem.config.js
             pnpm install --frozen-lockfile
             pm2 restart omsking-backend --update-env
             pm2 save
-            sleep 3
-            curl -fsS http://127.0.0.1:5005/api/v1 >/dev/null
-            echo "Backend deployed and healthy"
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsS http://127.0.0.1:5005/api/v1 >/dev/null; then
+                echo "Backend deployed and healthy"
+                exit 0
+              fi
+              sleep 3
+            done
+            echo "Backend did not become healthy in time"
+            pm2 logs omsking-backend --lines 40 --nostream || true
+            exit 1
