@@ -29,7 +29,9 @@ jobs:
             set -euo pipefail
             cd /home/ubuntu/Momtaj_Projects/omskingleheriya_backend
             git config --global --add safe.directory /home/ubuntu/Momtaj_Projects/omskingleheriya_backend || true
-            git pull --ff-only origin main
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd -e .env -e '.env.*' -e 'apps/backend/.env' -e 'apps/backend/.env.*'
             pnpm install --frozen-lockfile
             pm2 restart omsking-backend --update-env
             pm2 save
