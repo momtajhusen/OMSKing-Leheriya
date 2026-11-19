@@ -136,9 +136,12 @@ export default function NdrPage() {
                     return (
                       <TableRow key={row.orderNo}>
                         <TableCell className="font-medium">
-                          <button type="button" className="text-primary hover:underline" onClick={() => navigate(`/orders/${encodeURIComponent(row.orderNo)}`)}>
-                            {row.orderNo}
+                          <button type="button" className="text-left text-primary hover:underline" onClick={() => navigate(`/orders/${encodeURIComponent(row.orderNo)}`)}>
+                            {row.channelOrderNo || row.orderNo}
                           </button>
+                          {row.channelOrderNo && row.channelOrderNo !== row.orderNo && (
+                            <div className="text-[11px] text-muted-foreground">{row.orderNo}</div>
+                          )}
                         </TableCell>
                         <TableCell className="font-mono text-xs">{row.awb || '—'}</TableCell>
                         <TableCell>{row.attempt}</TableCell>

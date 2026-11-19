@@ -358,15 +358,25 @@ async function pollActiveCouriers() {
 
 async function listNdr(tenantId) {
   const rows = await skip(NdrCase.find({ tenantId }).sort({ updatedAt: -1 }));
-  return rows.map((row) => ({
-    orderNo: row.orderNo,
-    awb: row.awb,
-    reason: row.reason,
-    attempt: row.attempt,
-    phone: row.phone,
-    address: row.address,
-    status: row.status,
-  }));
+  const orderNos = [...new Set(rows.map((row) => row.orderNo).filter(Boolean))];
+  const orders = orderNos.length
+    ? await skip(Order.find({ tenantId, orderNo: { $in: orderNos } }).select('orderNo channelOrderNo channel'))
+    : [];
+  const byNo = new Map(orders.map((order) => [order.orderNo, order]));
+  return rows.map((row) => {
+    const order = byNo.get(row.orderNo);
+    return {
+      orderNo: row.orderNo,
+      channelOrderNo: order?.channelOrderNo || '',
+      channel: order?.channel || '',
+      awb: row.awb,
+      reason: row.reason,
+      attempt: row.attempt,
+      phone: row.phone,
+      address: row.address,
+      status: row.status,
+    };
+  });
 }
 
 module.exports = {

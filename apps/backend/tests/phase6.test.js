@@ -18,7 +18,7 @@ const { stockIn, restockReturn, reserveStock } = require('../src/services/invent
 const { ensureDefaultWarehouses } = require('../src/services/warehouse.service');
 const { channelQty, runInventoryJob } = require('../src/services/inventoryPush.service');
 const { upsertConnection } = require('../src/services/channelConnection.service');
-const { applyTracking, pollDelhivery, pollOpenShipments, reattemptNdr, convertNdrToRto } = require('../src/services/tracking.service');
+const { applyTracking, pollDelhivery, pollOpenShipments, reattemptNdr, convertNdrToRto, listNdr } = require('../src/services/tracking.service');
 const { ingestReturns, approveReturn, receiveReturn } = require('../src/services/returnsFlow.service');
 const { pullChannelReturns } = require('../src/services/returnsPull.service');
 const { enqueueScheduledPulls } = require('../src/services/channelScheduler.service');
@@ -109,6 +109,7 @@ test('an NDR scan does not create a new order, and reattempt or RTO stays on it'
   const order = await Order.create({
     tenantId: tenant._id,
     orderNo: 'SHP-NDR',
+    channelOrderNo: '#70046-LEH',
     channel: 'Shopify',
     status: 'Dispatched',
     awb: 'AWB-NDR',
@@ -124,6 +125,9 @@ test('an NDR scan does not create a new order, and reattempt or RTO stays on it'
     attempt: 1,
   });
   assert.equal(await Order.countDocuments({ tenantId: tenant._id }), before);
+  const listed = await listNdr(tenant._id);
+  const hit = listed.find((row) => row.orderNo === 'SHP-NDR');
+  assert.equal(hit.channelOrderNo, '#70046-LEH');
   const again = await applyTracking(tenant._id, {
     orderNo: order.orderNo,
     awb: order.awb,
