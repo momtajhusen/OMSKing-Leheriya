@@ -90,7 +90,7 @@ export default function AuthPage({ scope = 'tenant' }) {
       <p className="text-muted-foreground">
         {isPlatform
           ? 'Platform-wide sessions and password resets across every subscriber.'
-          : `JWT access (15 min) + refresh cookie (7 days) for ${user?.tenantName || 'this tenant'}.`}
+          : `JWT access (15 min) + refresh cookie (30 days) for ${user?.tenantName || 'this tenant'}.`}
       </p>
     </>
   );
@@ -351,7 +351,9 @@ export default function AuthPage({ scope = 'tenant' }) {
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
-                {user?.twoFactorRequired ? 'Every account enters an email OTP at sign-in. This is always on.' : 'Ask for an email OTP at every sign-in'}
+                {user?.twoFactorRequired
+                  ? 'Every account enters an email OTP on a new browser. This browser stays trusted for 30 days after one successful code.'
+                  : 'Ask for an email OTP at every sign-in'}
               </p>
               {!user?.twoFactorRequired && <Button
                 variant={twoFa ? 'default' : 'outline'}

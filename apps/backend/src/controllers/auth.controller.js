@@ -14,6 +14,7 @@ const {
   hashToken, signAccessToken, signRefreshToken, verifyRefresh,
   setRefreshCookie, clearRefreshCookie, deviceFromUa, COOKIE_NAME,
 } = require('../lib/tokens');
+const { setTrustCookie, clearTrustCookie, isTrustedDevice, trustDays } = require('../lib/loginTrust');
 const { provisionMerchant, slugify } = require('../services/tenantOnboard.service');
 const { sendMail } = require('../lib/mailer');
 const { issueEmailOtp, takeEmailOtp } = require('../lib/emailOtp');
@@ -121,7 +122,7 @@ async function login(req, res) {
 
   assertPasswordFresh(user);
 
-  if (loginOtpRequired(user)) {
+  if (loginOtpRequired(user) && !isTrustedDevice(req, user._id)) {
     await issueEmailOtp({ user, purpose: 'login', required: true });
     return successResponse(res, { twoFactorRequired: true, email: user.email }, 'OTP sent to your email');
   }
@@ -130,6 +131,7 @@ async function login(req, res) {
   if (user.status === 'invited') user.status = 'active';
   await user.save();
   const session = await issueSession(req, res, user);
+  if (loginOtpRequired(user)) setTrustCookie(res, user._id);
   return successResponse(res, session, 'Signed in');
 }
 
@@ -258,6 +260,7 @@ async function verifyLogin(req, res) {
   if (user.status === 'invited') user.status = 'active';
   await user.save();
   const session = await issueSession(req, res, user);
+  setTrustCookie(res, user._id);
   return successResponse(res, session, 'Signed in');
 }
 
@@ -301,6 +304,7 @@ async function logout(req, res) {
     ).setOptions({ skipTenantFilter: true });
   }
   clearRefreshCookie(res);
+  clearTrustCookie(res);
   return successResponse(res, null, 'Signed out');
 }
 

@@ -86,6 +86,7 @@ const OWN = [
       { key: 'apiMode', label: 'API environment', type: 'text', required: false, placeholder: 'live' },
       { key: 'clientId', label: 'Client ID (API booking)', type: 'text', required: false, placeholder: 'Apigee Client ID — needed for GenerateWayBill' },
       { key: 'clientSecret', label: 'Client secret (API booking)', type: 'password', required: false, placeholder: 'Apigee client secret — needed for GenerateWayBill' },
+      { key: 'apiType', label: 'API type (Profile)', type: 'text', required: false, placeholder: 'S or P — leave blank to use sandbox→S / live→P' },
       { key: 'loginId', label: 'Login ID', type: 'text', required: true, placeholder: 'Bluedart login ID' },
       { key: 'licenceKey', label: 'Licence key', type: 'password', required: true, placeholder: 'Licence key' },
       { key: 'trackingLicenceKey', label: 'Tracking licence key', type: 'password', required: false, placeholder: 'Tracking licence key' },

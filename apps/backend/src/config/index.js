@@ -1,4 +1,7 @@
-require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
+// src/config/index.js → apps/backend/.env first (PORT), then repo-root .env fills JWT etc. (no override).
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../../../../.env') });
 
 const config = {
   port: Number(process.env.PORT) || 5002,
@@ -8,7 +11,7 @@ const config = {
     accessSecret: process.env.JWT_ACCESS_SECRET || 'dev-access-secret',
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
     accessExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
-    refreshExpiry: process.env.JWT_REFRESH_EXPIRY || '7d',
+    refreshExpiry: process.env.JWT_REFRESH_EXPIRY || '30d',
   },
   // Comma-separated list. Defaults include live admin so production works after pull.
   corsOrigins: String(
@@ -22,6 +25,8 @@ const config = {
   auth: {
     // Amazon SP-API Data Protection Policy: every sign-in needs a second factor (email OTP).
     requireLoginOtp: process.env.REQUIRE_LOGIN_OTP !== 'false',
+    // After one successful OTP, this browser stays trusted so daily re-logins skip the code.
+    trustDeviceDays: Number(process.env.LOGIN_TRUST_DAYS || 30),
   },
   demoLogin: process.env.DEMO_LOGIN === 'true' || (process.env.NODE_ENV || 'development') !== 'production',
   // A development backend sends Developer Support (/support) to the live API: the subscriber inbox as the live

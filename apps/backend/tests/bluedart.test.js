@@ -55,7 +55,7 @@ function blueMock({ bookStatus = 200, cancelStatus = 200, trackStatus = 'SHIPMEN
     const body = typeof opts.body === 'string' && opts.body.startsWith('{') ? JSON.parse(opts.body) : opts.body;
     calls.push({ method, url, headers: opts.headers || {}, body });
     if (url.endsWith('/token/v1/login')) {
-      assert.equal(method, 'POST');
+      assert.equal(method, 'GET');
       assert.equal(opts.headers.clientID || opts.headers.ClientID, 'bd-client');
       assert.equal(opts.headers.clientSecret, 'bd-secret');
       assert.equal(Boolean(new URL(url).search), false, 'login must not put secrets in the query string');
@@ -179,18 +179,23 @@ test('Blue Dart book logs in, generates a waybill, and returns AWB with label PD
   assert.ok(Buffer.isBuffer(booked.labelPdf));
   assert.equal(booked.labelPdf.toString(), PDF.toString());
   const [login, waybill] = blue.calls;
-  assert.equal(login.method, 'POST');
+  assert.equal(login.method, 'GET');
   assert.equal(login.url, 'https://apigateway-sandbox.bluedart.com/in/transportation/token/v1/login');
   assert.equal(login.headers.clientID, 'bd-client');
   assert.equal(login.headers.clientSecret, 'bd-secret');
-  assert.equal(login.headers['Content-Type'], 'application/json');
   assert.equal(waybill.url, 'https://apigateway-sandbox.bluedart.com/in/transportation/waybill/v1/GenerateWayBill');
   assert.equal(waybill.headers.JWTToken, 'jwt-test-token');
+  assert.equal(waybill.headers.Type, 'S');
+  assert.equal(waybill.headers.clientid, 'bd-client');
   assert.equal(waybill.body.Profile.LoginID, 'DEL79448');
   assert.equal(waybill.body.Profile.Api_type, 'S');
   assert.equal(waybill.body.Request.Services.CreditReferenceNo, 'SHP-BD');
   assert.equal(waybill.body.Request.Consignee.ConsigneePincode, '302001');
   assert.equal(waybill.body.Request.Shipper.CustomerPincode, '302002');
+  assert.ok(Array.isArray(waybill.body.Request.Services.Dimensions));
+  assert.equal(waybill.body.Request.Services.Dimensions[0].Length, 30);
+  assert.equal(waybill.body.Request.Services.PickupTime.length, 4);
+  assert.equal(waybill.body.Request.Services.RegisterPickup, true);
 });
 
 test('Blue Dart asks for COD collectable amount on COD parcels', async () => {

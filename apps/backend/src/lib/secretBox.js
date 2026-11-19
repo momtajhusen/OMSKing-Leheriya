@@ -19,10 +19,14 @@ function decryptObject(payload) {
   if (!payload) return {};
   const [ivHex, tagHex, dataHex] = String(payload).split(':');
   if (!dataHex) return {};
-  const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuf(), Buffer.from(ivHex, 'hex'));
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-  const json = Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
-  return JSON.parse(json);
+  try {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuf(), Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    const json = Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+    return JSON.parse(json);
+  } catch {
+    return {};
+  }
 }
 
 function mask(value) {

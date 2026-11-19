@@ -800,8 +800,13 @@ async function runDueManifests(deps = {}) {
 
 async function shippingReadiness(tenantId) {
   const missing = [];
-  const creds = await delhiveryCreds(tenantId);
-  const courierReady = Boolean(String(creds?.apiToken || '').trim());
+  let courierReady = false;
+  try {
+    const creds = await delhiveryCreds(tenantId);
+    courierReady = Boolean(String(creds?.apiToken || '').trim());
+  } catch {
+    courierReady = false;
+  }
   if (!courierReady) missing.push('Delhivery API token on this company');
   const row = await skip(Warehouse.findOne({ tenantId, code: 'WH-001', status: 'active' }));
   if (!row?.address?.line1) missing.push('WH-001 street address');

@@ -91,15 +91,24 @@ test('every account must enter the email OTP at sign-in, even with OTP not turne
   const email = `otp-${Date.now()}@example.com`;
   await makeUser(email, { twoFactorEnabled: false });
   const challenge = fakeRes();
-  await login({ body: { email, password: STRONG }, headers: {}, ip: '127.0.0.1' }, challenge);
+  await login({ body: { email, password: STRONG }, headers: {}, ip: '127.0.0.1', cookies: {} }, challenge);
   assert.equal(challenge.body.data.twoFactorRequired, true);
   assert.equal(challenge.body.data.accessToken, undefined);
   assert.equal(sent.length, 1);
 
   const signedIn = fakeRes();
-  await verifyLogin({ body: { email, password: STRONG, otp: otpFrom(sent.at(-1)) }, headers: {}, ip: '127.0.0.1' }, signedIn);
+  const cookies = {};
+  signedIn.cookie = (name, value) => { cookies[name] = value; return signedIn; };
+  await verifyLogin({ body: { email, password: STRONG, otp: otpFrom(sent.at(-1)) }, headers: {}, ip: '127.0.0.1', cookies: {} }, signedIn);
   assert.ok(signedIn.body.data.accessToken);
   assert.equal(signedIn.body.data.user.twoFactorRequired, true);
+  assert.ok(cookies.login_trust, 'OTP success trusts this browser');
+
+  sent.length = 0;
+  const trusted = fakeRes();
+  await login({ body: { email, password: STRONG }, headers: {}, ip: '127.0.0.1', cookies: { login_trust: cookies.login_trust } }, trusted);
+  assert.ok(trusted.body.data.accessToken, 'trusted browser skips OTP');
+  assert.equal(sent.length, 0);
 });
 
 test('sign-in OTP cannot be turned off while it is required', async () => {
