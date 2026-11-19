@@ -89,7 +89,7 @@ test('each order item has a Print barcode button in its Barcode cell', () => {
   const table = page.slice(page.indexOf('<CardTitle>Order items</CardTitle>'), page.indexOf('</Table>', page.indexOf('<CardTitle>Order items</CardTitle>')));
   const cell = table.slice(table.indexOf('{item.sku}</TableCell>') + '{item.sku}</TableCell>'.length);
   const barcodeCell = cell.slice(0, cell.indexOf('</TableCell>'));
-  assert.match(barcodeCell, /printBarcodeLabel\(\{ value: item\.barcode \|\| item\.sku, name: item\.name \}\)/);
+  assert.match(barcodeCell, /printBarcodeLabel\(\{ value: item\.barcode \|\| item\.sku, name: item\.name, price: item\.price \}\)/);
   assert.match(barcodeCell, /aria-label=\{`Print barcode for \$\{item\.sku\}`\}/);
 });
 

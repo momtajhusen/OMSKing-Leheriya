@@ -61,15 +61,24 @@ function centeredText(value, size, y, max) {
   return `BT /F1 ${size} Tf ${x.toFixed(2)} ${y} Td (${pdfText(value, max)}) Tj ET`;
 }
 
-export function barcodeLabelPdf({ value, name }) {
+/** Retail sticker price line, e.g. Rs. 2799/- */
+export function formatBarcodePrice(price) {
+  const n = Number(price);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return `Rs. ${Math.round(n)}/-`;
+}
+
+export function barcodeLabelPdf({ value, name, price }) {
   const modules = code128Modules(value);
   const total = modules.reduce((sum, w) => sum + w, 0);
   const quiet = 8;
   const unit = Math.min(1.2, (LABEL_WIDTH_PT - quiet * 2) / total);
   let x = (LABEL_WIDTH_PT - unit * total) / 2;
+  const priceText = formatBarcodePrice(price);
   const bars = [];
+  // Leave room under the bars for barcode digits + Rs. price.
   modules.forEach((width, i) => {
-    if (i % 2 === 0) bars.push(`${x.toFixed(3)} 17 ${(width * unit).toFixed(3)} 42 re`);
+    if (i % 2 === 0) bars.push(`${x.toFixed(3)} 20 ${(width * unit).toFixed(3)} 36 re`);
     x += width * unit;
   });
   const content = [
@@ -77,7 +86,8 @@ export function barcodeLabelPdf({ value, name }) {
     'q 0 g',
     ...bars,
     'f Q',
-    centeredText(value, 8, 6, 28),
+    centeredText(value, 7, priceText ? 10 : 6, 28),
+    ...(priceText ? [centeredText(priceText, 8, 2, 22)] : []),
   ].join('\n');
 
   const objects = [
@@ -100,8 +110,8 @@ export function barcodeLabelPdf({ value, name }) {
   return pdf;
 }
 
-export function printBarcodeLabel({ value, name }) {
-  const pdf = barcodeLabelPdf({ value, name });
+export function printBarcodeLabel({ value, name, price }) {
+  const pdf = barcodeLabelPdf({ value, name, price });
   const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
   if (!window.open(url, '_blank')) {
     const link = document.createElement('a');

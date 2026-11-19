@@ -8,7 +8,7 @@ test('each Master SKU in the product list has a Print barcode button', () => {
   assert.match(page, /import \{ printBarcodeLabel \} from '\.\.\/\.\.\/lib\/barcodeLabel'/);
   const cell = page.slice(page.indexOf('productVariantRows(rows).map(({ key, product, variant: v }) =>'));
   const row = cell.slice(0, cell.indexOf('))}'));
-  assert.match(row, /printBarcodeLabel\(\{ value: v\.barcode \|\| v\.code, name: product\.name \}\)/);
+  assert.match(row, /printBarcodeLabel\(\{ value: v\.barcode \|\| v\.code, name: product\.name, price: v\.sellingPrice \}\)/);
   assert.match(row, /aria-label=\{`Print barcode for \$\{v\.code\}`\}/);
 });
 

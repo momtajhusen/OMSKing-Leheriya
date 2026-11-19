@@ -690,7 +690,7 @@ export default function OrderDetailPage() {
                         aria-label={`Print barcode for ${item.sku}`}
                         onClick={() => {
                           try {
-                            printBarcodeLabel({ value: item.barcode || item.sku, name: item.name });
+                            printBarcodeLabel({ value: item.barcode || item.sku, name: item.name, price: item.price });
                           } catch (err) {
                             toast.error(err.message);
                           }

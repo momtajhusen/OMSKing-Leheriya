@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { code128Modules, barcodeBars, barcodeLabelPdf, LABEL_WIDTH_PT, LABEL_HEIGHT_PT } from './barcodeLabel.js';
+import { code128Modules, barcodeBars, barcodeLabelPdf, formatBarcodePrice, LABEL_WIDTH_PT, LABEL_HEIGHT_PT } from './barcodeLabel.js';
 
 test('Code 128B encodes start, data, checksum and stop', () => {
   // "A" = value 33, checksum (104 + 33) % 103 = 34
@@ -22,13 +22,14 @@ test('Code 128B rejects empty or non-printable values', () => {
 test('the barcode label is a one-page PDF of 51 mm by 25 mm', () => {
   assert.equal(LABEL_WIDTH_PT, 144.57);
   assert.equal(LABEL_HEIGHT_PT, 70.87);
-  const pdf = barcodeLabelPdf({ value: 'SKU-001', name: 'Silk (Red) Saree' });
+  const pdf = barcodeLabelPdf({ value: 'SKU-001', name: 'Silk (Red) Saree', price: 2799 });
   assert.ok(pdf.startsWith('%PDF-1.4'));
   assert.ok(pdf.trimEnd().endsWith('%%EOF'));
   assert.match(pdf, /\/MediaBox \[0 0 144\.57 70\.87\]/);
   assert.equal((pdf.match(/\/Type \/Page\b/g) || []).length, 1);
   assert.match(pdf, /\(SKU-001\) Tj/);
   assert.match(pdf, /\(Silk \\\(Red\\\) Saree\) Tj/);
+  assert.match(pdf, /\(Rs\. 2799\/-\) Tj/);
   const bars = (pdf.match(/ re$/gm) || []).length;
   assert.equal(bars, code128Modules('SKU-001').filter((_, i) => i % 2 === 0).length);
   const startxref = Number(pdf.match(/startxref\n(\d+)/)[1]);
@@ -38,6 +39,13 @@ test('the barcode label is a one-page PDF of 51 mm by 25 mm', () => {
   offsets.forEach((offset, i) => {
     assert.equal(pdf.slice(offset, offset + `${i + 1} 0 obj`.length), `${i + 1} 0 obj`);
   });
+});
+
+test('barcode price formats as Rs. amount/- and skips empty prices', () => {
+  assert.equal(formatBarcodePrice(2799), 'Rs. 2799/-');
+  assert.equal(formatBarcodePrice('2799.4'), 'Rs. 2799/-');
+  assert.equal(formatBarcodePrice(0), '');
+  assert.equal(formatBarcodePrice(null), '');
 });
 
 test('barcode bars for the on-screen barcode follow the same Code 128 pattern as the printed label', () => {
