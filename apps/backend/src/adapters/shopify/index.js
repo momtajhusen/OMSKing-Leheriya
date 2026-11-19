@@ -674,14 +674,14 @@ const paise = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const amountSum = (rows, key) => (rows || []).reduce((sum, row) => sum + (Number(row?.[key]) || 0), 0);
 
 /**
- * Per-unit price after line discounts; GST added when the shop prices exclude tax.
- * discount_allocations and tax_lines cover the originally ordered quantity, so they are split per original unit.
+ * Per-unit Shopify selling price (catalogue / line price). Coupons and discount_allocations
+ * are ignored so OMS labels and item rows show the SKU selling price, not the net after promo.
+ * GST is still added when the shop prices exclude tax.
  */
 function shopifyUnitPrice(line, taxesIncluded) {
   const ordered = Math.max(1, Number(line.quantity) || 1);
-  const discount = amountSum(line.discount_allocations, 'amount');
   const tax = taxesIncluded === false ? amountSum(line.tax_lines, 'price') : 0;
-  return paise((Number(line.price) * ordered - discount + tax) / ordered);
+  return paise((Number(line.price) * ordered + tax) / ordered);
 }
 
 function shopifyShipping(order) {

@@ -165,24 +165,24 @@ function shopifyOrder(extra = {}) {
   };
 }
 
-test('Shopify line price is after discount; taxes are added when taxes_included is false; shipping and currency mapped', () => {
+test('Shopify line price is the selling price; coupons are ignored; taxes added when taxes_included is false', () => {
   const excl = mapShopifyOrder(shopifyOrder({ taxes_included: false }), {});
-  assert.equal(excl.items[0].price, 477);
+  assert.equal(excl.items[0].price, 527, 'selling price 500 + tax share 27');
   assert.equal(excl.shippingCharge, 94.4);
   assert.equal(excl.currency, 'INR');
   const incl = mapShopifyOrder(shopifyOrder({ taxes_included: true }), {});
-  assert.equal(incl.items[0].price, 450);
+  assert.equal(incl.items[0].price, 500, 'coupon discount_allocations are not subtracted');
   assert.equal(incl.shippingCharge, 80);
   const odd = mapShopifyOrder(shopifyOrder({
     taxes_included: true,
     line_items: [{ sku: 'S2', quantity: 3, current_quantity: 3, price: '333.33', discount_allocations: [{ amount: '10.00' }] }],
   }), {});
-  assert.equal(odd.items[0].price, 330);
+  assert.equal(odd.items[0].price, 333.33);
   const edited = mapShopifyOrder(shopifyOrder({
     taxes_included: true,
     line_items: [{ sku: 'S3', quantity: 2, current_quantity: 1, price: '500.00', discount_allocations: [{ amount: '100.00' }] }],
   }), {});
-  assert.deepEqual([edited.items[0].qty, edited.items[0].price], [1, 450], 'discount covers the 2 ordered units, not the 1 left');
+  assert.deepEqual([edited.items[0].qty, edited.items[0].price], [1, 500], 'qty can shrink; selling price stays the unit catalogue price');
 });
 
 test('Shopify total uses current_total_price (after edits/refunds) when present', () => {

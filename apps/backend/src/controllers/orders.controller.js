@@ -271,13 +271,20 @@ async function withBarcodes(tenantId, dto) {
   const ids = items.map((item) => item.masterSkuId).filter((id) => mongoose.isValidObjectId(id));
   const codes = items.map((item) => String(item.sku || '').trim().toUpperCase()).filter(Boolean);
   const masters = await MasterSku.find({ tenantId, $or: [{ _id: { $in: ids } }, { code: { $in: codes } }] })
-    .select('code barcode').lean().setOptions({ skipTenantFilter: true });
-  const byId = new Map(masters.map((m) => [String(m._id), m.barcode || '']));
-  const byCode = new Map(masters.map((m) => [m.code, m.barcode || '']));
-  dto.items = items.map((item) => ({
-    ...item,
-    barcode: byId.get(item.masterSkuId) || byCode.get(String(item.sku || '').trim().toUpperCase()) || '',
-  }));
+    .select('code barcode sellingPrice').lean().setOptions({ skipTenantFilter: true });
+  const byId = new Map(masters.map((m) => [String(m._id), m]));
+  const byCode = new Map(masters.map((m) => [m.code, m]));
+  dto.items = items.map((item) => {
+    const master = byId.get(String(item.masterSkuId || '')) || byCode.get(String(item.sku || '').trim().toUpperCase());
+    const sellingPrice = Number(master?.sellingPrice) || 0;
+    return {
+      ...item,
+      barcode: master?.barcode || '',
+      sellingPrice: sellingPrice || undefined,
+      // Labels and the Price column show catalogue selling price, not coupon-net.
+      price: sellingPrice > 0 ? sellingPrice : item.price,
+    };
+  });
   return dto;
 }
 
