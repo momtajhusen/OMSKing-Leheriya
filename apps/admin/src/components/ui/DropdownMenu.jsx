@@ -87,4 +87,50 @@ function DropdownMenuLabel({ className, children }) {
   );
 }
 
-export { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel };
+/** Nested list: opens on hover or click, flies out to the left of a right-side menu. */
+function DropdownMenuSub({ label, icon, children, disabled = false, className }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => { if (!disabled) setOpen(true); }}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!disabled) setOpen((prev) => !prev);
+        }}
+        className={cn(
+          'relative flex w-full cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none transition-colors',
+          'hover:bg-[hsl(var(--color-muted))] focus:bg-[hsl(var(--color-muted))]',
+          'disabled:pointer-events-none disabled:opacity-50',
+          open && 'bg-[hsl(var(--color-muted))]',
+          className,
+        )}
+      >
+        {icon}
+        <span className="flex-1 text-left">{label}</span>
+        <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 opacity-60" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-full top-0 z-50 mr-1.5 min-w-[11rem] overflow-hidden rounded-xl border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] p-1.5 text-popover-foreground shadow-pop"
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuSub };

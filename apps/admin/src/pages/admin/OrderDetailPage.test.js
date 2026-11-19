@@ -283,11 +283,14 @@ test('order header actions sit in one right-side Actions dropdown menu', () => {
   assert.match(page, /shrink-0 self-start/);
 });
 
-test('Shopify order detail has Sync from Shopify for a single order refresh', () => {
+test('order Actions has a Sync submenu with All and each connected channel', () => {
   assert.match(page, /syncChannelOrder/);
-  assert.match(page, /Sync from Shopify/);
-  assert.match(page, /order\.channel === 'Shopify'/);
-  assert.match(page, /runSyncOrder/);
+  assert.match(page, /DropdownMenuSub/);
+  assert.match(page, /runSyncAllChannels/);
+  assert.match(page, /runSyncChannel/);
+  assert.match(page, /connected\.channels\.map/);
+  assert.match(page, />\s*All\s*</);
+  assert.match(page, /label=\{busy === 'sync' \? 'Syncing…' : 'Sync'\}/);
   const store = fs.readFileSync(new URL('../../stores/orderStore.js', import.meta.url), 'utf8');
   assert.match(store, /\/orders\/\$\{encodeURIComponent\(orderId\)\}\/sync/);
 });

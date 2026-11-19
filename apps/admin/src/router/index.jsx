@@ -1,9 +1,11 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import NotFoundPage from '../pages/NotFoundPage';
 import ProtectedRoute from '../components/ui/ProtectedRoute';
 import PageLoader from '../components/ui/PageLoader';
 import { TENANT_STAFF_ROLES } from '../constants/roles';
+import { lazy } from '../lib/lazyWithReload';
+import ChunkLoadErrorPage from '../lib/ChunkLoadErrorPage';
 
 // Lazy load layout components
 const AuthLayout = lazy(() => import('../components/layout/AuthLayout'));
@@ -330,6 +332,9 @@ function ScreenLoader() {
 // Create router configuration
 const router = createBrowserRouter([
   {
+    errorElement: <ChunkLoadErrorPage />,
+    children: [
+  {
     element: (
       <Suspense fallback={<ScreenLoader />}>
         <PublicLayout />
@@ -551,6 +556,8 @@ const router = createBrowserRouter([
   {
     path: '*',
     element: <NotFoundPage />,
+  },
+    ],
   },
 ]);
 

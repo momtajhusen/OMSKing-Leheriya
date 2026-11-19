@@ -27,8 +27,11 @@ import { barcodeBars, printBarcodeLabel } from '../../lib/barcodeLabel';
 import { PACKAGE_SOURCE, packageForm, packageSize, packageWeight } from '../../lib/itemPackage';
 import { canEditOrder, asksShopifyPush, orderEditForm } from '../../lib/orderEdit';
 import { reverseTrackUrl } from '../../lib/reverseTrack';
-import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '../../components/ui/DropdownMenu';
-import api from '../../lib/api';
+import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub } from '../../components/ui/DropdownMenu';
+import useConnectedChannels from '../../hooks/useConnectedChannels';
+import { pullChannelOrders } from '../../lib/channelOrders';
+import { orderChannelLabel } from '../../constants/channelCatalog';
+import api, { apiError } from '../../lib/api';
 
 const RISK_TONE = { High: 'text-red-600', Medium: 'text-orange-500', Low: 'text-green-600' };
 
@@ -61,6 +64,7 @@ export default function OrderDetailPage() {
   const { orderId } = useParams();
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const connected = useConnectedChannels();
   const orders = useOrderStore((s) => s.orders);
   const getById = useOrderStore((s) => s.getById);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
@@ -202,12 +206,60 @@ export default function OrderDetailPage() {
       .catch(() => setLabelCouriers([]));
   };
 
-  const runSyncOrder = async () => {
+  const runSyncChannel = async (channelId) => {
     setBusy('sync');
-    const next = await syncChannelOrder(order.id);
-    setBusy('');
-    if (next?.error) { toast.error(next.error); return; }
-    toast.success(next.message || 'Order synced from Shopify');
+    try {
+      const orderCh = String(order.channel || '').toLowerCase();
+      if (channelId === 'shopify' && orderCh === 'shopify') {
+        const next = await syncChannelOrder(order.id);
+        if (next?.error) { toast.error(next.error); return; }
+        toast.success(next.message || 'Order synced from Shopify');
+        return;
+      }
+      const job = await pullChannelOrders(channelId);
+      const channel = connected.channels.find((row) => row.id === channelId);
+      const label = channel ? orderChannelLabel(channel) : channelId;
+      toast.success(job?.shortSummary || `${label} orders synced`);
+    } catch (err) {
+      toast.error(apiError(err, 'Sync failed'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const runSyncAllChannels = async () => {
+    const ids = connected.ids || [];
+    if (!ids.length) {
+      toast.error('No channel is connected');
+      return;
+    }
+    setBusy('sync');
+    try {
+      const orderCh = String(order.channel || '').toLowerCase();
+      if (ids.includes('shopify') && orderCh === 'shopify') {
+        const next = await syncChannelOrder(order.id);
+        if (next?.error) toast.error(next.error);
+        else toast.success(next.message || 'Order synced from Shopify');
+      }
+      const results = await Promise.all(ids.map(async (channelId) => {
+        try {
+          const job = await pullChannelOrders(channelId);
+          return { channelId, ok: true, summary: job?.shortSummary };
+        } catch (err) {
+          return { channelId, ok: false, summary: apiError(err, 'failed') };
+        }
+      }));
+      const failed = results.filter((row) => !row.ok);
+      if (failed.length === results.length) {
+        toast.error(failed.map((row) => `${row.channelId}: ${row.summary}`).join(' · '));
+      } else if (failed.length) {
+        toast.error(`Some channels failed: ${failed.map((row) => row.channelId).join(', ')}`);
+      } else {
+        toast.success(`Synced ${results.length} connected channel${results.length === 1 ? '' : 's'}`);
+      }
+    } finally {
+      setBusy('');
+    }
   };
 
   const runCancelLabel = async () => {
@@ -515,11 +567,28 @@ export default function OrderDetailPage() {
                 Edit order
               </DropdownMenuItem>
             )}
-            {can(PERMISSIONS.ORDERS_EDIT) && order.channel === 'Shopify' && (
-              <DropdownMenuItem disabled={busy === 'sync'} onClick={runSyncOrder}>
-                <RefreshCw className={`h-4 w-4 text-muted-foreground ${busy === 'sync' ? 'animate-spin' : ''}`} />
-                {busy === 'sync' ? 'Syncing…' : 'Sync from Shopify'}
-              </DropdownMenuItem>
+            {can(PERMISSIONS.ORDERS_EDIT) && (
+              <DropdownMenuSub
+                disabled={busy === 'sync' || !connected.ids?.length}
+                label={busy === 'sync' ? 'Syncing…' : 'Sync'}
+                icon={<RefreshCw className={`h-4 w-4 text-muted-foreground ${busy === 'sync' ? 'animate-spin' : ''}`} />}
+              >
+                <DropdownMenuItem disabled={busy === 'sync'} onClick={runSyncAllChannels}>
+                  All
+                </DropdownMenuItem>
+                {connected.channels.map((channel) => (
+                  <DropdownMenuItem
+                    key={channel.id}
+                    disabled={busy === 'sync'}
+                    onClick={() => runSyncChannel(channel.id)}
+                  >
+                    {orderChannelLabel(channel)}
+                  </DropdownMenuItem>
+                ))}
+                {!connected.ids?.length && (
+                  <div className="px-2.5 py-2 text-xs text-muted-foreground">No channel connected</div>
+                )}
+              </DropdownMenuSub>
             )}
 
             <DropdownMenuSeparator />
