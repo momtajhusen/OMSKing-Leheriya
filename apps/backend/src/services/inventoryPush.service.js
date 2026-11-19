@@ -70,6 +70,14 @@ async function enqueueChannel(tenantId, userId, channel, masterSkuId) {
     'payload.masterSkuId': String(masterSkuId),
   }));
   if (open) return open;
+  // Cap backlog so inventory floods cannot bury order pulls / trip Shopify 429.
+  const backlog = await skipTenant(IntegrationJob.countDocuments({
+    tenantId,
+    channel,
+    jobType: 'inventory_push',
+    status: { $in: ['queued', 'running'] },
+  }));
+  if (backlog >= 50) return null;
   return enqueue({
     tenantId,
     channel,
@@ -151,6 +159,13 @@ async function queueShopifyDecrement(tenantId, { channel, masterSkuId, qty, orde
   if ((await getInventoryAuthority(tenantId)) !== 'shopify') return null;
   const mapped = await skipTenant(SkuMapping.exists({ tenantId, masterSkuId, channel: 'shopify', isActive: true, syncStatus: 'synced' }));
   if (!mapped) return null;
+  const backlog = await skipTenant(IntegrationJob.countDocuments({
+    tenantId,
+    channel: 'shopify',
+    jobType: 'inventory_push',
+    status: { $in: ['queued', 'running'] },
+  }));
+  if (backlog >= 50) return null;
   return enqueue({
     tenantId,
     channel: 'shopify',
