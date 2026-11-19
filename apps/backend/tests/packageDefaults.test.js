@@ -78,7 +78,7 @@ test('tenant default package is editable and can be applied to every product of 
   await MasterSku.create({ tenantId: other._id, code: 'OTH-1', name: 'Other', weightKg: 2 });
 
   const blank = await call(tenant, settings.getPackageDefaults);
-  assert.deepEqual(blank.data, { weightKg: 0, lengthCm: 0, breadthCm: 0, heightCm: 0 });
+  assert.deepEqual(blank.data, { weightKg: 0.45, lengthCm: 10, breadthCm: 10, heightCm: 10 });
 
   const saved = await call(tenant, settings.patchPackageDefaults, {
     body: { weightKg: 0.5, lengthCm: 30, breadthCm: 25, heightCm: 5 },
@@ -114,6 +114,13 @@ test('a product without its own weight or size falls back to the tenant default'
   assert.deepEqual(
     effectivePackage({ weightKg: 1.2, dimensionsCm: { l: 40, w: 30, h: 10 } }, defaults),
     { weightKg: 1.2, lengthCm: 40, breadthCm: 30, heightCm: 10, source: 'product' },
+  );
+});
+
+test('blank tenant package defaults fall back to 450 g and 10×10×10 cm', () => {
+  assert.deepEqual(
+    effectivePackage({ weightKg: 0, dimensionsCm: { l: 0, w: 0, h: 0 } }, { weightKg: 0, lengthCm: 0, breadthCm: 0, heightCm: 0 }),
+    { weightKg: 0.45, lengthCm: 10, breadthCm: 10, heightCm: 10, source: 'default' },
   );
 });
 

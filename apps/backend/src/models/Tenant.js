@@ -26,10 +26,10 @@ const tenantSchema = new mongoose.Schema({
     inventoryAuthority: { type: String, enum: ['oms', 'shopify'], default: 'oms' },
     warehouseLinksCustom: { type: Boolean, default: false },
     packageDefaults: {
-      weightKg: { type: Number, default: 0 },
-      lengthCm: { type: Number, default: 0 },
-      breadthCm: { type: Number, default: 0 },
-      heightCm: { type: Number, default: 0 },
+      weightKg: { type: Number, default: 0.45 },
+      lengthCm: { type: Number, default: 10 },
+      breadthCm: { type: Number, default: 10 },
+      heightCm: { type: Number, default: 10 },
     },
     taxGst: {
       configured: { type: Boolean, default: false },

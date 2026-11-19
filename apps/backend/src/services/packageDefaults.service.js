@@ -4,6 +4,8 @@ const { HttpError } = require('../utils/httpError');
 
 const LABELS = { weightKg: 'Weight (kg)', lengthCm: 'Length (cm)', breadthCm: 'Breadth (cm)', heightCm: 'Height (cm)' };
 const MAX = { weightKg: 1000, lengthCm: 1000, breadthCm: 1000, heightCm: 1000 };
+/** Client default when tenant has not saved package size yet (450 g, 10×10×10 cm). */
+const FALLBACK_PACKAGE = { weightKg: 0.45, lengthCm: 10, breadthCm: 10, heightCm: 10 };
 
 function measure(value, key) {
   if (value == null || value === '') return 0;
@@ -30,12 +32,14 @@ function skuPackage(body) {
 
 function view(tenant) {
   const row = tenant?.settings?.packageDefaults || {};
-  return {
+  const next = {
     weightKg: Number(row.weightKg) || 0,
     lengthCm: Number(row.lengthCm) || 0,
     breadthCm: Number(row.breadthCm) || 0,
     heightCm: Number(row.heightCm) || 0,
   };
+  if (next.weightKg > 0 || next.lengthCm > 0 || next.breadthCm > 0 || next.heightCm > 0) return next;
+  return { ...FALLBACK_PACKAGE };
 }
 
 async function loadTenant(tenantId) {
