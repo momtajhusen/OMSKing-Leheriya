@@ -64,6 +64,7 @@ function DropdownMenuItem({ className, children, onClick, closeOnSelect = true, 
       className={cn(
         'relative flex w-full cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none transition-colors',
         'hover:bg-[hsl(var(--color-muted))] focus:bg-[hsl(var(--color-muted))]',
+        'disabled:pointer-events-none disabled:opacity-50',
         'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className
       )}

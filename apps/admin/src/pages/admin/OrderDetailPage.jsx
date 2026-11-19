@@ -16,7 +16,7 @@ import ProductThumb from '../../components/ui/ProductThumb';
 import EmptyState from '../../components/ui/EmptyState';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
-import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle, Pencil, RefreshCw } from 'lucide-react';
+import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle, Pencil, RefreshCw, ChevronDown } from 'lucide-react';
 import { isChannelManaged, packetIdOf, openMyntraDocument, openAmazonLabel } from '../../lib/channelOrders';
 import { isMyntraHyperlocal } from '../../lib/myntraHyperlocal';
 import { shipWarehouseTag } from '../../lib/channelWarehouse';
@@ -27,6 +27,7 @@ import { barcodeBars, printBarcodeLabel } from '../../lib/barcodeLabel';
 import { PACKAGE_SOURCE, packageForm, packageSize, packageWeight } from '../../lib/itemPackage';
 import { canEditOrder, asksShopifyPush, orderEditForm } from '../../lib/orderEdit';
 import { reverseTrackUrl } from '../../lib/reverseTrack';
+import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '../../components/ui/DropdownMenu';
 import api from '../../lib/api';
 
 const RISK_TONE = { High: 'text-red-600', Medium: 'text-orange-500', Low: 'text-green-600' };
@@ -492,146 +493,166 @@ export default function OrderDetailPage() {
             </div>
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
-            <Button
-              variant="outline"
-              disabled={busy === 'label' || busy === 'label-invoice'}
-              onClick={() => openLabel(true)}
-            >
-              <Printer className="w-4 h-4 mr-2" />
-              {busy === 'label-invoice' ? 'Opening…' : 'Generate Label & Invoice'}
-            </Button>
-          )}
-          <Button variant="outline" onClick={() => navigate('/orders')}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            All orders
-          </Button>
-          {can(PERMISSIONS.ORDERS_EDIT) && canEditOrder(order) && (
-            <Button variant="outline" onClick={openEdit}>
-              <Pencil className="w-4 h-4 mr-2" />
-              Edit order
-            </Button>
-          )}
-          {can(PERMISSIONS.ORDERS_EDIT) && order.channel === 'Shopify' && (
-            <Button variant="outline" disabled={busy === 'sync'} onClick={runSyncOrder}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${busy === 'sync' ? 'animate-spin' : ''}`} />
-              {busy === 'sync' ? 'Syncing…' : 'Sync from Shopify'}
-            </Button>
-          )}
-          {channelManaged && packetId && (
-            <>
-              <Button variant="outline" disabled={busy === 'invoice' || !order.invoiceNo} onClick={() => runChannelDoc('invoice')}>
-                <FileText className="w-4 h-4 mr-2" />
-                {busy === 'invoice' ? 'Opening…' : 'Myntra Invoice'}
+        <div className="shrink-0 self-start">
+          <DropdownMenu
+            align="end"
+            className="w-[min(18.5rem,calc(100vw-2rem))]"
+            trigger={
+              <Button variant="outline" className="gap-2 shadow-sm">
+                Actions
+                <ChevronDown className="h-4 w-4 opacity-70" />
               </Button>
-              <Button disabled={busy === 'label'} onClick={() => runChannelDoc('label')}>
-                <Printer className="w-4 h-4 mr-2" />
-                {busy === 'label' ? 'Opening…' : 'Myntra Label'}
-              </Button>
-            </>
-          )}
-          {can(PERMISSIONS.FINANCE_VIEW) && !channelManaged && (
-            <>
-              <Button variant="outline" disabled={busy === 'invoice'} onClick={() => runInvoice('')}>
-                <FileText className="w-4 h-4 mr-2" />
-                {busy === 'invoice' ? 'Opening…' : 'Generate Invoice'}
-              </Button>
-              <Button variant="outline" disabled={busy === 'invoice'} onClick={openB2bInvoice}>
-                <FileText className="w-4 h-4 mr-2" />
-                Generate B2B Invoice
-              </Button>
-            </>
-          )}
-          {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'make' && (
-            <Button disabled={busy === 'amazon-label'} onClick={runAmazonLabel}>
-              <Printer className="w-4 h-4 mr-2" />
-              {busy === 'amazon-label' ? 'Making label…' : 'Make Easy Ship label'}
-            </Button>
-          )}
-          {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'print' && (
-            <Button onClick={printAmazonLabel}>
-              <Printer className="w-4 h-4 mr-2" />
-              Amazon label
-            </Button>
-          )}
-          {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && order.courier === 'Amazon Shipping' && order.awb && (
-            <Button variant="outline" onClick={printAmazonLabel}>
-              <Printer className="w-4 h-4 mr-2" />
-              Amazon Shipping label
-            </Button>
-          )}
-          {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && /^blue\s*dart$/i.test(order.courier || '') && order.awb && (
-            <Button variant="outline" onClick={printAmazonLabel}>
-              <Printer className="w-4 h-4 mr-2" />
-              Blue Dart label
-            </Button>
-          )}
-          {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && /shree[-\s]?maruti|^maruti$/i.test(order.courier || '') && order.awb && (
-            <Button variant="outline" onClick={printAmazonLabel}>
-              <Printer className="w-4 h-4 mr-2" />
-              Shree Maruti label
-            </Button>
-          )}
-          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
-            <Button disabled={busy === 'label'} onClick={() => openLabel(false)}>
-              <Printer className="w-4 h-4 mr-2" />
-              {busy === 'label' ? 'Opening…' : 'Generate Label'}
-            </Button>
-          )}
-          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (order.awb || ['Dispatched', 'Ready to Ship'].includes(order.status)) && (
-            <Button variant="outline" disabled={busy === 'cancel-label'} onClick={runCancelLabel}>
-              {busy === 'cancel-label' ? 'Cancelling…' : 'Cancel Label'}
-            </Button>
-          )}
-          {can(PERMISSIONS.ORDERS_EDIT) && ['Dispatched', 'In transit'].includes(order.status) && !channelManaged && (
-            <Button
-              variant="outline"
-              disabled={busy === 'delivered'}
-              onClick={async () => {
-                setBusy('delivered');
-                const next = await markDelivered(order.id);
-                setBusy('');
-                if (next?.error) { toast.error(next.error); return; }
-                toast.success(`${displayId} marked delivered. Book reverse pickup when you are ready.`);
-              }}
-            >
-              <CheckCircle className="w-4 h-4 mr-2" />
-              Mark delivered
-            </Button>
-          )}
-          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.status === 'Delivered' && !channelManaged && !order.reversePickup?.returnId && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setReverseReason('Customer reverse pickup');
-                setReverseCourier(order.courier || 'Delhivery');
-                setReverseOpen(true);
-              }}
-            >
-              <RotateCcw className="w-4 h-4 mr-2" />
-              Book reverse pickup
-            </Button>
-          )}
-          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.reversePickup?.returnId && (
-            <Button
-              variant="outline"
-              className="text-destructive"
-              disabled={busy === 'cancel-reverse'}
-              onClick={async () => {
-                setBusy('cancel-reverse');
-                const next = await cancelReversePickup(order.id);
-                setBusy('');
-                if (next?.error) {
-                  toast.error(next.error);
-                  return;
-                }
-                toast.success(next.message || 'Reverse pickup cancelled');
-              }}
-            >
-              {busy === 'cancel-reverse' ? 'Cancelling…' : 'Cancel reverse pickup'}
-            </Button>
-          )}
+            }
+          >
+            <DropdownMenuLabel>Order</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => navigate('/orders')}>
+              <ArrowLeft className="h-4 w-4 text-muted-foreground" />
+              All orders
+            </DropdownMenuItem>
+            {can(PERMISSIONS.ORDERS_EDIT) && canEditOrder(order) && (
+              <DropdownMenuItem onClick={openEdit}>
+                <Pencil className="h-4 w-4 text-muted-foreground" />
+                Edit order
+              </DropdownMenuItem>
+            )}
+            {can(PERMISSIONS.ORDERS_EDIT) && order.channel === 'Shopify' && (
+              <DropdownMenuItem disabled={busy === 'sync'} onClick={runSyncOrder}>
+                <RefreshCw className={`h-4 w-4 text-muted-foreground ${busy === 'sync' ? 'animate-spin' : ''}`} />
+                {busy === 'sync' ? 'Syncing…' : 'Sync from Shopify'}
+              </DropdownMenuItem>
+            )}
+
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Label & invoice</DropdownMenuLabel>
+            {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
+              <DropdownMenuItem
+                disabled={busy === 'label' || busy === 'label-invoice'}
+                onClick={() => openLabel(true)}
+              >
+                <Printer className="h-4 w-4 text-muted-foreground" />
+                {busy === 'label-invoice' ? 'Opening…' : 'Generate Label & Invoice'}
+              </DropdownMenuItem>
+            )}
+            {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
+              <DropdownMenuItem disabled={busy === 'label'} onClick={() => openLabel(false)}>
+                <Printer className="h-4 w-4 text-muted-foreground" />
+                {busy === 'label' ? 'Opening…' : 'Generate Label'}
+              </DropdownMenuItem>
+            )}
+            {can(PERMISSIONS.FINANCE_VIEW) && !channelManaged && (
+              <>
+                <DropdownMenuItem disabled={busy === 'invoice'} onClick={() => runInvoice('')}>
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  {busy === 'invoice' ? 'Opening…' : 'Generate Invoice'}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={busy === 'invoice'} onClick={openB2bInvoice}>
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  Generate B2B Invoice
+                </DropdownMenuItem>
+              </>
+            )}
+            {channelManaged && packetId && (
+              <>
+                <DropdownMenuItem disabled={busy === 'invoice' || !order.invoiceNo} onClick={() => runChannelDoc('invoice')}>
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  {busy === 'invoice' ? 'Opening…' : 'Myntra Invoice'}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={busy === 'label'} onClick={() => runChannelDoc('label')}>
+                  <Printer className="h-4 w-4 text-muted-foreground" />
+                  {busy === 'label' ? 'Opening…' : 'Myntra Label'}
+                </DropdownMenuItem>
+              </>
+            )}
+            {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'make' && (
+              <DropdownMenuItem disabled={busy === 'amazon-label'} onClick={runAmazonLabel}>
+                <Printer className="h-4 w-4 text-muted-foreground" />
+                {busy === 'amazon-label' ? 'Making label…' : 'Make Easy Ship label'}
+              </DropdownMenuItem>
+            )}
+            {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'print' && (
+              <DropdownMenuItem onClick={printAmazonLabel}>
+                <Printer className="h-4 w-4 text-muted-foreground" />
+                Amazon label
+              </DropdownMenuItem>
+            )}
+            {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && order.courier === 'Amazon Shipping' && order.awb && (
+              <DropdownMenuItem onClick={printAmazonLabel}>
+                <Printer className="h-4 w-4 text-muted-foreground" />
+                Amazon Shipping label
+              </DropdownMenuItem>
+            )}
+            {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && /^blue\s*dart$/i.test(order.courier || '') && order.awb && (
+              <DropdownMenuItem onClick={printAmazonLabel}>
+                <Printer className="h-4 w-4 text-muted-foreground" />
+                Blue Dart label
+              </DropdownMenuItem>
+            )}
+            {can(PERMISSIONS.SHIPPING_GENERATE) && !amazonOrder && /shree[-\s]?maruti|^maruti$/i.test(order.courier || '') && order.awb && (
+              <DropdownMenuItem onClick={printAmazonLabel}>
+                <Printer className="h-4 w-4 text-muted-foreground" />
+                Shree Maruti label
+              </DropdownMenuItem>
+            )}
+            {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (order.awb || ['Dispatched', 'Ready to Ship'].includes(order.status)) && (
+              <DropdownMenuItem disabled={busy === 'cancel-label'} onClick={runCancelLabel}>
+                {busy === 'cancel-label' ? 'Cancelling…' : 'Cancel Label'}
+              </DropdownMenuItem>
+            )}
+
+            {(can(PERMISSIONS.ORDERS_EDIT) && ['Dispatched', 'In transit'].includes(order.status) && !channelManaged)
+              || ((can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.status === 'Delivered' && !channelManaged && !order.reversePickup?.returnId)
+              || ((can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.reversePickup?.returnId) ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Status & reverse</DropdownMenuLabel>
+              </>
+            ) : null}
+            {can(PERMISSIONS.ORDERS_EDIT) && ['Dispatched', 'In transit'].includes(order.status) && !channelManaged && (
+              <DropdownMenuItem
+                disabled={busy === 'delivered'}
+                onClick={async () => {
+                  setBusy('delivered');
+                  const next = await markDelivered(order.id);
+                  setBusy('');
+                  if (next?.error) { toast.error(next.error); return; }
+                  toast.success(`${displayId} marked delivered. Book reverse pickup when you are ready.`);
+                }}
+              >
+                <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                Mark delivered
+              </DropdownMenuItem>
+            )}
+            {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.status === 'Delivered' && !channelManaged && !order.reversePickup?.returnId && (
+              <DropdownMenuItem
+                onClick={() => {
+                  setReverseReason('Customer reverse pickup');
+                  setReverseCourier(order.courier || 'Delhivery');
+                  setReverseOpen(true);
+                }}
+              >
+                <RotateCcw className="h-4 w-4 text-muted-foreground" />
+                Book reverse pickup
+              </DropdownMenuItem>
+            )}
+            {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.reversePickup?.returnId && (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                disabled={busy === 'cancel-reverse'}
+                onClick={async () => {
+                  setBusy('cancel-reverse');
+                  const next = await cancelReversePickup(order.id);
+                  setBusy('');
+                  if (next?.error) {
+                    toast.error(next.error);
+                    return;
+                  }
+                  toast.success(next.message || 'Reverse pickup cancelled');
+                }}
+              >
+                {busy === 'cancel-reverse' ? 'Cancelling…' : 'Cancel reverse pickup'}
+              </DropdownMenuItem>
+            )}
+          </DropdownMenu>
         </div>
       </div>
 

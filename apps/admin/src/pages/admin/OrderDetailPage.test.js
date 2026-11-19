@@ -276,6 +276,13 @@ test('Generate Label asks which courier first: Delhivery by default, any enabled
   assert.match(page, /generateLabelInvoice/);
 });
 
+test('order header actions sit in one right-side Actions dropdown menu', () => {
+  assert.match(page, /DropdownMenu/);
+  assert.match(page, />\s*Actions\s*</);
+  assert.match(page, /DropdownMenuLabel>Label & invoice/);
+  assert.match(page, /shrink-0 self-start/);
+});
+
 test('Shopify order detail has Sync from Shopify for a single order refresh', () => {
   assert.match(page, /syncChannelOrder/);
   assert.match(page, /Sync from Shopify/);
