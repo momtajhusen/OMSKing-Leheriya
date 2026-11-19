@@ -67,6 +67,16 @@ async function startBullTransport(url, handler) {
   return true;
 }
 
+/** Lower number runs first. Order pulls must beat inventory floods. */
+function bullPriority(jobType) {
+  if (jobType === 'orders_pull') return 1;
+  if (jobType === 'return_pull') return 2;
+  if (jobType === 'products_pull') return 3;
+  if (jobType === 'stock_import') return 4;
+  if (jobType === 'inventory_push') return 10;
+  return 5;
+}
+
 async function scheduleBull(row, delayMs = 0) {
   if (!queue || !row?._id) return;
   const jobId = `${row._id}:${row.retriesCount || 0}:${Date.now()}`;
@@ -77,6 +87,7 @@ async function scheduleBull(row, delayMs = 0) {
       {
         jobId,
         delay: Math.max(0, Number(delayMs) || 0),
+        priority: bullPriority(row.jobType),
         removeOnComplete: 1000,
         removeOnFail: 1000,
       },

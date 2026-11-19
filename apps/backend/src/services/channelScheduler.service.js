@@ -47,6 +47,14 @@ async function enqueueScheduledPulls(now = new Date()) {
     if (row.channel !== 'shopify') continue;
     const tenant = await Tenant.findById(row.tenantId).setOptions({ skipTenantFilter: true });
     if (tenant?.settings?.inventoryAuthority !== 'shopify') continue;
+    // Skip if an inventory backlog is already waiting — do not bury order pulls again.
+    const inventoryBacklog = await IntegrationJob.countDocuments({
+      tenantId: row.tenantId,
+      channel: 'shopify',
+      jobType: 'inventory_push',
+      status: { $in: ['queued', 'running'] },
+    }).setOptions({ skipTenantFilter: true });
+    if (inventoryBacklog > 20) continue;
     if (await enqueueIdle(row, 'inventory_push', {})) queued += 1;
   }
   return queued;
