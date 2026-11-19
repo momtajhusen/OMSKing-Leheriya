@@ -33,6 +33,19 @@ async function enqueueIdle(row, jobType, payload) {
   return true;
 }
 
+async function shopifyPullCooling(tenantId, now = new Date()) {
+  const last = await IntegrationJob.findOne({
+    tenantId,
+    channel: 'shopify',
+    jobType: 'orders_pull',
+    status: 'failed',
+    lastError: /429/,
+  }).sort({ finishedAt: -1, createdAt: -1 }).setOptions({ skipTenantFilter: true });
+  if (!last) return false;
+  const at = new Date(last.finishedAt || last.createdAt || 0).getTime();
+  return Number.isFinite(at) && now.getTime() - at < 15 * 60_000;
+}
+
 async function enqueueScheduledPulls(now = new Date()) {
   const rows = await ChannelConnection.find({ channel: { $in: ['shopify', 'amazon', 'myntra'] } }).setOptions({ skipTenantFilter: true });
   const from = new Date(now.getTime() - SCHEDULED_LOOKBACK_DAYS * 864e5).toISOString();
@@ -40,6 +53,7 @@ async function enqueueScheduledPulls(now = new Date()) {
   for (const row of rows) {
     const creds = credsOf(row);
     if (!pullReady(row, creds)) continue;
+    if (row.channel === 'shopify' && await shopifyPullCooling(row.tenantId, now)) continue;
     const payload = { from };
     if (await enqueueIdle(row, 'orders_pull', payload)) queued += 1;
     if (await enqueueIdle(row, 'products_pull', payload)) queued += 1;

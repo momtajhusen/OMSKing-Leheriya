@@ -764,7 +764,13 @@ async function pullOrders(creds, opts = {}) {
     }
     if (res.status < 200 || res.status >= 300) {
       const err = new Error(`Shopify orders API returned ${res.status}. Orders were not pulled.`);
-      err.statusCode = 502;
+      err.statusCode = res.status === 429 ? 429 : 502;
+      // Stop the 1-minute scheduler from hammering Shopify after a throttle.
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers?.['retry-after'] || res.headers?.['Retry-After'] || 0);
+        err.delayMs = Math.max(15 * 60_000, (Number.isFinite(retryAfter) ? retryAfter : 0) * 1000);
+        err.terminal = false;
+      }
       throw err;
     }
     const body = JSON.parse(res.text || '{}');
