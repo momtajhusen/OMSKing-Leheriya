@@ -54,6 +54,7 @@ export default function ShippingPage() {
   const [reverseFor, setReverseFor] = useState(null);
   const [reverseReason, setReverseReason] = useState('Customer reverse pickup');
   const [reverseCourier, setReverseCourier] = useState('Delhivery');
+  const [reverseAwb, setReverseAwb] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [syncing, setSyncing] = useState(false);
   const [labelFor, setLabelFor] = useState(null);
@@ -540,11 +541,21 @@ export default function ShippingPage() {
               loading={busy === 'reverse'}
               onClick={async () => {
                 setBusy('reverse');
-                const next = await bookReversePickup(reverseFor.id, { reason: reverseReason, courier: reverseCourier });
+                if (!String(reverseAwb || '').trim()) {
+                  toast.error('Enter the reverse AWB from BlueDart / courier so tracking shows on Returns');
+                  setBusy('');
+                  return;
+                }
+                const next = await bookReversePickup(reverseFor.id, {
+                  reason: reverseReason,
+                  courier: reverseCourier,
+                  awb: reverseAwb,
+                });
                 setBusy('');
                 if (next?.error) { toast.error(next.error); return; }
                 toast.success(`Reverse pickup ${next?.reversePickup?.returnId || ''} is in Returns.`);
                 setReverseFor(null);
+                setReverseAwb('');
               }}
             >
               Generate reverse label
@@ -565,6 +576,16 @@ export default function ShippingPage() {
               <option>Xpressbees</option>
               <option>Ecom Express</option>
             </Select>
+          </label>
+          <label className="block text-sm font-medium">
+            Reverse AWB
+            <Input
+              className="mt-1 font-mono"
+              value={reverseAwb}
+              onChange={(event) => setReverseAwb(event.target.value)}
+              placeholder="AWB from the BlueDart / courier booking"
+            />
+            <span className="mt-1 block text-xs font-normal text-muted-foreground">Required. This is reverse tracking on Returns.</span>
           </label>
         </div>
       </Modal>

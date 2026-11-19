@@ -35,6 +35,29 @@ async function delhiveryCreds(tenantId) {
   return activeCourierCreds(tenantId, 'delhivery');
 }
 
+/** Setup seed used "123 Fashion Street" — never send that on a live courier label. */
+function isPlaceholderPickup(line1) {
+  return /123\s*fashion\s*street/i.test(String(line1 || '').trim());
+}
+
+function legalPickupFrom(tenant) {
+  const legal = tenant?.legalEntity || {};
+  const line1 = String(legal.address || '').trim();
+  if (!line1) return null;
+  const district = String(legal.district || '');
+  const pinMatch = `${district} ${legal.city || ''}`.match(/\b(\d{6})\b/);
+  const city = String(legal.city || '').replace(/\s*-\s*\d{6}.*$/, '').trim();
+  const phone = String(legal.phone || '').replace(/\s+/g, '');
+  return {
+    line1,
+    city: city || 'New Delhi',
+    state: 'Delhi',
+    pincode: pinMatch ? pinMatch[1] : '',
+    phone,
+    name: String(legal.legalName || tenant.name || '').trim(),
+  };
+}
+
 async function pickupWarehouse(tenantId) {
   const row = await skip(Warehouse.findOne({ tenantId, code: 'WH-001', status: 'active' }));
   if (!row) {
@@ -42,25 +65,55 @@ async function pickupWarehouse(tenantId) {
     err.terminal = true;
     throw err;
   }
-  const address = [row.address?.line1, row.address?.city, row.address?.pincode].filter(Boolean).join(', ');
-  if (!row.address?.line1 || !row.address?.pincode || !row.contactPhone) {
+  let line1 = String(row.address?.line1 || '').trim();
+  let city = String(row.address?.city || '').trim();
+  let state = String(row.address?.state || '').trim();
+  let pincode = String(row.address?.pincode || '').trim();
+  let phone = String(row.contactPhone || '').trim();
+  let name = String(row.name || '').trim();
+
+  if (isPlaceholderPickup(line1)) {
+    const Tenant = require('../models/Tenant');
+    const tenant = await skip(Tenant.findById(tenantId).select('name legalEntity'));
+    const legal = legalPickupFrom(tenant);
+    if (legal?.line1) {
+      line1 = legal.line1;
+      city = legal.city || city;
+      state = legal.state || state;
+      if (/^\d{6}$/.test(legal.pincode)) pincode = legal.pincode;
+      if (legal.phone) phone = legal.phone;
+      if (legal.name) name = legal.name;
+    }
+  }
+
+  const address = [line1, city, pincode].filter(Boolean).join(', ');
+  if (!line1 || !pincode || !phone) {
     const err = new HttpError(400, 'WH-001 needs a street address, pincode, and phone before an AWB is booked.');
     err.terminal = true;
     throw err;
   }
   return {
     address,
-    phone: row.contactPhone,
-    name: row.name,
-    line1: row.address.line1,
-    city: row.address.city,
-    state: row.address.state,
-    pincode: row.address.pincode,
+    phone,
+    name,
+    line1,
+    city,
+    state,
+    pincode,
   };
 }
 
 async function saveShipment(doc) {
   return Shipment.create(doc);
+}
+
+/** AWB/label already booked — Shopify tracking is best-effort so Generate Label still finishes. */
+async function pushShopifyTracking(shopCreds, opts) {
+  try {
+    return await shopify.fulfillOrder(shopCreds, opts);
+  } catch {
+    return { fulfillmentId: '' };
+  }
 }
 
 const BOOKING_LOCK_MS = 2 * 60 * 1000;
@@ -74,9 +127,13 @@ async function withBookingLock(tenantId, orderNo, fn) {
   const order = await skip(Order.findOne({ tenantId, orderNo }));
   if (!order) throw new HttpError(404, 'Order not found');
   if (NO_LABEL_STATUS.includes(order.status)) {
-    const err = new HttpError(400, `This order is ${order.status}. No label was booked.`);
-    err.terminal = true;
-    throw err;
+    // Allow one more Generate Label click to stamp a booked AWB that never reached the order row.
+    const orphan = await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked' }));
+    if (!orphan?.awb || String(order.awb || '').trim()) {
+      const err = new HttpError(400, `This order is ${order.status}. No label was booked.`);
+      err.terminal = true;
+      throw err;
+    }
   }
   const now = new Date();
   const claim = await skip(Order.updateOne(
@@ -118,15 +175,28 @@ async function bookShopifyNow(tenantId, orderNo, deps = {}) {
     throw err;
   }
   const existing = await skip(Shipment.findOne({ tenantId, orderNo, status: 'booked' }));
-  if (existing?.shopifyFulfillmentId) {
-    if (order.awb !== existing.awb) {
-      order.awb = existing.awb;
-      if (existing.courier === 'delhivery') order.courier = 'Delhivery';
-      order.status = 'Dispatched';
-      order.labelGeneratedAt = order.labelGeneratedAt || existing.bookedAt || new Date();
-      await order.save();
-    }
-    return existing;
+  if (existing && existing.courier && existing.courier !== 'delhivery') {
+    const who = existing.courier === 'bluedart' ? 'Blue Dart'
+      : existing.courier === 'shree-maruti' ? 'Shree Maruti'
+        : existing.courier === 'amazon-shipping' ? 'Amazon Shipping'
+          : existing.courier;
+    throw new HttpError(400, `This order already has a booked ${who} AWB ${existing.awb}. Cancel it first.`);
+  }
+
+  /** Put AWB on the order as soon as Delhivery books — packing slip / Shopify must not hide it. */
+  async function stampDelhiveryOrder(ship) {
+    order.awb = ship.awb;
+    order.courier = 'Delhivery';
+    if (!NO_LABEL_STATUS.includes(order.status)) order.status = 'Dispatched';
+    order.labelGeneratedAt = order.labelGeneratedAt || ship.bookedAt || new Date();
+    await order.save();
+  }
+
+  // AWB already booked earlier (label PDF or Shopify fulfill may have failed) — show it and finish.
+  if (existing?.awb) {
+    if (order.awb !== existing.awb || !order.labelGeneratedAt) await stampDelhiveryOrder(existing);
+    // Fully done: do not call Delhivery again. Missing packing slip still retries labelPdf below.
+    if (existing.shopifyFulfillmentId && existing.labelPdf) return existing;
   }
 
   const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
@@ -182,24 +252,28 @@ async function bookShopifyNow(tenantId, orderNo, deps = {}) {
       labelPdf: null,
       bookedAt: new Date(),
     });
+    // Stamp before packing-slip / Shopify so a later failure still shows AWB on the order.
+    await stampDelhiveryOrder(shipment);
   }
   if (!order.labelPaymentMode) order.labelPaymentMode = pay;
   if (!shipment.labelPdf) {
-    shipment.labelPdf = await delhivery.labelPdf(creds, shipment.awb, { request });
-    await shipment.save();
+    try {
+      shipment.labelPdf = await delhivery.labelPdf(creds, shipment.awb, { request });
+      await shipment.save();
+    } catch {
+      /* packing slip is best-effort; AWB stays on the order */
+    }
   }
-  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+  const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: shipment.awb,
     request: deps.shopifyRequest,
   });
-  shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
-  await shipment.save();
-  order.awb = shipment.awb;
-  order.courier = 'Delhivery';
-  order.status = 'Dispatched';
-  order.labelGeneratedAt = new Date();
-  await order.save();
+  if (fulfilled?.fulfillmentId) {
+    shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
+    await shipment.save();
+  }
+  await stampDelhiveryOrder(shipment);
   return shipment;
 }
 
@@ -231,7 +305,7 @@ async function bookOtherCourierNow(tenantId, orderNo, { courier, awb } = {}, dep
   if (reused) throw new HttpError(400, `AWB ${tracking} is already used on order ${reused.orderNo}.`);
   const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
   if (!shopify.hasShopifyAuth(shopCreds)) throw new HttpError(400, 'Shopify shop URL and admin token are missing.');
-  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+  const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: tracking,
     company: account.name,
@@ -357,7 +431,7 @@ async function bookMarutiNow(tenantId, order, account, deps = {}) {
       bookedAt: new Date(),
     });
   }
-  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+  const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: shipment.awb,
     company: account.name,
@@ -420,7 +494,7 @@ async function bookAmazonShippingNow(tenantId, order, account, deps = {}) {
       bookedAt: new Date(),
     });
   }
-  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+  const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: shipment.awb,
     company: account.name,
@@ -481,7 +555,7 @@ async function bookBluedartNow(tenantId, order, account, deps = {}) {
       bookedAt: new Date(),
     });
   }
-  const fulfilled = await shopify.fulfillOrder(shopCreds, {
+  const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: shipment.awb,
     company: account.name,
@@ -501,13 +575,15 @@ async function bookBluedartNow(tenantId, order, account, deps = {}) {
 /** The stored courier label PDF of a Shopify order booked by API; no courier is called. */
 async function courierLabelPdf(tenantId, orderNo) {
   const shipment = await skip(Shipment.findOne({
-    tenantId, orderNo, status: 'booked', courier: { $in: [AMAZON_SHIPPING, BLUE_DART, SHREE_MARUTI] },
+    tenantId, orderNo, status: 'booked',
+    courier: { $in: ['delhivery', AMAZON_SHIPPING, BLUE_DART, SHREE_MARUTI] },
   }));
   if (!shipment) throw new HttpError(404, 'This order has no courier label PDF yet.');
   if (!shipment.labelPdf) {
-    const who = shipment.courier === BLUE_DART ? 'Blue Dart'
-      : shipment.courier === SHREE_MARUTI ? 'Shree Maruti'
-        : 'Amazon Shipping';
+    const who = shipment.courier === 'delhivery' ? 'Delhivery'
+      : shipment.courier === BLUE_DART ? 'Blue Dart'
+        : shipment.courier === SHREE_MARUTI ? 'Shree Maruti'
+          : 'Amazon Shipping';
     throw new HttpError(404, `${who} sent no label PDF for this parcel.`);
   }
   return shipment.labelPdf;

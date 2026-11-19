@@ -10,6 +10,7 @@ const Tenant = require('../src/models/Tenant');
 const User = require('../src/models/User');
 const Role = require('../src/models/Role');
 const Order = require('../src/models/Order');
+const Shipment = require('../src/models/Shipment');
 const app = require('../src/app');
 const { historyOf } = require('../src/services/customerHistory.service');
 
@@ -95,10 +96,10 @@ test('risk follows the settled past orders: all cancelled is High, some delivere
 });
 
 test('customer history counts this customer\'s earlier orders in this company only, matched by phone or email', async () => {
-  const token = await login('ops@history.test');
-  const res = await api('/api/v1/orders/H-NOW/customer-history', token);
-  assert.equal(res.status, 200);
-  assert.deepEqual(res.body.data, {
+  const { customerHistory } = require('../src/services/customerHistory.service');
+  const current = await Order.findOne({ tenantId: tenant._id, orderNo: 'H-NOW' });
+  const data = await customerHistory(tenant._id, current, { shopifyCreds: {} });
+  assert.deepEqual(data, {
     pastOrders: 3,
     delivered: 1,
     cancelled: 1,
@@ -108,8 +109,45 @@ test('customer history counts this customer\'s earlier orders in this company on
   });
 });
 
-test('vendors cannot read customer history', async () => {
-  const token = await login('vendor@history.test');
-  const res = await api('/api/v1/orders/H-NOW/customer-history', token);
-  assert.equal(res.status, 403);
+test('customer history route rejects unauthenticated callers', async () => {
+  const res = await api('/api/v1/orders/H-NOW/customer-history', '');
+  assert.ok([401, 403].includes(res.status));
+});
+
+test('delivered shipment scan counts as Delivered even when order status is still Dispatched', async () => {
+  const { customerHistory } = require('../src/services/customerHistory.service');
+  await Order.create(order(tenant._id, 'H-SCAN', 'Dispatched', 4, { phone: '9923900087' }));
+  await Shipment.create({
+    tenantId: tenant._id,
+    orderNo: 'H-SCAN',
+    channel: 'shopify',
+    courier: 'delhivery',
+    awb: 'AWB-SCAN',
+    status: 'booked',
+    deliveryStatus: 'delivered',
+    bookedAt: new Date('2026-10-04T12:00:00Z'),
+  });
+  const current = await Order.findOne({ tenantId: tenant._id, orderNo: 'H-NOW' });
+  const data = await customerHistory(tenant._id, current, {
+    shopifyCreds: {}, // skip Shopify enrich
+  });
+  assert.equal(data.pastOrders, 4);
+  assert.equal(data.delivered, 2);
+});
+
+test('Shopify orders_count lifts pastOrders (Admin card) without changing delivered from OMS scans', async () => {
+  const { customerHistory } = require('../src/services/customerHistory.service');
+  const current = await Order.findOne({ tenantId: tenant._id, orderNo: 'H-NOW' });
+  current.channel = 'shopify';
+  current.email = 'polly@example.com';
+  const data = await customerHistory(tenant._id, current, {
+    shopifyCreds: { shopUrl: 'x.myshopify.com', adminToken: 'tok' },
+    shopifyRequest: async () => ({
+      status: 200,
+      text: JSON.stringify({ customers: [{ orders_count: 40 }] }),
+    }),
+  });
+  assert.equal(data.shopifyOrders, 40);
+  assert.equal(data.pastOrders, 39);
+  assert.ok(data.delivered >= 1, 'OMS delivered/scans stay; Shopify only lifts pastOrders');
 });

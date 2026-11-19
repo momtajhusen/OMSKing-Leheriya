@@ -388,8 +388,8 @@ export default function SettingsPage() {
             Tenant config — not hard-coded to Leheriya. Amazon and Myntra still only receive WH-001.
           </p>
           {[
-            { id: 'oms', title: 'OMS is master', text: 'Qty is edited here. Shopify, Amazon and Myntra receive the push.' },
-            { id: 'shopify', title: 'Shopify is master', text: 'OMS does not allow sellable edits. Location A (WH-001) updates Shopify Offline, then Amazon and Myntra. OMS only fetches.' },
+            { id: 'oms', title: 'OMS is master', text: 'Qty is edited here. Amazon and Myntra receive the push. Shopify inventory is not overwritten.' },
+            { id: 'shopify', title: 'Shopify is master', text: 'OMS does not allow sellable edits. Location A (WH-001) follows Shopify Offline, then Amazon and Myntra. OMS only fetches.' },
           ].map((opt) => (
             <label key={opt.id} className={`flex cursor-pointer gap-3 rounded-xl border p-4 ${inventoryAuthority === opt.id ? 'border-primary bg-primary/5' : 'border-[hsl(var(--color-border-premium))]'}`}>
               <input type="radio" name="inv-auth" className="mt-1" checked={inventoryAuthority === opt.id} onChange={() => setInventoryAuthority(opt.id)} />

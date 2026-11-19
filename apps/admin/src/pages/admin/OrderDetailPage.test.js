@@ -89,7 +89,7 @@ test('each order item has a Print barcode button in its Barcode cell', () => {
   const table = page.slice(page.indexOf('<CardTitle>Order items</CardTitle>'), page.indexOf('</Table>', page.indexOf('<CardTitle>Order items</CardTitle>')));
   const cell = table.slice(table.indexOf('{item.sku}</TableCell>') + '{item.sku}</TableCell>'.length);
   const barcodeCell = cell.slice(0, cell.indexOf('</TableCell>'));
-  assert.match(barcodeCell, /printBarcodeLabel\(\{ value: item\.barcode \|\| item\.sku, name: item\.name, price: item\.price \}\)/);
+  assert.match(barcodeCell, /printBarcodeLabel\(\{[\s\S]*value: item\.barcode \|\| item\.sku,[\s\S]*price: item\.finalPrice > 0 \? item\.finalPrice : item\.price/);
   assert.match(barcodeCell, /aria-label=\{`Print barcode for \$\{item\.sku\}`\}/);
 });
 
@@ -132,10 +132,13 @@ test('Fulfilment & vendor tracking shows the Shopify vendor in its own column ri
   assert.match(page, /const shopifyVendorOf = \(sub\) => order\.items\.find\(\(item\) => item\.sku === sub\.sku\)\?\.vendor \|\| order\.shopifyVendor \|\| ''/);
 });
 
-test('Generate Invoice asks for an optional customer GSTIN for a B2B sale and sends it with the invoice', () => {
-  assert.match(page, /onClick=\{openInvoice\}/);
-  assert.match(page, /Customer GSTIN \(B2B, optional\)/);
-  assert.match(page, /generateInvoice\(order\.id, \{ customerGstin \}\)/);
+test('Generate Invoice is one click for B2C; Generate B2B Invoice asks for GSTIN only when needed', () => {
+  assert.match(page, /onClick=\{\(\) => runInvoice\(''\)\}/, 'B2C invoice skips the GSTIN modal');
+  assert.match(page, /onClick=\{openB2bInvoice\}/);
+  assert.match(page, />\s*Generate B2B Invoice\s*</);
+  assert.match(page, /Customer GSTIN \(B2B\)/);
+  assert.match(page, /generateInvoice\(order\.id, \{ customerGstin: gstin \}\)/);
+  assert.match(page, /onClick=\{\(\) => runInvoice\(customerGstin\)\}/);
   const store = fs.readFileSync(new URL('../../stores/orderStore.js', import.meta.url), 'utf8');
   assert.match(store, /\{ kind, email, \.\.\.\(customerGstin === undefined \? \{\} : \{ customerGstin \}\) \}/);
 });
@@ -187,6 +190,7 @@ test('Order items shows each line weight and L × B × H with where it comes fro
   assert.equal(PACKAGE_SOURCE.default, 'Default');
   assert.deepEqual(packageForm({ weightKg: 0.5, lengthCm: 30, breadthCm: 25, heightCm: 5, source: 'default' }), { weightKg: '0.5', lengthCm: '30', breadthCm: '25', heightCm: '5' });
   const items = page.slice(page.indexOf('<CardTitle>Order items</CardTitle>'), page.indexOf('Fulfilment & vendor tracking'));
+  assert.match(items, /<TableHead>HSN<\/TableHead>/);
   assert.match(items, /<TableHead>Weight<\/TableHead>/);
   assert.match(items, /<TableHead>Size \(L × B × H\)<\/TableHead>/);
   assert.match(items, /packageWeight\(item\.package\)/);
@@ -202,21 +206,32 @@ test('editors change one line weight and L/B/H from Order items until the label 
   for (const label of ['Weight \\(kg\\)', 'Length \\(cm\\)', 'Breadth \\(cm\\)', 'Height \\(cm\\)']) {
     assert.match(page, new RegExp(label));
   }
-  assert.match(page, /fetchOrder\(masterId\)/, 'an order from the list is fetched once to get the line packages');
+  assert.match(page, /fetchOrder\(orderId\)\.finally/, 'detail page always fetches the full order before paint');
   const store = fs.readFileSync(new URL('../../stores/orderStore.js', import.meta.url), 'utf8');
   assert.match(store, /saveItemPackage: async \(id, index, body\) =>/);
   assert.match(store, /api\.patch\(`\/orders\/\$\{encodeURIComponent\(orderId\)\}\/items\/\$\{index\}\/package`, body\)/);
 });
 
-test('an order missing from the loaded list is fetched by id before showing Order not found', () => {
+test('editors change HSN on an order line before invoice, and the store patches /items/:index/hsn', () => {
+  const items = page.slice(page.indexOf('<CardTitle>Order items</CardTitle>'), page.indexOf('Fulfilment & vendor tracking'));
+  assert.match(items, /openHsn\(item, index\)/);
+  assert.match(items, /can\(PERMISSIONS\.ORDERS_EDIT\) && !order\.invoiceGeneratedAt/);
+  assert.match(page, /saveItemHsn\(order\.id, hsnItem\.index, hsnDraft\)/);
+  assert.match(page, /title=\{`HSN · \$\{hsnItem\?\.sku/);
+  const store = fs.readFileSync(new URL('../../stores/orderStore.js', import.meta.url), 'utf8');
+  assert.match(store, /saveItemHsn: async \(id, index, hsn\) =>/);
+  assert.match(store, /api\.patch\(`\/orders\/\$\{encodeURIComponent\(orderId\)\}\/items\/\$\{index\}\/hsn`, \{ hsn \}\)/);
+});
+
+test('order detail waits for a full fetch before paint so list stubs do not flash', () => {
   const store = fs.readFileSync(new URL('../../stores/orderStore.js', import.meta.url), 'utf8');
   assert.match(store, /fetchOrder: async \(id\) =>/);
   assert.match(store, /api\.get\(`\/orders\/\$\{encodeURIComponent\(id\)\}`\)/);
+  assert.match(store, /preferRicherOrder/, 'list hydrate must not wipe barcode/package from a detail fetch');
   assert.match(page, /const fetchOrder = useOrderStore\(\(s\) => s\.fetchOrder\)/);
-  assert.match(page, /if \(!loaded \|\| order \|\| lookup\.id === orderId\) return;/);
+  assert.match(page, /setDetailReady\(false\)/);
   assert.match(page, /fetchOrder\(orderId\)\.finally/);
-  assert.match(page, /const lookedUp = lookup\.id === orderId && lookup\.done;/);
-  assert.match(page, /if \(!order && \(!loaded \|\| !lookedUp\)\) return <div[^>]*>Loading order…<\/div>;/);
+  assert.match(page, /if \(!detailReady\) return <div[^>]*>Loading order…<\/div>;/);
 });
 
 test('vendor tracking shows assignment message status, offline stock, and takes a tracking ID and delivery date', () => {
@@ -256,5 +271,16 @@ test('Generate Label asks which courier first: Delhivery by default, any enabled
   assert.match(page, /setCourierCode\('delhivery'\)/);
   assert.match(page, /labelRequest\(picked, labelAwb\)/);
   assert.match(page, /generateLabel\(order\.id, undefined, request\.body\)/);
-  assert.match(page, /onClick=\{openLabel\}/);
+  assert.match(page, /onClick=\{\(\) => openLabel\(false\)\}/);
+  assert.match(page, /Generate Label & Invoice/);
+  assert.match(page, /generateLabelInvoice/);
+});
+
+test('Shopify order detail has Sync from Shopify for a single order refresh', () => {
+  assert.match(page, /syncChannelOrder/);
+  assert.match(page, /Sync from Shopify/);
+  assert.match(page, /order\.channel === 'Shopify'/);
+  assert.match(page, /runSyncOrder/);
+  const store = fs.readFileSync(new URL('../../stores/orderStore.js', import.meta.url), 'utf8');
+  assert.match(store, /\/orders\/\$\{encodeURIComponent\(orderId\)\}\/sync/);
 });

@@ -63,11 +63,16 @@ function applyChannelTotal(doc, total) {
   doc.total = to;
 }
 
-async function finishChannelOrder(tenantId, doc, { created, before, orderNo, channelName }) {
+async function finishChannelOrder(tenantId, doc, { created, before, orderNo, channelName, refresh = false }) {
   const { syncOrderReservations } = require('./orderReserve.service');
   await syncOrderReservations(tenantId, doc);
   await doc.save();
-  if (!created) return before === `${doc.status}|${doc.total}` ? 'unchanged' : 'updated';
+  if (!created) {
+    const after = refresh
+      ? `${doc.status}|${doc.total}|${doc.customer}|${doc.phone}|${doc.address}|${doc.city}|${doc.email}|${(doc.items || []).map((i) => `${i.sku}:${i.price}:${i.discount || 0}`).join(',')}`
+      : `${doc.status}|${doc.total}`;
+    return before === after ? 'unchanged' : 'updated';
+  }
   const { notifyEventEmail } = require('./notify.service');
   await notifyEventEmail(tenantId, 'NOT-001', {
     dedupeKey: `order.new:${orderNo}`,
@@ -77,7 +82,7 @@ async function finishChannelOrder(tenantId, doc, { created, before, orderNo, cha
   return 'created';
 }
 
-async function ingestChannelOrders(tenantId, channelId, orders = []) {
+async function ingestChannelOrders(tenantId, channelId, orders = [], opts = {}) {
   const meta = channelById(channelId);
   if (!meta) throw new HttpError(400, 'Unknown channel');
   const out = { fetched: orders.length, created: 0, updated: 0, unchanged: 0 };
@@ -119,7 +124,9 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
     );
     let before = null;
     if (!created) {
-      before = `${doc.status}|${doc.total}`;
+      before = opts.refresh
+        ? `${doc.status}|${doc.total}|${doc.customer}|${doc.phone}|${doc.address}|${doc.city}|${doc.email}|${(doc.items || []).map((i) => `${i.sku}:${i.price}:${i.discount || 0}`).join(',')}`
+        : `${doc.status}|${doc.total}`;
       require('./orderReserve.service').mergeChannelStatus(doc, next.status);
       if (!moneyLocked(doc)) {
         doc.codAmount = next.codAmount;
@@ -127,10 +134,31 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       }
       applyChannelTotal(doc, next.total);
       doc.currency = next.currency;
-      doc.items = next.items;
-      doc.subOrders = next.subOrders;
+      // Keep existing coupon lines if the pull returned selling price without allocations.
+      // Never replace a full items table with an empty pull (cancelled Shopify qty=0 wipe).
+      if ((next.items || []).length) {
+        doc.items = (next.items || []).map((item, index) => {
+          const prev = (doc.items || [])[index];
+          const fromChannel = Number(item.discount) > 0;
+          const discount = fromChannel
+            ? Number(item.discount)
+            : (Number(prev?.discount) || 0);
+          const price = Number(item.price) || 0;
+          // Recalculate Final when we kept the old coupon — incoming finalPrice is full price.
+          const finalPrice = fromChannel && Number(item.finalPrice) > 0
+            ? Number(item.finalPrice)
+            : Math.round(Math.max(0, price - discount) * 100) / 100;
+          return { ...item, discount, finalPrice };
+        });
+        if (next.subOrders) doc.subOrders = next.subOrders;
+      }
       if (next.reserveState !== undefined) doc.reserveState = next.reserveState;
-      doc.paymentMode = next.paymentMode || doc.paymentMode;
+      // Never let an incomplete Shopify pull (empty gateways) demote a known COD to Prepaid.
+      if (next.paymentMode === 'Prepaid' && doc.paymentMode === 'COD') {
+        /* keep COD */
+      } else {
+        doc.paymentMode = next.paymentMode || doc.paymentMode;
+      }
       doc.orderDate = next.orderDate || doc.orderDate;
       doc.source = 'channel_api';
       if (next.channelOrderNo) doc.channelOrderNo = next.channelOrderNo;
@@ -141,12 +169,14 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       }
       const savedPin = /\b\d{6}\b/.test(`${doc.address || ''} ${doc.city || ''}`);
       const incomingPin = /\b\d{6}\b/.test(`${next.address || ''} ${next.city || ''}`);
-      if (!savedPin && incomingPin) {
-        doc.address = next.address;
-        doc.city = next.city;
+      // refresh=true (Single Order Sync): pull customer/address/phone even when a pin already exists.
+      if (opts.refresh ? !doc.awb : (!savedPin && incomingPin)) {
+        if (next.address) doc.address = next.address;
+        if (next.city) doc.city = next.city;
         if (next.shipState) doc.shipState = next.shipState;
         if (next.phone) doc.phone = next.phone;
         if (next.customer) doc.customer = next.customer;
+        if (next.email) doc.email = next.email;
       }
     }
     const outcome = await finishChannelOrder(tenantId, doc, {
@@ -154,6 +184,7 @@ async function ingestChannelOrders(tenantId, channelId, orders = []) {
       before,
       orderNo,
       channelName: meta.name,
+      refresh: Boolean(opts.refresh),
     });
     out[outcome] += 1;
   }

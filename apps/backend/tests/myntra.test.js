@@ -12,7 +12,7 @@ const WebhookEvent = require('../src/models/WebhookEvent');
 const MasterSku = require('../src/models/MasterSku');
 const { createMyntraClient, orderWindows, extractPdf } = require('../src/adapters/myntra/client');
 const { upsertConnection } = require('../src/services/channelConnection.service');
-const { pullMyntraOrders, mapMyntraOrder, orderStatus, parseMyntraDate } = require('../src/services/myntraSync.service');
+const { pullMyntraOrders, mapMyntraOrder, orderStatus, parseMyntraDate, isMyntraHyperlocal } = require('../src/services/myntraSync.service');
 const app = require('../src/app');
 
 let memory;
@@ -242,6 +242,19 @@ test('status mapping and Myntra date parsing', () => {
   assert.equal(orderStatus([{ status: 'S' }, { status: 'C' }]), 'Dispatched');
   assert.equal(orderStatus([{ status: 'C' }]), 'Delivered');
   assert.equal(parseMyntraDate('05-10-2026 10:15:00').toISOString(), '2026-10-05T04:45:00.000Z');
+});
+
+test('Myntra MNOW / SFX_HL tracking is marked Hyperlocal', () => {
+  assert.equal(isMyntraHyperlocal({ awb: 'MYSFXHL1000929078' }), true);
+  assert.equal(isMyntraHyperlocal({ courier: 'SFX_HL' }), true);
+  assert.equal(isMyntraHyperlocal({ awb: 'MYEC123' }), false);
+  const mapped = mapMyntraOrder('HL1', [{
+    ...detail('S-HL', [{ sku: 'LEHKC1918', status_code: 'C', packetId: 'P-HL', invoiceNumber: 'I1' }]),
+    trackingNumber: 'MYSFXHL1000929078',
+    courierCode: 'SFX_HL',
+  }]);
+  assert.equal(mapped.hyperlocal, true);
+  assert.equal(mapped.awb, 'MYSFXHL1000929078');
 });
 
 test('mapper builds an OMS order with items, tax, AWB and channel lines', () => {

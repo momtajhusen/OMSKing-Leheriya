@@ -49,6 +49,18 @@ function normalizeSkuCode(value) {
   return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
+/** Exact normalized code, then without a leading M/A (Myntra/Amazon seller prefix). */
+function channelSkuMatchCodes(value) {
+  const norm = normalizeSkuCode(value);
+  if (!norm) return [];
+  const codes = [norm];
+  if (norm.length > 4 && /^[MA]/.test(norm)) {
+    const stripped = norm.slice(1);
+    if (stripped) codes.push(stripped);
+  }
+  return codes;
+}
+
 function normalizeBarcode(value) {
   return String(value || '').trim();
 }
@@ -67,6 +79,7 @@ function assertHsnCode(value) {
 module.exports = {
   generateMasterCode,
   normalizeSkuCode,
+  channelSkuMatchCodes,
   normalizeBarcode,
   normalizeChannel,
   slugPart,

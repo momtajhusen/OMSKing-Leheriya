@@ -15,10 +15,11 @@ import PageLoader from '../../components/ui/PageLoader';
 import EmptyState from '../../components/ui/EmptyState';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
 import Modal from '../../components/ui/Modal';
-import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, RotateCcw, CheckCircle, Check, X } from 'lucide-react';
+import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, RotateCcw, CheckCircle, Check, X, Printer } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
-import { isChannelManaged, packetIdOf, openMyntraDocument, pullMyntraOrders } from '../../lib/channelOrders';
+import { isChannelManaged, packetIdOf, openMyntraDocument, syncAllChannelOrders } from '../../lib/channelOrders';
+import { isMyntraHyperlocal } from '../../lib/myntraHyperlocal';
 import { channelIssuesInvoice } from '../../lib/channelInvoice';
 import { downloadCsv, istDate } from '../../lib/orderMetrics';
 import { shipWarehouseTag } from '../../lib/channelWarehouse';
@@ -171,6 +172,7 @@ export default function OrdersPage() {
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState({ total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0 });
   const generateInvoice = useOrderStore((s) => s.generateInvoice);
+  const generateLabelInvoice = useOrderStore((s) => s.generateLabelInvoice);
   const markDelivered = useOrderStore((s) => s.markDelivered);
   const bookReversePickup = useOrderStore((s) => s.bookReversePickup);
   const setStatus = useOrderStore((s) => s.setStatus);
@@ -180,6 +182,7 @@ export default function OrdersPage() {
   const [reverseFor, setReverseFor] = useState(null);
   const [reverseReason, setReverseReason] = useState('Customer reverse pickup');
   const [reverseCourier, setReverseCourier] = useState('Delhivery');
+  const [reverseAwb, setReverseAwb] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [searchParams] = useSearchParams();
   const [channelFilter, setChannelFilter] = useState(() => channelFromSearch(searchParams));
@@ -268,14 +271,21 @@ export default function OrdersPage() {
   const syncOrders = async () => {
     setSyncing(true);
     try {
-      if (can(PERMISSIONS.SETTINGS_MANAGE)) {
-        const job = await pullMyntraOrders();
-        if (job.status === 'success') toast.success(job.shortSummary || 'Myntra orders synced');
-        else if (job.status === 'running') toast(job.shortSummary);
-        else toast.error(job.lastError || job.shortSummary || 'Myntra order pull failed');
+      if (!can(PERMISSIONS.SETTINGS_MANAGE)) return;
+      const results = await syncAllChannelOrders();
+      const ok = results.filter((row) => row.status === 'success');
+      const failed = results.filter((row) => row.status === 'failed');
+      const running = results.filter((row) => row.status === 'running');
+      if (ok.length) {
+        toast.success(ok.map((row) => row.shortSummary || `${row.channel} synced`).join(' · ') || 'Orders synced');
       }
+      if (failed.length) {
+        toast.error(failed.map((row) => row.lastError || row.shortSummary || `${row.channel} failed`).join(' · '));
+      }
+      if (running.length) toast(running.map((row) => row.shortSummary || `${row.channel} still running`).join(' · '));
+      if (!ok.length && !failed.length && !running.length) toast('No live channel to sync');
     } catch (err) {
-      if (err?.response?.status !== 400) toast.error(apiError(err, 'Myntra order pull failed'));
+      if (err?.response?.status !== 400) toast.error(apiError(err, 'Order sync failed'));
     } finally {
       await loadOrders(page);
       setSyncing(false);
@@ -549,6 +559,13 @@ export default function OrdersPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">{order.channel}</Badge>
+                      {isMyntraHyperlocal(order) && (
+                        <div className="mt-1">
+                          <Badge className="rounded-sm border-transparent bg-red-600 text-white hover:bg-red-600" title="Myntra MNOW immediate dispatch">
+                            Hyperlocal Order
+                          </Badge>
+                        </div>
+                      )}
                       {shipWarehouseTag(order) && (
                         <div className="mt-1 text-[11px] text-muted-foreground" title={shipWarehouseTag(order).title}>
                           from {shipWarehouseTag(order).code}
@@ -583,7 +600,12 @@ export default function OrdersPage() {
                         <div className="text-xs text-muted-foreground mt-1">Partially paid, handled as COD</div>
                       )}
                     </TableCell>
-                    <TableCell>{formatDate(order.createdAt)}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <div>{formatDate(order.orderDate || order.createdAt)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatDateTime(order.orderDate || order.createdAt).replace(/^.*,\s*/, '')}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       {order.slaDate ? (
                         <span className="whitespace-nowrap font-medium text-red-600" title="Dispatch by this date">{formatDateTime(order.slaDate)}</span>
@@ -595,6 +617,20 @@ export default function OrdersPage() {
                           <Eye className="w-3 h-3 mr-1" />
                           View
                         </Button>
+                        {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !isChannelManaged(order) && order.channel !== 'Amazon' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              const next = await generateLabelInvoice(order.id, order.awb ? {} : { courier: 'delhivery' });
+                              if (next?.error) toast.error(next.error);
+                              else toast.success('Label + Invoice (4×6) opened');
+                            }}
+                          >
+                            <Printer className="w-3 h-3 mr-1" />
+                            Label+Inv
+                          </Button>
+                        )}
                         {can(PERMISSIONS.FINANCE_VIEW) && !channelIssuesInvoice(order) && (
                           <Button
                             variant="ghost"
@@ -767,13 +803,22 @@ export default function OrdersPage() {
             <Button variant="outline" onClick={() => setReverseFor(null)}>Cancel</Button>
             <Button
               onClick={async () => {
-                const next = await bookReversePickup(reverseFor.id, { reason: reverseReason, courier: reverseCourier });
+                if (!String(reverseAwb || '').trim()) {
+                  toast.error('Enter the reverse AWB from BlueDart / courier so tracking shows on Returns');
+                  return;
+                }
+                const next = await bookReversePickup(reverseFor.id, {
+                  reason: reverseReason,
+                  courier: reverseCourier,
+                  awb: reverseAwb,
+                });
                 if (next?.error) {
                   toast.error(next.error);
                   return;
                 }
                 toast.success(`Reverse pickup ${next?.reversePickup?.returnId || ''} is in Returns. Generate the reverse label there if you need another copy.`);
                 setReverseFor(null);
+                setReverseAwb('');
               }}
             >
               Generate reverse label
@@ -798,6 +843,16 @@ export default function OrdersPage() {
               <option>Xpressbees</option>
               <option>Ecom Express</option>
             </Select>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Reverse AWB</label>
+            <input
+              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-mono"
+              value={reverseAwb}
+              onChange={(e) => setReverseAwb(e.target.value)}
+              placeholder="AWB from the BlueDart / courier booking"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">Required. This is what Returns shows as reverse tracking.</p>
           </div>
         </div>
       </Modal>

@@ -197,9 +197,85 @@ test('Shree Maruti cancel and tracking call the official gateway endpoints', asy
 test('Shree Maruti tracking codes map to OMSKing scan statuses', () => {
   assert.equal(maruti.mapScanStatus('Picked Up'), 'picked_up');
   assert.equal(maruti.mapScanStatus('Out for Delivery'), 'out_for_delivery');
+  assert.equal(maruti.mapScanStatus('OUT_FOR_DELIVERY'), 'out_for_delivery');
   assert.equal(maruti.mapScanStatus('Delivered'), 'delivered');
+  assert.equal(maruti.mapScanStatus('DELIVERED'), 'delivered');
+  assert.equal(maruti.mapScanStatus('IN_TRANSIT'), 'in_transit');
+  assert.equal(maruti.mapScanStatus('PICKED_UP'), 'picked_up');
   assert.equal(maruti.mapScanStatus('RTO Initiated'), 'rto');
   assert.equal(maruti.mapScanStatus('Unknown'), '');
+});
+
+test('Shree Maruti track reads top-level statuses beside orderInformation (live Innofulfill shape)', async () => {
+  const calls = [];
+  const request = async (method, url) => {
+    calls.push({ method, url });
+    assert.match(url, /\/gateway\/tracking-v2\/api\/tracking\/awb\/PRDO0000000002$/);
+    return {
+      status: 200,
+      text: JSON.stringify({
+        orderInformation: {
+          trackingId: 'PRDO0000000002',
+          currentShipmentPhase: 'delivered',
+        },
+        statuses: [
+          { status: 'PICKED_UP', event: 'picked_up', statusTimestamp: 1, createdAt: 't1' },
+          { status: 'IN_TRANSIT', event: 'inscanned_at_transit', statusTimestamp: 2, createdAt: 't2' },
+          { status: 'OUT_FOR_DELIVERY', event: 'out_for_delivery', statusTimestamp: 3, createdAt: 't3' },
+          { status: 'DELIVERED', event: 'delivered', category: 'DELIVERED', statusTimestamp: 4, createdAt: 't4' },
+        ],
+      }),
+    };
+  };
+  const tracked = await maruti.track(creds, 'PRDO0000000002', { request });
+  assert.equal(tracked.status, 'delivered');
+  assert.deepEqual(tracked.events.map((row) => row.status), [
+    'picked_up', 'in_transit', 'out_for_delivery', 'delivered',
+  ]);
+  assert.equal(calls.length, 1);
+});
+
+test('Shree Maruti pickup replaces WH-001 Fashion Street placeholder with company legal address', async () => {
+  const tenant = await Tenant.create({
+    name: 'Leheriya Co',
+    slug: `sm-legal-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    kind: 'merchant',
+    legalEntity: {
+      legalName: 'PRDOSCO GLOBAL PRIVATE LIMITED',
+      address: 'BASEMENT, PLOT NO. 24, SECTOR 12-A ROAD, SECTOR 12, DWARKA',
+      city: 'NEW DELHI',
+      district: 'NEW DELHI - 110078',
+      phone: '+91 98730 03388',
+    },
+  });
+  await CourierAccount.create({
+    tenantId: tenant._id, source: 'own', code: 'shree-maruti', name: 'Shree Maruti', status: 'active',
+    credentialsEnc: encryptObject(creds),
+  });
+  await Warehouse.create({
+    tenantId: tenant._id, code: 'WH-001', name: 'Physical / Offline', type: 'physical', isPickup: true, status: 'active',
+    contactPhone: '+919876543210',
+    address: { line1: '123 Fashion Street', city: 'Delhi', state: 'Delhi', pincode: '110078' },
+  });
+  await Order.create({
+    tenantId: tenant._id, orderNo: 'SHP-SM-LEGAL', channel: 'Shopify', status: 'New', source: 'manual',
+    customer: 'Asha', address: '12 MG Road 302001', city: 'Jaipur 302001', phone: '9111111111',
+    paymentMode: 'Prepaid', total: 1299, externalOrderId: '9109',
+    items: [{ sku: 'K1', name: 'Kurta', qty: 1, price: 1299, pack: { weightKg: 0.5, lengthCm: 30, breadthCm: 25, heightCm: 4 } }],
+  });
+  const mock = marutiMock();
+  const shopify = shopifyMock();
+  await bookOtherCourier(tenant._id, 'SHP-SM-LEGAL', { courier: 'shree-maruti' }, {
+    marutiCreds: creds,
+    marutiRequest: mock.request,
+    shopifyCreds: shopCreds,
+    shopifyRequest: shopify.request,
+  });
+  const create = mock.calls.find((call) => call.url.endsWith('/gateway/booking-service/orders'));
+  const pickup = (create.body.addresses || []).find((row) => row.type === 'PICKUP');
+  assert.match(String(pickup.street || pickup.addressName || ''), /PLOT NO\. 24|DWARKA/i);
+  assert.doesNotMatch(String(pickup.street || ''), /Fashion Street/i);
+  assert.match(String(pickup.name || ''), /PRDOSCO/i);
 });
 
 test('booking a Shopify order on Shree Maruti needs no typed AWB, stores the label and fulfils Shopify', async () => {
@@ -230,7 +306,7 @@ test('booking a Shopify order on Shree Maruti needs no typed AWB, stores the lab
   assert.equal(readiness.couriers.find((row) => row.code === 'shree-maruti')?.api, true);
 });
 
-test('a failed Shopify fulfil after Shree Maruti booked resumes without creating a second AWB', async () => {
+test('a failed Shopify fulfil after Shree Maruti booked still returns the label and resumes without a second AWB', async () => {
   const tenant = await seller();
   await CourierAccount.create({
     tenantId: tenant._id, source: 'own', code: 'shree-maruti', name: 'Shree Maruti', status: 'active',
@@ -250,9 +326,11 @@ test('a failed Shopify fulfil after Shree Maruti booked resumes without creating
     if (url.endsWith('/fulfillments.json')) return { status: 200, text: JSON.stringify({ fulfillment: { id: 99 } }) };
     throw new Error(`unexpected Shopify call ${url}`);
   };
-  await assert.rejects(() => bookOtherCourier(tenant._id, 'SHP-SM-RETRY', { courier: 'shree-maruti' }, {
+  const first = await bookOtherCourier(tenant._id, 'SHP-SM-RETRY', { courier: 'shree-maruti' }, {
     marutiCreds: creds, marutiRequest: mock.request, shopifyCreds: shopCreds, shopifyRequest,
-  }), /Shopify down/);
+  });
+  assert.equal(first.awb, 'SM123456789');
+  assert.equal(first.shopifyFulfillmentId || '', '');
   assert.equal(mock.calls.filter((call) => call.url.endsWith('/gateway/booking-service/orders')).length, 1);
   const shipment = await bookOtherCourier(tenant._id, 'SHP-SM-RETRY', { courier: 'shree-maruti' }, {
     marutiCreds: creds, marutiRequest: mock.request, shopifyCreds: shopCreds, shopifyRequest,

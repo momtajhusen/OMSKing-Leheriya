@@ -12,7 +12,7 @@ const { imagesBySku, imageForSku, paintOrder } = require('../lib/catalogImages')
 const { applyDeskRules, stockPools, OPEN } = require('../services/orderDesk.service');
 const { buildOrderSummary, customRange, dayKey } = require('../services/orderSummary.service');
 const { SHIPPING_TABS, ON_THE_WAY, shippingTab } = require('../lib/orderTabs');
-const { vendorContact, labelHtml, invoiceHtml, deliveryStatusFor, escapeHtml } = require('../lib/orderSubOrders');
+const { vendorContact, labelHtml, labelInvoiceHtml, invoiceHtml, deliveryStatusFor, escapeHtml } = require('../lib/orderSubOrders');
 const { vendorByName, scopedVendorNames } = require('./vendors.controller');
 const { recordFromReq } = require('../services/auditLog.service');
 const { customerHistory } = require('../services/customerHistory.service');
@@ -21,6 +21,50 @@ const { codCollectAmount, isPaid } = require('../utils/payment');
 function nextProcessing(status) {
   if (status === 'New' || status === 'Pending') return 'Processing';
   return status;
+}
+
+/** Seed leftover "123 Fashion Street" must never print as Ship From / return address. */
+function isSeedPickupAddress(line1) {
+  return /123\s*fashion\s*street/i.test(String(line1 || '').trim());
+}
+
+async function packingSlipWarehouse(tenantId, warehouseCode) {
+  const Warehouse = require('../models/Warehouse');
+  const Tenant = require('../models/Tenant');
+  const [wh, tenant] = await Promise.all([
+    Warehouse.findOne({ tenantId, code: warehouseCode || 'WH-001', status: 'active' })
+      .setOptions({ skipTenantFilter: true }).lean(),
+    Tenant.findById(tenantId).select('name slug legalEntity').setOptions({ skipTenantFilter: true }).lean(),
+  ]);
+  const legal = tenant?.legalEntity || {};
+  let line1 = String(wh?.address?.line1 || '').trim();
+  let city = String(wh?.address?.city || '').trim();
+  let state = String(wh?.address?.state || '').trim();
+  let pincode = String(wh?.address?.pincode || '').trim();
+  let phone = String(wh?.contactPhone || '').trim();
+  let name = String(wh?.name || '').trim();
+  if (!line1 || isSeedPickupAddress(line1)) {
+    line1 = String(legal.address || '').trim() || line1;
+    const district = String(legal.district || '');
+    const pinMatch = `${district} ${legal.city || ''}`.match(/\b(\d{6})\b/);
+    city = String(legal.city || '').replace(/\s*-\s*\d{6}.*$/, '').trim() || city;
+    state = state || 'Delhi';
+    pincode = pincode || (pinMatch ? pinMatch[1] : '');
+    phone = phone || String(legal.phone || '').replace(/\s+/g, '');
+    name = name || String(legal.legalName || tenant?.name || '').trim();
+  }
+  return {
+    brandName: /leheriya/i.test(String(tenant?.slug || tenant?.name || '')) ? 'Leheriya' : (tenant?.name || 'OMSKing'),
+    tenantName: tenant?.name || '',
+    gstin: legal.gstin || '',
+    companyGstin: legal.gstin || '',
+    warehouseName: name || legal.legalName || '',
+    warehouseLine1: line1,
+    warehouseCity: city,
+    warehouseState: state,
+    warehousePincode: pincode,
+    warehousePhone: phone || legal.phone || '',
+  };
 }
 
 /** Vendor users only see orders (and sub-orders) assigned to their vendors. */
@@ -274,15 +318,28 @@ async function withBarcodes(tenantId, dto) {
     .select('code barcode sellingPrice').lean().setOptions({ skipTenantFilter: true });
   const byId = new Map(masters.map((m) => [String(m._id), m]));
   const byCode = new Map(masters.map((m) => [m.code, m]));
+  const orderTotal = Number(dto.total) || 0;
+  const onlyOne = items.length === 1;
   dto.items = items.map((item) => {
     const master = byId.get(String(item.masterSkuId || '')) || byCode.get(String(item.sku || '').trim().toUpperCase());
     const sellingPrice = Number(master?.sellingPrice) || 0;
+    const price = Number(item.price) > 0 ? Number(item.price) : sellingPrice;
+    const qty = Math.max(1, Number(item.qty) || 1);
+    let discount = Math.max(0, Number(item.discount) || 0);
+    // Older Shopify pulls stored selling price only — derive coupon from order total when possible.
+    if (!discount && onlyOne && orderTotal > 0 && price * qty > orderTotal + 0.009) {
+      discount = Math.round(((price * qty - orderTotal) / qty) * 100) / 100;
+    }
+    const finalPrice = Number(item.finalPrice) > 0
+      ? Number(item.finalPrice)
+      : Math.round((Math.max(0, price - discount)) * 100) / 100;
     return {
       ...item,
       barcode: master?.barcode || '',
       sellingPrice: sellingPrice || undefined,
-      // Labels and the Price column show catalogue selling price, not coupon-net.
-      price: sellingPrice > 0 ? sellingPrice : item.price,
+      price,
+      discount,
+      finalPrice,
     };
   });
   return dto;
@@ -328,6 +385,23 @@ async function getCustomerHistory(req, res) {
   return successResponse(res, await customerHistory(tenantId, order), 'Customer history');
 }
 
+/** Single Order Sync: re-pull this Shopify order from Admin API into OMS. */
+async function syncChannelOrder(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  const { syncShopifyOrder } = require('../services/orderSync.service');
+  const { order: fresh, result } = await syncShopifyOrder(tenantId, order.orderNo);
+  const dto = await decorateOne(tenantId, fresh);
+  const summary = result.updated
+    ? 'Shopify order updated in OMS.'
+    : result.unchanged
+      ? 'Shopify order already matches OMS.'
+      : 'Shopify order synced.';
+  return successResponse(res, dto, summary);
+}
+
 async function generateLabel(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
@@ -349,20 +423,56 @@ async function generateLabel(req, res) {
   else await bookOtherCourier(tenantId, order.orderNo, { courier, awb: req.body?.awb });
   const fresh = await findMaster(tenantId, order.orderNo);
   const dto = await decorateOne(tenantId, fresh);
-  let labelPdfBase64 = null;
-  if (courier === 'amazon-shipping' || courier === 'bluedart' || courier === 'shree-maruti') {
-    try {
-      const pdf = await courierLabelPdf(tenantId, fresh.orderNo);
-      labelPdfBase64 = Buffer.isBuffer(pdf) ? pdf.toString('base64') : null;
-    } catch {
-      labelPdfBase64 = null;
-    }
+  // Still fetch/store courier PDFs for reprint APIs, but Generate Label always prints the OMS packing slip.
+  if (courier === 'delhivery' || courier === 'amazon-shipping' || courier === 'bluedart' || courier === 'shree-maruti') {
+    try { await courierLabelPdf(tenantId, fresh.orderNo); } catch { /* optional */ }
+  }
+  let labelOrder = { ...dto };
+  try {
+    labelOrder = { ...dto, ...(await packingSlipWarehouse(tenantId, fresh.warehouseCode || 'WH-001')) };
+  } catch {
+    /* brand / warehouse enrich is best-effort for the packing slip */
   }
   return successResponse(res, {
     ...dto,
-    labelHtml: labelHtml(dto, subOrderId),
-    ...(labelPdfBase64 ? { labelPdfBase64 } : {}),
+    labelHtml: labelHtml(labelOrder, subOrderId),
   }, 'Label generated');
+}
+
+/** Book (if needed) then print Shipway-style Label + Invoice on two 4×6 pages. */
+async function generateLabelInvoice(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (order.channel === 'Myntra' || order.channel === 'Amazon') {
+    throw new HttpError(400, `${order.channel} labels/invoices come from the marketplace. Use their documents.`);
+  }
+  const subOrderId = req.body?.subOrderId || req.query.subOrderId;
+  const { bookShopify, bookOtherCourier } = require('../services/ship.service');
+  if (!String(order.awb || '').trim()) {
+    const courier = String(req.body?.courier || 'delhivery');
+    if (courier === 'delhivery') await bookShopify(tenantId, order.orderNo);
+    else await bookOtherCourier(tenantId, order.orderNo, { courier, awb: req.body?.awb });
+  }
+  const fresh = await findMaster(tenantId, order.orderNo);
+  if (!fresh.invoiceGeneratedAt) {
+    try {
+      const { invoiceNumber } = require('../services/finance.service');
+      fresh.invoiceGeneratedAt = new Date();
+      fresh.invoiceNo = fresh.invoiceNo || invoiceNumber(fresh);
+      await fresh.save();
+    } catch { /* invoice number is best-effort for the packing slip */ }
+  }
+  const dto = await decorateOne(tenantId, fresh);
+  let labelOrder = { ...dto };
+  try {
+    labelOrder = { ...dto, ...(await packingSlipWarehouse(tenantId, fresh.warehouseCode || 'WH-001')) };
+  } catch { /* enrich best-effort */ }
+  return successResponse(res, {
+    ...dto,
+    labelHtml: labelInvoiceHtml(labelOrder, subOrderId),
+  }, 'Label + Invoice ready (4×6)');
 }
 
 async function cancelLabel(req, res) {
@@ -415,22 +525,27 @@ async function markPaid(req, res) {
   return successResponse(res, await decorateOne(tenantId, order), 'Payment marked. This order is paid.');
 }
 
-/** Fills missing GST rate / HSN from the Master SKU or product; returns the SKUs that still have no GST rate. */
+/** Fills missing GST rate / HSN from the Master SKU, product, or Tax settings default HSN. */
 async function fillLineTax(tenantId, order) {
   const { resolveLineRate } = require('../services/finance.service');
   const open = (order.items || []).filter((item) => !(Number(item.gst) > 0) || !item.hsn);
   if (!open.length) return [];
   const MasterSku = require('../models/MasterSku');
   const Product = require('../models/Product');
+  const Tenant = require('../models/Tenant');
   const ids = open.map((item) => item.masterSkuId).filter(Boolean);
   const codes = open.map((item) => String(item.sku || '').trim().toUpperCase()).filter(Boolean);
-  const masters = await MasterSku.find({ tenantId, $or: [{ _id: { $in: ids } }, { code: { $in: codes } }] })
-    .select('code hsnCode gstRatePercent productId').setOptions({ skipTenantFilter: true }).lean();
+  const [masters, tenant] = await Promise.all([
+    MasterSku.find({ tenantId, $or: [{ _id: { $in: ids } }, { code: { $in: codes } }] })
+      .select('code hsnCode gstRatePercent productId').setOptions({ skipTenantFilter: true }).lean(),
+    Tenant.findById(tenantId).select('settings.taxGst').setOptions({ skipTenantFilter: true }).lean(),
+  ]);
   const productIds = masters.map((row) => row.productId).filter(Boolean);
   const products = productIds.length
     ? await Product.find({ tenantId, _id: { $in: productIds } }).select('hsnCode gstRatePercent').setOptions({ skipTenantFilter: true }).lean()
     : [];
   const productOf = new Map(products.map((row) => [String(row._id), row]));
+  const defaultHsn = String(tenant?.settings?.taxGst?.defaultHsn || '').trim();
   const missing = [];
   open.forEach((item) => {
     const master = masters.find((row) => String(row._id) === String(item.masterSkuId || ''))
@@ -439,7 +554,9 @@ async function fillLineTax(tenantId, order) {
     const rate = resolveLineRate(item, master, product);
     if (rate === null) missing.push(item.sku || item.name || 'item');
     else item.gst = rate;
-    if (master && !item.hsn) item.hsn = master.hsnCode || product.hsnCode || '';
+    if (!item.hsn) {
+      item.hsn = (master && (master.hsnCode || product.hsnCode)) || defaultHsn || '';
+    }
   });
   return missing;
 }
@@ -832,6 +949,57 @@ async function updateItemPackage(req, res) {
   return successResponse(res, await withPackages(tenantId, await decorateOne(tenantId, order)), 'Weight and size saved');
 }
 
+/** Set HSN on this order line, Master SKU / product, and push to Shopify when mapped. */
+async function updateItemHsn(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (order.invoiceGeneratedAt) {
+    throw new HttpError(400, 'Invoice is already generated. HSN on this order is locked.');
+  }
+  const index = Number(req.params.index);
+  const item = Number.isInteger(index) ? order.items[index] : null;
+  if (!item) throw new HttpError(404, 'Order item not found');
+  const { assertHsnCode } = require('../services/skuIdentity.service');
+  const hsn = assertHsnCode(req.body?.hsn ?? req.body?.hsnCode);
+  const before = item.hsn || '';
+  item.hsn = hsn;
+  order.markModified('items');
+  await order.save();
+
+  let shopify = { pushed: 0, failed: [] };
+  if (item.masterSkuId) {
+    const MasterSku = require('../models/MasterSku');
+    const Product = require('../models/Product');
+    const sku = await MasterSku.findOne({ _id: item.masterSkuId, tenantId }).setOptions({ skipTenantFilter: true });
+    if (sku) {
+      sku.hsnCode = hsn;
+      await sku.save();
+      if (sku.productId) {
+        await Product.updateOne({ _id: sku.productId, tenantId }, { hsnCode: hsn }).setOptions({ skipTenantFilter: true });
+      }
+      const { pushMasterSkuHsnToShopify } = require('../services/shopifyHsn.service');
+      shopify = await pushMasterSkuHsnToShopify(tenantId, sku._id, hsn);
+    }
+  }
+
+  await recordFromReq(req, {
+    tenantId,
+    action: 'order.item_hsn_updated',
+    resourceType: 'orders',
+    resourceId: order._id,
+    resourceDisplay: order.orderNo,
+    before: { item: index, sku: item.sku, hsn: before },
+    after: { item: index, sku: item.sku, hsn, shopify },
+  });
+  const dto = await decorateOne(tenantId, order);
+  const note = shopify.pushed
+    ? `HSN saved. Shopify updated on ${shopify.pushed} variant${shopify.pushed === 1 ? '' : 's'}.`
+    : (shopify.failed?.length ? `HSN saved on OMS. Shopify: ${shopify.failed[0].reason}` : 'HSN saved');
+  return successResponse(res, dto, note);
+}
+
 async function mapItemSku(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
@@ -864,6 +1032,10 @@ async function bookReverse(req, res) {
   const reason = String(req.body.reason || 'Customer reverse pickup').trim();
   const returnId = order.reversePickup?.returnId || `RET-REV-${String(order.orderNo).replace(/-LEH$/i, '')}`;
   const awb = String(req.body.awb || order.reversePickup?.awb || '').trim();
+  if (!courier) throw new HttpError(400, 'Pick the reverse courier (e.g. Bluedart).');
+  if (!awb) {
+    throw new HttpError(400, 'Enter the reverse AWB from the courier booking. Without it, tracking cannot show on Returns.');
+  }
   order.reversePickup = {
     returnId,
     awb,
@@ -872,11 +1044,94 @@ async function bookReverse(req, res) {
     bookedAt: order.reversePickup?.bookedAt || new Date(),
   };
   await order.save();
+  await recordFromReq(req, {
+    tenantId,
+    action: 'order.reverse_booked',
+    resourceType: 'orders',
+    resourceId: order._id,
+    resourceDisplay: order.orderNo,
+    before: null,
+    after: { returnId, awb, courier, reason },
+  });
   const dto = await decorateOne(tenantId, order);
   return successResponse(res, {
     ...dto,
     reverseLabelHtml: reversePickupHtml(dto),
   }, 'Reverse pickup booked');
+}
+
+/** Update reverse courier / AWB so tracking can be filled after booking. */
+async function patchReverse(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (!order.reversePickup?.returnId) {
+    throw new HttpError(400, 'No reverse pickup on this order');
+  }
+  const before = {
+    returnId: order.reversePickup.returnId,
+    awb: order.reversePickup.awb || '',
+    courier: order.reversePickup.courier || '',
+  };
+  if (req.body.courier != null) order.reversePickup.courier = String(req.body.courier || '').trim();
+  if (req.body.awb != null) order.reversePickup.awb = String(req.body.awb || '').trim();
+  if (req.body.reason != null) order.reversePickup.reason = String(req.body.reason || '').trim();
+  if (!order.reversePickup.courier) throw new HttpError(400, 'Pick the reverse courier.');
+  if (!order.reversePickup.awb) {
+    throw new HttpError(400, 'Enter the reverse AWB so tracking shows on Returns.');
+  }
+  order.markModified('reversePickup');
+  await order.save();
+  await recordFromReq(req, {
+    tenantId,
+    action: 'order.reverse_updated',
+    resourceType: 'orders',
+    resourceId: order._id,
+    resourceDisplay: order.orderNo,
+    before,
+    after: {
+      returnId: order.reversePickup.returnId,
+      awb: order.reversePickup.awb,
+      courier: order.reversePickup.courier,
+    },
+  });
+  return successResponse(res, await decorateOne(tenantId, order), 'Reverse tracking saved');
+}
+
+/** Drop a reverse pickup that has not been marked received yet. */
+async function cancelReverse(req, res) {
+  staffOnly(req);
+  const tenantId = merchantTenant(req);
+  const order = await findMaster(tenantId, req.params.orderId);
+  if (!order) throw new HttpError(404, 'Order not found');
+  if (!order.reversePickup?.returnId) {
+    throw new HttpError(400, 'No reverse pickup on this order');
+  }
+  const before = {
+    returnId: order.reversePickup.returnId,
+    awb: order.reversePickup.awb || '',
+    courier: order.reversePickup.courier || '',
+  };
+  order.reversePickup = {
+    returnId: '',
+    awb: '',
+    courier: '',
+    reason: '',
+    bookedAt: undefined,
+  };
+  order.markModified('reversePickup');
+  await order.save();
+  await recordFromReq(req, {
+    tenantId,
+    action: 'order.reverse_cancelled',
+    resourceType: 'orders',
+    resourceId: order._id,
+    resourceDisplay: order.orderNo,
+    before,
+    after: null,
+  });
+  return successResponse(res, await decorateOne(tenantId, order), 'Reverse pickup cancelled');
 }
 
 function reversePickupHtml(order) {
@@ -1077,5 +1332,5 @@ async function amazonLabel(req, res) {
 }
 
 module.exports = {
-  listOrders, orderSummary, getOrder, getCustomerHistory, generateLabel, cancelLabel, generateInvoice, markPaid, assignSubOrder, lineCost, saveLineCost, vendorUpdate, patchStatus, editOrderDetails, updateNotes, updateItemPackage, mapItemSku, bookReverse, bookBulkLabels, bookAmazonLabels, amazonLabel, shipOrder, closeManifest, courierManifests, shippingReadiness, courierRates, handOver, handoverManifests, handoverManifest,
+  listOrders, orderSummary, getOrder, getCustomerHistory, syncChannelOrder, generateLabel, generateLabelInvoice, cancelLabel, generateInvoice, markPaid, assignSubOrder, lineCost, saveLineCost, vendorUpdate, patchStatus, editOrderDetails, updateNotes, updateItemPackage, updateItemHsn, mapItemSku, bookReverse, patchReverse, cancelReverse, bookBulkLabels, bookAmazonLabels, amazonLabel, shipOrder, closeManifest, courierManifests, shippingReadiness, courierRates, handOver, handoverManifests, handoverManifest,
 };

@@ -88,7 +88,7 @@ async function seedSeller() {
   return { tenant, physical, virtual, sku };
 }
 
-test('OMS qty pushes Location A 4, Location B 1000, Amazon 4, Myntra 4, then reserve drops only WH-001', async () => {
+test('OMS qty pushes Amazon and Myntra only — Shopify inventory is not overwritten', async () => {
   const { tenant, sku } = await seedSeller();
   const before = await channelQty(tenant._id, sku._id);
   assert.deepEqual(before.shopify.map((row) => row.available).sort((a, b) => a - b), [4, 1000]);
@@ -99,7 +99,8 @@ test('OMS qty pushes Location A 4, Location B 1000, Amazon 4, Myntra 4, then res
   const amz = amazonMock();
   const myntraItems = [];
   const jobs = await IntegrationJob.find({ tenantId: tenant._id, jobType: 'inventory_push', status: 'queued' });
-  assert.equal(jobs.length, 3);
+  assert.equal(jobs.length, 2, 'Shopify must not get an OMS inventory push');
+  assert.deepEqual(jobs.map((job) => job.channel).sort(), ['amazon', 'myntra']);
   for (const job of jobs) {
     await runInventoryJob(job, {
       shopifyRequest: shopify.request,
@@ -107,9 +108,8 @@ test('OMS qty pushes Location A 4, Location B 1000, Amazon 4, Myntra 4, then res
       myntraClient: { updateInventory: async (items) => { myntraItems.push(...items); return []; } },
     });
   }
-  const sets = shopify.calls.filter((call) => call.url.includes('/inventory_levels/set')).map((call) => call.body);
-  assert.deepEqual(sets.map((body) => body.available).sort((a, b) => a - b), [4, 1000]);
-  assert.deepEqual(sets.map((body) => body.location_id).sort((a, b) => a - b), [111, 222]);
+  const sets = shopify.calls.filter((call) => call.url.includes('/inventory_levels/set'));
+  assert.equal(sets.length, 0, 'OMS must not call Shopify inventory_levels/set');
   const patch = amz.calls.find((call) => call.method === 'PATCH');
   assert.equal(patch.body.patches[0].value[0].quantity, 4);
   assert.match(patch.url, /sellingpartnerapi-eu\.amazon\.com/);
@@ -139,7 +139,7 @@ test('OMS qty pushes Location A 4, Location B 1000, Amazon 4, Myntra 4, then res
       myntraClient: { updateInventory: async (items) => { myntra2.push(...items); return []; } },
     });
   }
-  assert.deepEqual(shopify2.calls.filter((call) => call.url.includes('/set')).map((call) => call.body.available).sort((a, b) => a - b), [3, 1000]);
+  assert.equal(shopify2.calls.filter((call) => call.url.includes('/set')).length, 0);
   assert.equal(amz2.calls.find((call) => call.method === 'PATCH').body.patches[0].value[0].quantity, 3);
   assert.deepEqual(myntra2, [{ sku: 'KURTA-RED-L', quantity: 3 }]);
   assert.equal(await Inventory.countDocuments({ tenantId: tenant._id, reservedQty: { $gt: 0 } }), 1);

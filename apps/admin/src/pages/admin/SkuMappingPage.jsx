@@ -34,6 +34,7 @@ export default function SkuMappingPage() {
   const [total, setTotal] = useState(0);
   const [masterPage, setMasterPage] = useState(1);
   const [masterTotal, setMasterTotal] = useState(0);
+  const [linking, setLinking] = useState(false);
 
   const loadTab = async (tab, nextPage = page) => {
     if (tab === 'unlisted') {
@@ -129,6 +130,19 @@ export default function SkuMappingPage() {
     }
   };
 
+  const mapMatching = async () => {
+    setLinking(true);
+    try {
+      const { data } = await api.post('/sku-mappings/auto-link-suggested');
+      toast.success(data.message || `Linked ${data.data?.linked || 0}`);
+      load(activeTab, page);
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setLinking(false);
+    }
+  };
+
   const tabs = [
     { id: 'mapped', label: 'Mapped', count: counts.mapped },
     { id: 'unmapped', label: 'Unmapped', count: counts.unmapped },
@@ -158,6 +172,7 @@ export default function SkuMappingPage() {
               <p className="font-medium">Mapping engine</p>
               <p className="text-sm text-muted-foreground">
                 Import Shopify first (creates Master SKUs), then Myntra, then Amazon. No match → Unmapped.
+                If the Master SKU already exists with the same code, use Map matching SKUs (or re-pull) to link them.
                 Type an existing code or Create as new. Failed rows keep the listing; Retry restores a mapped error or re-runs auto-map.
               </p>
             </div>
@@ -215,6 +230,11 @@ export default function SkuMappingPage() {
           </div>
         )}
         <Button size="sm" variant="outline" onClick={() => { setPage(1); load(activeTab, 1); }}>Apply</Button>
+        {activeTab === 'unmapped' && canCatalogEdit && (
+          <Button size="sm" disabled={linking || !(counts.unmapped > 0)} onClick={mapMatching}>
+            {linking ? 'Linking…' : 'Map matching SKUs'}
+          </Button>
+        )}
       </div>
 
       <Card>
@@ -286,10 +306,10 @@ export default function SkuMappingPage() {
                         <div className="flex flex-wrap gap-2">
                           <input
                             className="h-8 w-36 rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-2 text-sm text-foreground placeholder:text-muted-foreground"
-                            list="master-codes"
                             placeholder="Master SKU code"
                             value={mappingInput[row.id] ?? row.suggestedMasterSku ?? ''}
                             onChange={(e) => setMappingInput((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                            autoComplete="off"
                           />
                           <Button variant="outline" size="sm" disabled={!(mappingInput[row.id] ?? row.suggestedMasterSku)} onClick={() => mapExisting(row.id, row.suggestedMasterSku)}>Map</Button>
                           <Button variant="outline" size="sm" onClick={() => createNew(row.id)}>Create as new</Button>
@@ -307,12 +327,6 @@ export default function SkuMappingPage() {
           <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
         </CardContent>
       </Card>
-
-      <datalist id="master-codes">
-        {masters.map((sku) => (
-          <option key={sku.id} value={sku.code}>{sku.barcode ? `${sku.name} · ${sku.barcode}` : sku.name}</option>
-        ))}
-      </datalist>
 
       <Card>
         <CardHeader>

@@ -110,12 +110,18 @@ async function enqueueManual(tenantId, userId, body) {
     });
     return toJobDto(job);
   }
+  const payload = {};
+  // Manual Sync: short lookback so Shopify is not rate-limited by a 30-day page crawl.
+  if (jobType === 'orders_pull' && channel === 'shopify') {
+    payload.from = new Date(Date.now() - 3 * 864e5).toISOString();
+  }
   const job = await enqueue({
     tenantId,
     channel,
     jobType,
     triggeredBy: 'manual',
     triggeredByUserId: userId,
+    payload,
   });
   return toJobDto(job);
 }
@@ -281,7 +287,7 @@ async function pullLiveOrders(job) {
     const shopify = require('../adapters/shopify');
     const { ingestChannelOrders } = require('./channelOrder.service');
     const creds = await require('./shopifyAuth.service').shopifyCreds(job.tenantId);
-    const orders = await shopify.pullOrders(creds);
+    const orders = await shopify.pullOrders(creds, { from: job.payload?.from });
     const done = new Set((job.payload?.appliedExternalIds || []).map((id) => String(id)));
     const res = { fetched: orders.length, created: 0, updated: 0, unchanged: 0 };
     for (const order of orders) {

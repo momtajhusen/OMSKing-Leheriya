@@ -6,6 +6,7 @@ const { firstImage } = require('../lib/catalogImages');
 const {
   generateMasterCode,
   normalizeSkuCode,
+  channelSkuMatchCodes,
   normalizeBarcode,
   normalizeChannel,
 } = require('./skuIdentity.service');
@@ -161,18 +162,18 @@ async function rememberBarcode(master, barcode) {
 }
 
 async function findAutoMaster(tenantId, { channelSkuCode, barcode }) {
-  const codeNorm = normalizeSkuCode(channelSkuCode);
-  if (codeNorm) {
+  const codes = channelSkuMatchCodes(channelSkuCode);
+  if (codes.length) {
     const hit = await SkuMapping.findOne({
       tenantId,
-      channelSkuCodeNorm: codeNorm,
+      channelSkuCodeNorm: { $in: codes },
       masterSkuId: { $ne: null },
       isActive: true,
     }).setOptions({ skipTenantFilter: true });
     if (hit?.masterSkuId) {
       return MasterSku.findById(hit.masterSkuId).setOptions({ skipTenantFilter: true });
     }
-    const byCode = await MasterSku.findOne({ tenantId, code: codeNorm, status: 'active' }).setOptions({ skipTenantFilter: true });
+    const byCode = await MasterSku.findOne({ tenantId, code: { $in: codes }, status: 'active' }).setOptions({ skipTenantFilter: true });
     if (byCode) return byCode;
   }
   const bar = normalizeBarcode(barcode);
@@ -221,9 +222,9 @@ async function ingestListing(tenantId, userId, row, options = {}) {
     if (row.channelProductId) existing.channelProductId = String(row.channelProductId);
     if (row.price != null && row.price !== '') existing.channelSellingPrice = Number(row.price);
     if (row.barcode) existing.barcode = normalizeBarcode(row.barcode);
+    if (!existing.channelSkuCodeNorm) existing.channelSkuCodeNorm = channelSkuCodeNorm;
     const photo = firstImage([row.image || row.imageUrl]);
     if (photo) existing.imageUrl = photo;
-    await existing.save();
     let master = null;
     if (existing.masterSkuId) {
       master = await MasterSku.findById(existing.masterSkuId).setOptions({ skipTenantFilter: true });
@@ -232,9 +233,33 @@ async function ingestListing(tenantId, userId, row, options = {}) {
         const product = await Product.findOne({ _id: master.productId, tenantId }).setOptions({ skipTenantFilter: true });
         await rememberShopifyFields(product, listingExtras(row));
       }
+      await existing.save();
       await linkOpenOrders(tenantId, existing);
+      return { action: 'exists', mapping: existing, master };
     }
-    return { action: 'exists', mapping: existing, master };
+    // Listing arrived before Master SKU existed (or was unmapped by hand) —
+    // rematch on every re-pull so same-code Amazon rows do not stay Unmapped.
+    const auto = await findAutoMaster(tenantId, {
+      channelSkuCode: existing.channelSkuCode || channelSkuCode,
+      barcode: existing.barcode || row.barcode,
+    });
+    if (auto) {
+      existing.masterSkuId = auto._id;
+      existing.syncStatus = 'synced';
+      existing.lastSyncedAt = new Date();
+      existing.lastSyncError = '';
+      existing.updatedBy = userId;
+      await existing.save();
+      if (!auto.codeLocked) {
+        auto.codeLocked = true;
+        await auto.save();
+      }
+      await rememberBarcode(auto, row.barcode);
+      await linkOpenOrders(tenantId, existing);
+      return { action: 'auto-mapped', mapping: existing, master: auto };
+    }
+    await existing.save();
+    return { action: 'exists', mapping: existing, master: null };
   }
 
   const auto = await findAutoMaster(tenantId, { channelSkuCode, barcode: row.barcode });
@@ -287,9 +312,10 @@ async function findOrCreateProduct(tenantId, userId, mapping, extras = {}) {
       }
     }
   }
+  // Never reuse a Product by title alone — many Banarasi / dupatta listings share
+  // the same title, and that stuck one photo (often the wrong one) on every SKU.
+  // Sibling Shopify variants still share via channelProductId above.
   const name = extras.name || mapping.channelTitle || mapping.channelSkuCode;
-  const existing = await Product.findOne({ tenantId, name }).setOptions({ skipTenantFilter: true });
-  if (existing) return rememberImage(await refresh(existing), extras.image);
   const image = firstImage([extras.image]);
   return Product.create({
     tenantId,
@@ -542,11 +568,31 @@ async function retryFailedMapping(tenantId, userId, mapping) {
   return { action: 'unmapped', mapping };
 }
 
+async function autoLinkSuggestedUnmapped(tenantId, userId) {
+  const rows = await SkuMapping.find({
+    tenantId,
+    syncStatus: 'unmapped',
+    masterSkuId: null,
+    isActive: { $ne: false },
+  }).setOptions({ skipTenantFilter: true });
+  if (!rows.length) return { scanned: 0, linked: 0 };
+  const why = await explainUnmapped(tenantId, rows);
+  let linked = 0;
+  for (const row of rows) {
+    const hit = why.get(String(row._id));
+    const code = hit?.suggestedMasterSku;
+    if (!code) continue;
+    await attachMappingToCode(tenantId, userId, row, code);
+    linked += 1;
+  }
+  return { scanned: rows.length, linked };
+}
+
 async function explainUnmapped(tenantId, rows) {
   const out = new Map();
   const list = rows.filter((row) => row.syncStatus === 'unmapped' && !row.masterSkuId);
   if (!list.length) return out;
-  const norms = [...new Set(list.map((row) => row.channelSkuCodeNorm || normalizeSkuCode(row.channelSkuCode)).filter(Boolean))];
+  const norms = [...new Set(list.flatMap((row) => channelSkuMatchCodes(row.channelSkuCodeNorm || row.channelSkuCode)))];
   const bars = [...new Set(list.map((row) => normalizeBarcode(row.barcode)).filter(Boolean))];
   const [siblings, byCode, byBar] = await Promise.all([
     SkuMapping.find({ tenantId, channelSkuCodeNorm: { $in: norms }, masterSkuId: { $ne: null }, isActive: true })
@@ -572,16 +618,20 @@ async function explainUnmapped(tenantId, rows) {
   const masterByBar = new Map(byBar.map((row) => [row.barcode, row.code]));
 
   list.forEach((row) => {
-    const norm = row.channelSkuCodeNorm || normalizeSkuCode(row.channelSkuCode);
+    const codes = channelSkuMatchCodes(row.channelSkuCodeNorm || row.channelSkuCode);
+    const norm = codes[0] || normalizeSkuCode(row.channelSkuCode);
     const bar = normalizeBarcode(row.barcode);
-    const sameCode = masterByCode.get(norm);
+    const sameCode = codes.map((c) => masterByCode.get(c)).find(Boolean);
+    const siblingCode = codes.map((c) => siblingByNorm.get(c)).find(Boolean);
     let reason;
     let suggestedMasterSku = null;
     if (sameCode && sameCode.status === 'active') {
       suggestedMasterSku = sameCode.code;
-      reason = `Master SKU ${sameCode.code} has the same code but is not linked to this listing. Press Map to link it.`;
-    } else if (siblingByNorm.has(norm)) {
-      suggestedMasterSku = siblingByNorm.get(norm);
+      reason = sameCode.code === norm
+        ? `Master SKU ${sameCode.code} has the same code but is not linked to this listing. Press Map to link it.`
+        : `Master SKU ${sameCode.code} matches after dropping the channel prefix on ${norm}. Press Map to link it.`;
+    } else if (siblingCode) {
+      suggestedMasterSku = siblingCode;
       reason = `Another listing with SKU ${row.channelSkuCode} is mapped to Master SKU ${suggestedMasterSku}. Press Map to link this one too.`;
     } else if (bar && masterByBar.has(bar)) {
       suggestedMasterSku = masterByBar.get(bar);
@@ -611,6 +661,7 @@ module.exports = {
   unmapListing,
   retryFailedMapping,
   explainUnmapped,
+  autoLinkSuggestedUnmapped,
   parseCsv,
   importChannel,
 };

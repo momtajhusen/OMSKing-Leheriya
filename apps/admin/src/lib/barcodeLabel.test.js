@@ -27,11 +27,12 @@ test('the barcode label is a one-page PDF of 51 mm by 25 mm', () => {
   assert.ok(pdf.trimEnd().endsWith('%%EOF'));
   assert.match(pdf, /\/MediaBox \[0 0 144\.57 70\.87\]/);
   assert.equal((pdf.match(/\/Type \/Page\b/g) || []).length, 1);
-  assert.match(pdf, /\(SKU-001\) Tj/);
-  assert.match(pdf, /\(Silk \\\(Red\\\) Saree\) Tj/);
-  assert.match(pdf, /\(Rs\. 2799\/-\) Tj/);
+  assert.match(pdf, /\(SKU-001\) Tj/, 'barcode number on line 4');
+  assert.match(pdf, /\(Silk \\\(Red\\\) Saree\) Tj/, 'name on line 1');
+  assert.match(pdf, /\(SKU-001 \/ Rs\. 2799\/-\) Tj/, 'SKU/Price on line 2 under the name');
   const bars = (pdf.match(/ re$/gm) || []).length;
   assert.equal(bars, code128Modules('SKU-001').filter((_, i) => i % 2 === 0).length);
+  assert.match(pdf, / 16 .* 22 re/, 'barcode bars are shorter than before');
   const startxref = Number(pdf.match(/startxref\n(\d+)/)[1]);
   assert.equal(pdf.slice(startxref, startxref + 4), 'xref');
   const offsets = [...pdf.matchAll(/(\d{10}) 00000 n \n/g)].map((m) => Number(m[1]));

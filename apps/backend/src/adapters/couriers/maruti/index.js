@@ -325,16 +325,16 @@ async function cancel(creds, { awb, shipmentId } = {}, opts = {}) {
 }
 
 const SCAN_STATUS = [
-  [/rto|return to origin|returned/i, 'rto'],
+  [/rto|return[_\s-]?to[_\s-]?origin|returned/i, 'rto'],
   [/undeliver|consignee|refused|not available|ndr|delivery attempt/i, 'ndr'],
-  [/out for delivery/i, 'out_for_delivery'],
+  [/out[_\s-]?for[_\s-]?delivery/i, 'out_for_delivery'],
   [/delivered/i, 'delivered'],
-  [/transit|arrived|departed|hub|in scan|reached|processing/i, 'in_transit'],
-  [/picked|pickup|manifest|confirmed/i, 'picked_up'],
+  [/transit|arrived|departed|hub|in scan|reached|processing|ready[_\s-]?for[_\s-]?dispatch/i, 'in_transit'],
+  [/picked|pickup|manifest|confirmed|order[_\s-]?created/i, 'picked_up'],
 ];
 
 function mapScanStatus(text) {
-  const value = String(text || '');
+  const value = String(text || '').replace(/_/g, ' ');
   for (const [re, status] of SCAN_STATUS) {
     if (re.test(value)) return status;
   }
@@ -347,19 +347,30 @@ async function track(creds, awb, opts = {}) {
   if (!tracking) throw refuse('Shree Maruti tracking needs an AWB.');
   const call = await session(creds, opts);
   const { json } = await call('tracking', 'GET', `/gateway/tracking-v2/api/tracking/awb/${encodeURIComponent(tracking)}`);
-  const data = json.data || json.result || json.orderInformation || json;
-  const scans = data.statuses || data.scans || data.history || data.tracking_history || data.events
-    || data.trackingHistory || data.partnerTracking || [];
+  // Live Innofulfill returns { orderInformation, statuses } at the top level — do not dig into
+  // orderInformation first or the statuses array is missed and every poll stays empty.
+  const data = json.data || json.result || json;
+  const info = data.orderInformation || json.orderInformation || {};
+  const scans = data.statuses || json.statuses || info.statuses || data.scans || data.history
+    || data.tracking_history || data.events || data.trackingHistory || data.partnerTracking
+    || info.partnerTracking || [];
   const list = Array.isArray(scans) ? scans : [];
   const events = list.map((row) => {
-    const detail = String(row.status || row.statusName || row.scan || row.Scan || row.message || row.remark || row.event || '');
-    const status = mapScanStatus(detail || row.status_code || row.code);
+    const detail = String(
+      row.status || row.category || row.statusName || row.scan || row.Scan
+      || row.message || row.remark || row.event || row.subcategory || '',
+    );
+    const status = mapScanStatus(detail || row.status_code || row.code || row.provider_status);
     if (!status) return null;
-    const when = row.time || row.datetime || row.date || row.timestamp || row.ScanDateTime || status;
+    const when = row.statusTimestamp || row.time || row.datetime || row.date || row.timestamp
+      || row.createdAt || row.ScanDateTime || status;
     return { status, detail, eventKey: `${tracking}:${when}:${status}` };
   }).filter(Boolean);
   if (!events.length) {
-    const detail = String(data.status || data.current_status || data.shipment_status || data.currentStatus || data.orderStatus || '');
+    const detail = String(
+      info.currentShipmentPhase || data.currentShipmentPhase
+      || data.status || data.current_status || data.shipment_status || data.currentStatus || data.orderStatus || '',
+    );
     const status = mapScanStatus(detail);
     if (status) events.push({ status, detail, eventKey: `${tracking}:${status}:current` });
   }

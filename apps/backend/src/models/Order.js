@@ -6,6 +6,8 @@ const itemSchema = new mongoose.Schema({
   sku: { type: String, default: '' },
   qty: { type: Number, default: 1 },
   price: { type: Number, default: 0 },
+  discount: { type: Number, default: 0 },
+  finalPrice: { type: Number, default: 0 },
   priceFromMrp: { type: Boolean, default: false },
   cost: { type: Number },
   hsn: { type: String, default: '' },
@@ -87,6 +89,8 @@ const orderSchema = new mongoose.Schema({
   },
   courier: { type: String, default: '' },
   awb: { type: String, default: '' },
+  /** Myntra MNOW / SFX_HL immediate dispatch */
+  hyperlocal: { type: Boolean, default: false },
   invoiceNo: { type: String, default: '' },
   labelGeneratedAt: { type: Date },
   handoverAt: { type: Date, default: null },

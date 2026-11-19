@@ -1,0 +1,27 @@
+---
+description: Use Leheriya test order 70046-LEH for OMS label/order smoke tests
+alwaysApply: true
+---
+
+# Leheriya test order (client)
+
+When testing OMS order/label/sync/payment behaviour for Leheriya (live or local against their data), use this order only — do not pick random live orders.
+
+| Field | Value |
+|---|---|
+| Channel order | `70046-LEH` |
+| OMS ref | `SHP-19115831230557` |
+| Customer | Kavita Singh |
+| Phone | +919873384751 |
+| Channel | Shopify |
+| Purpose | Client test order for Generate Label / Cancel Label / Sync / payment mode |
+
+## Rules
+
+1. Prefer this order for Delhivery / BlueDart / Maruti / Amazon Shipping label checks.
+2. Never book a live courier AWB unless the user explicitly asks to test on this order; prefer mocks in automated tests.
+3. If AWB exists on `shipments` but `orders.awb` is empty, treat it as a stamp bug — fix code, then repair this order.
+4. After a stuck label test, leave the order usable again (Cancel Label or clear booked shipment + status `New`) so the next test can run.
+5. Do not use other live customer orders for experimental label clicks.
+6. Payment is **COD** (Shopify draft + Due on receipt). Never leave it Prepaid.
+7. Before finishing any fix on this order, verify page fields are real (customer, address, SKU, price, barcode, paymentMode, AWB) — not empty items / dummy warehouse text.

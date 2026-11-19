@@ -71,6 +71,42 @@ test('inventory list reads the master SKU catalogue once, so large catalogues st
   assert.deepEqual(pending.channels, ['shopify']);
 });
 
+test('inventory rows use each Master SKU listing photo, not one shared Product image', async () => {
+  const stamp = Date.now();
+  const tenant = await Tenant.create({ name: 'Variant photos', slug: `inv-photos-${stamp}`, kind: 'merchant' });
+  const product = await Product.create({
+    tenantId: tenant._id,
+    name: 'Banarasi Bandhej Gharchola Jangla Dupatta',
+    images: ['https://img.test/wrong-bag.jpg'],
+  });
+  const dupattaA = await MasterSku.create({
+    tenantId: tenant._id, productId: product._id, code: `LEHKCPC309-${stamp}`, name: 'Dupatta A',
+  });
+  const dupattaB = await MasterSku.create({
+    tenantId: tenant._id, productId: product._id, code: `LEHKCPC313-${stamp}`, name: 'Dupatta B',
+  });
+  await SkuMapping.create({
+    tenantId: tenant._id, masterSkuId: dupattaA._id, channel: 'shopify',
+    channelVariantId: `va-${stamp}`, channelSkuCode: 'LEHKCPC309', channelSkuCodeNorm: 'lehkcpc309',
+    imageUrl: 'https://cdn.shopify.com/s/files/dupatta-a.jpg', syncStatus: 'synced',
+  });
+  await SkuMapping.create({
+    tenantId: tenant._id, masterSkuId: dupattaB._id, channel: 'shopify',
+    channelVariantId: `vb-${stamp}`, channelSkuCode: 'LEHKCPC313', channelSkuCodeNorm: 'lehkcpc313',
+    imageUrl: 'https://cdn.shopify.com/s/files/dupatta-b.jpg', syncStatus: 'synced',
+  });
+
+  const { attachImages } = require('../src/services/inventory.service');
+  const rows = [
+    { masterSkuId: String(dupattaA._id), sku: dupattaA.code, imageUrl: '' },
+    { masterSkuId: String(dupattaB._id), sku: dupattaB.code, imageUrl: '' },
+  ];
+  await attachImages(String(tenant._id), rows);
+  assert.equal(rows[0].imageUrl, 'https://cdn.shopify.com/s/files/dupatta-a.jpg');
+  assert.equal(rows[1].imageUrl, 'https://cdn.shopify.com/s/files/dupatta-b.jpg');
+  assert.notEqual(rows[0].imageUrl, 'https://img.test/wrong-bag.jpg');
+});
+
 test('each stock row shows the Shopify SKU mapped to its Master SKU, scoped to the tenant', async () => {
   const stamp = Date.now();
   const tenant = await Tenant.create({ name: 'Shopify SKU', slug: `shopify-sku-${stamp}`, kind: 'merchant' });

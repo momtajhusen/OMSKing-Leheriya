@@ -209,7 +209,7 @@ function authorityStep(authority) {
     impact: 'Switching the source after stock is loaded makes the next sync overwrite WH-001.',
     detail: shopify
       ? 'Shopify is master. Location A writes WH-001. Sellable edits in OMS stay closed.'
-      : 'OMS is master. Stock you enter is pushed to Shopify, Amazon, and Myntra.',
+      : 'OMS is master. Stock you enter is pushed to Amazon and Myntra. Shopify inventory is not overwritten.',
     clicks: [
       'Sidebar → Settings, then the Inventory source tab.',
       'Choose OMS is master, or Shopify is master.',

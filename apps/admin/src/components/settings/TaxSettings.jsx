@@ -28,6 +28,7 @@ export default function TaxSettings() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [defaultGstRate, setDefaultGstRate] = useState('18');
+  const [defaultHsn, setDefaultHsn] = useState('');
   const [categories, setCategories] = useState([]);
   const [hsnCount, setHsnCount] = useState(0);
   const [hsnPreview, setHsnPreview] = useState([]);
@@ -39,6 +40,7 @@ export default function TaxSettings() {
       .then(({ data }) => {
         const tax = data.data || {};
         setDefaultGstRate(String(tax.defaultGstRate ?? 18));
+        setDefaultHsn(String(tax.defaultHsn || ''));
         setCategories(tax.categories || []);
         setHsnCount(tax.hsnCount || 0);
         setHsnPreview(tax.hsnMaster || []);
@@ -52,10 +54,12 @@ export default function TaxSettings() {
     try {
       const { data } = await api.patch('/settings/tax', {
         defaultGstRate: Number(defaultGstRate),
+        defaultHsn,
         categories: categories.map((row) => ({ name: row.name, gstRate: Number(row.gstRate) })),
       });
       const tax = data.data || {};
       setDefaultGstRate(String(tax.defaultGstRate ?? defaultGstRate));
+      setDefaultHsn(String(tax.defaultHsn ?? defaultHsn));
       setCategories(tax.categories || []);
       toast.success('Tax settings saved');
     } catch (err) {
@@ -144,6 +148,23 @@ export default function TaxSettings() {
           className="premium-input max-w-xs"
         />
         <p className="text-xs text-muted-foreground">Used when a product has no category rate. India default is 18%.</p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-foreground" htmlFor="default-hsn">Default HSN Code</label>
+        <input
+          id="default-hsn"
+          type="text"
+          inputMode="numeric"
+          maxLength={8}
+          value={defaultHsn}
+          onChange={(e) => setDefaultHsn(e.target.value.replace(/\D/g, '').slice(0, 8))}
+          placeholder="e.g. 6109"
+          className="premium-input max-w-xs font-mono"
+        />
+        <p className="text-xs text-muted-foreground">
+          Used on invoice lines when a product or Master SKU has no HSN. You can still edit HSN on the product, Master SKU, or order line.
+        </p>
       </div>
 
       <div className="pt-6 border-t border-[hsl(var(--color-border-premium))]">

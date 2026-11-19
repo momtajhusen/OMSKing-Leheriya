@@ -11,11 +11,13 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import Input from '../../components/ui/Input';
-import { RotateCcw, Package, CheckCircle, XCircle, RefreshCw, AlertTriangle } from 'lucide-react';
+import Select from '../../components/ui/Select';
+import { RotateCcw, Package, CheckCircle, XCircle, RefreshCw, AlertTriangle, ExternalLink } from 'lucide-react';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
 import { orderChannelLabel } from '../../constants/channelCatalog';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import Pagination, { useClientPage } from '../../components/ui/Pagination';
+import { reverseTrackUrl } from '../../lib/reverseTrack';
 
 export default function ReturnsPage() {
   const connected = useConnectedChannels();
@@ -44,6 +46,11 @@ export default function ReturnsPage() {
   const loadReturns = useReturnsStore((s) => s.loadReturns);
   const orders = useOrderStore((s) => s.orders);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
+  const cancelReversePickup = useOrderStore((s) => s.cancelReversePickup);
+  const saveReverseTracking = useOrderStore((s) => s.saveReverseTracking);
+  const [trackEdit, setTrackEdit] = useState(null);
+  const [trackCourier, setTrackCourier] = useState('Bluedart');
+  const [trackAwb, setTrackAwb] = useState('');
 
   useEffect(() => {
     hydrateFromApi();
@@ -253,6 +260,7 @@ export default function ReturnsPage() {
                 <TableHead>Requested</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Courier · AWB</TableHead>
                 <TableHead>Restock Destination</TableHead>
                 <TableHead>QC · Refund · Claim</TableHead>
                 <TableHead>Actions</TableHead>
@@ -261,7 +269,7 @@ export default function ReturnsPage() {
             <TableBody>
               {filteredReturns.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={12} className="py-10 text-center text-muted-foreground">
                     No returns yet. A return shows here when a reverse pickup is booked on an order or a channel sends a return.
                   </TableCell>
                 </TableRow>
@@ -284,6 +292,36 @@ export default function ReturnsPage() {
                       <Badge variant={statusBadgeVariant(ret.status)}>
                         {ret.status}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">
+                      <div className="font-medium">{ret.courier || '—'}</div>
+                      <div className="font-mono text-xs text-muted-foreground">
+                        {ret.awb || (ret.type === 'reverse_pickup' ? 'AWB pending' : '—')}
+                      </div>
+                      {ret.type === 'reverse_pickup' && ret.awb && reverseTrackUrl(ret.courier, ret.awb) && (
+                        <a
+                          href={reverseTrackUrl(ret.courier, ret.awb)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-flex items-center gap-1 text-xs text-primary underline"
+                        >
+                          Track <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                      {ret.type === 'reverse_pickup' && !ret.awb && ret.status !== 'Completed' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="mt-1 h-auto px-0 text-xs"
+                          onClick={() => {
+                            setTrackEdit(ret);
+                            setTrackCourier(ret.courier || 'Bluedart');
+                            setTrackAwb('');
+                          }}
+                        >
+                          Add AWB
+                        </Button>
+                      )}
                     </TableCell>
                     <TableCell>
                       {ret.status === 'Pending' ? (
@@ -346,7 +384,6 @@ export default function ReturnsPage() {
                       )}
                       {ret.status === 'Approved' && (
                         <div className="flex flex-col gap-2">
-                          <Badge variant="outline">{ret.type === 'reverse_pickup' ? 'Reverse pickup' : 'QC / inbound'}</Badge>
                           <Button
                             size="sm"
                             variant="outline"
@@ -370,6 +407,24 @@ export default function ReturnsPage() {
                             <Package className="w-4 h-4 mr-1" />
                             Mark received
                           </Button>
+                          {ret.type === 'reverse_pickup' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive"
+                              onClick={async () => {
+                                const next = await cancelReversePickup(ret.orderId);
+                                if (next?.error) {
+                                  toast.error(next.error);
+                                  return;
+                                }
+                                toast.success('Reverse pickup cancelled');
+                              }}
+                            >
+                              <XCircle className="w-4 h-4 mr-1" />
+                              Cancel reverse
+                            </Button>
+                          )}
                         </div>
                       )}
                       {ret.status === 'Completed' && (
@@ -421,6 +476,54 @@ export default function ReturnsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Modal
+        open={Boolean(trackEdit)}
+        onOpenChange={(open) => { if (!open) setTrackEdit(null); }}
+        title={`Reverse tracking · ${trackEdit?.id || ''}`}
+        description="Paste the BlueDart / courier reverse AWB. Returns uses this for Track."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setTrackEdit(null)}>Cancel</Button>
+            <Button
+              onClick={async () => {
+                if (!String(trackAwb || '').trim()) {
+                  toast.error('Enter the reverse AWB');
+                  return;
+                }
+                const next = await saveReverseTracking(trackEdit.orderId, {
+                  courier: trackCourier,
+                  awb: trackAwb,
+                });
+                if (next?.error) {
+                  toast.error(next.error);
+                  return;
+                }
+                toast.success(next.message || 'Reverse tracking saved');
+                setTrackEdit(null);
+              }}
+            >
+              Save tracking
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm font-medium">Courier</label>
+            <Select value={trackCourier} onChange={(e) => setTrackCourier(e.target.value)}>
+              <option>Delhivery</option>
+              <option>Bluedart</option>
+              <option>Xpressbees</option>
+              <option>Ecom Express</option>
+            </Select>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Reverse AWB</label>
+            <Input className="font-mono" value={trackAwb} onChange={(e) => setTrackAwb(e.target.value)} placeholder="BlueDart reverse AWB" autoFocus />
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={Boolean(receiveFor)}

@@ -3,8 +3,11 @@ const MasterSku = require('../models/MasterSku');
 const Product = require('../models/Product');
 const { HttpError } = require('../utils/httpError');
 
+const { assertHsnCode } = require('./skuIdentity.service');
+
 const DEFAULT_TAX = {
   defaultGstRate: 18,
+  defaultHsn: '',
   categories: [
     { name: 'Apparel (up to ₹2500 per piece)', gstRate: 5 },
     { name: 'Apparel (above ₹2500 per piece)', gstRate: 18 },
@@ -37,6 +40,7 @@ function view(tenant) {
   }));
   return {
     defaultGstRate: tax && tax.defaultGstRate != null ? Number(tax.defaultGstRate) : DEFAULT_TAX.defaultGstRate,
+    defaultHsn: tax?.defaultHsn != null ? String(tax.defaultHsn) : DEFAULT_TAX.defaultHsn,
     categories: categories.length ? categories : DEFAULT_TAX.categories.map((row) => ({ ...row })),
     hsnCount: hsnMaster.length,
     hsnMaster,
@@ -47,6 +51,7 @@ function view(tenant) {
 function publicView(snapshot) {
   return {
     defaultGstRate: snapshot.defaultGstRate,
+    defaultHsn: snapshot.defaultHsn || '',
     categories: snapshot.categories,
     hsnCount: snapshot.hsnCount,
     hsnMaster: snapshot.hsnMaster,
@@ -57,6 +62,7 @@ function publicView(snapshot) {
 function auditView(snapshot) {
   return {
     defaultGstRate: snapshot.defaultGstRate,
+    defaultHsn: snapshot.defaultHsn || '',
     categories: snapshot.categories,
     hsnCount: snapshot.hsnCount,
   };
@@ -107,6 +113,9 @@ async function saveTax(tenantId, body) {
   tenant.settings = tenant.settings || {};
   tenant.settings.taxGst = tenant.settings.taxGst || {};
   tenant.settings.taxGst.defaultGstRate = rateOrThrow(body.defaultGstRate, 'Default GST rate');
+  if (body.defaultHsn !== undefined) {
+    tenant.settings.taxGst.defaultHsn = assertHsnCode(body.defaultHsn);
+  }
   tenant.settings.taxGst.categories = cleanCategories(body.categories);
   tenant.settings.taxGst.configured = true;
   if (!Array.isArray(tenant.settings.taxGst.hsnMaster)) tenant.settings.taxGst.hsnMaster = [];
@@ -125,6 +134,7 @@ async function uploadHsn(tenantId, rows) {
   tenant.settings.taxGst = {
     configured: true,
     defaultGstRate: current.defaultGstRate,
+    defaultHsn: current.defaultHsn || '',
     categories: current.categories,
     hsnMaster: cleaned.map(({ hsn, description, gstRate }) => ({ hsn, description, gstRate })),
   };
@@ -148,6 +158,10 @@ async function uploadHsn(tenantId, rows) {
       if (row.gstRate != null) patch.gstRatePercent = row.gstRate;
       await Product.updateOne({ _id: sku.productId, tenantId }, patch).setOptions({ skipTenantFilter: true });
     }
+    try {
+      const { pushMasterSkuHsnToShopify } = require('./shopifyHsn.service');
+      await pushMasterSkuHsnToShopify(tenantId, sku._id, row.hsn);
+    } catch (_) { /* Shopify soft-fail; OMS HSN already saved */ }
     applied.push(row.sku);
   }
 
@@ -176,6 +190,7 @@ async function changeHsnRow(tenantId, hsn, change) {
   tenant.settings.taxGst = {
     configured: true,
     defaultGstRate: current.defaultGstRate,
+    defaultHsn: current.defaultHsn || '',
     categories: current.categories,
     hsnMaster: rows,
   };

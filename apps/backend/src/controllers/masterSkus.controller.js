@@ -125,7 +125,8 @@ async function updateMasterSku(req, res) {
   ['name', 'barcode', 'status'].forEach((key) => {
     if (req.body[key] != null) sku[key] = req.body[key];
   });
-  if (req.body.hsnCode != null) sku.hsnCode = assertHsnCode(req.body.hsnCode);
+  const hsnChanged = req.body.hsnCode != null;
+  if (hsnChanged) sku.hsnCode = assertHsnCode(req.body.hsnCode);
   ['costPrice', 'mrp', 'sellingPrice', 'gstRatePercent'].forEach((key) => {
     if (req.body[key] != null) sku[key] = req.body[key];
   });
@@ -133,6 +134,15 @@ async function updateMasterSku(req, res) {
   if (req.body.variantAttributes) sku.variantAttributes = req.body.variantAttributes;
   sku.updatedBy = req.user.id;
   await sku.save();
+  if (hsnChanged && sku.productId) {
+    const Product = require('../models/Product');
+    await Product.updateOne({ _id: sku.productId, tenantId }, { hsnCode: sku.hsnCode }).setOptions({ skipTenantFilter: true });
+  }
+  let shopify = null;
+  if (hsnChanged) {
+    const { pushMasterSkuHsnToShopify } = require('../services/shopifyHsn.service');
+    shopify = await pushMasterSkuHsnToShopify(tenantId, sku._id, sku.hsnCode);
+  }
   await recordFromReq(req, {
     tenantId,
     action: 'sku.updated',
@@ -140,10 +150,13 @@ async function updateMasterSku(req, res) {
     resourceId: sku._id,
     resourceDisplay: sku.code,
     before,
-    after: skuSnap(sku),
+    after: { ...skuSnap(sku), shopify },
   });
   const maps = await SkuMapping.find({ tenantId, masterSkuId: sku._id }).setOptions({ skipTenantFilter: true });
-  return successResponse(res, mapMaster(sku, maps), 'Master SKU updated');
+  const note = shopify?.pushed
+    ? `Master SKU updated. Shopify HSN on ${shopify.pushed} variant${shopify.pushed === 1 ? '' : 's'}.`
+    : 'Master SKU updated';
+  return successResponse(res, mapMaster(sku, maps), note);
 }
 
 async function getMasterSku(req, res) {

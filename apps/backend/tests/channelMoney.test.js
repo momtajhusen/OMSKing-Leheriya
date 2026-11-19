@@ -171,7 +171,9 @@ test('Shopify line price is the selling price; coupons are ignored; taxes added 
   assert.equal(excl.shippingCharge, 94.4);
   assert.equal(excl.currency, 'INR');
   const incl = mapShopifyOrder(shopifyOrder({ taxes_included: true }), {});
-  assert.equal(incl.items[0].price, 500, 'coupon discount_allocations are not subtracted');
+  assert.equal(incl.items[0].price, 500, 'coupon discount_allocations are not subtracted from price');
+  assert.equal(incl.items[0].discount, 50, 'discount is 100 allocated / qty 2');
+  assert.equal(incl.items[0].finalPrice, 450);
   assert.equal(incl.shippingCharge, 80);
   const odd = mapShopifyOrder(shopifyOrder({
     taxes_included: true,
@@ -190,12 +192,99 @@ test('Shopify total uses current_total_price (after edits/refunds) when present'
   assert.equal(mapShopifyOrder(shopifyOrder(), {}).total, 1048.4);
 });
 
+test('Shopify line total_discount fills discount when discount_allocations are empty', () => {
+  const mapped = mapShopifyOrder(shopifyOrder({
+    taxes_included: true,
+    line_items: [{
+      sku: 'S4', title: 'Saree', quantity: 1, current_quantity: 1, price: '4999.00',
+      total_discount: '499.90', discount_allocations: [],
+    }],
+  }), {});
+  assert.equal(mapped.items[0].discount, 499.9);
+  assert.equal(mapped.items[0].finalPrice, 4499.1);
+});
+
+test('channel refresh keeps existing line discount when Shopify returns zero allocations', async () => {
+  const t = await tenant();
+  await channelOrder.ingestChannelOrders(t._id, 'shopify', [{
+    externalOrderId: 'D1', status: 'New', total: 4499.1,
+    items: [{ sku: 'LEHE', qty: 1, price: 4999, discount: 499.9, finalPrice: 4499.1 }],
+  }]);
+  await channelOrder.ingestChannelOrders(t._id, 'shopify', [{
+    externalOrderId: 'D1', status: 'New', total: 4499.1,
+    items: [{ sku: 'LEHE', qty: 1, price: 4999, discount: 0, finalPrice: 4999 }],
+  }], { refresh: true });
+  const saved = await Order.findOne({ tenantId: t._id, externalOrderId: 'D1' }).setOptions({ skipTenantFilter: true }).lean();
+  assert.equal(saved.items[0].discount, 499.9);
+  assert.equal(saved.items[0].finalPrice, 4499.1);
+});
+
 test('Shopify partially paid order sets codAmount to total_outstanding; plain COD leaves it null', () => {
   const part = mapShopifyOrder(shopifyOrder({ financial_status: 'partially_paid', total_outstanding: '300.00' }), {});
   assert.equal(part.codAmount, 300);
   const cod = mapShopifyOrder(shopifyOrder({ financial_status: 'pending', payment_gateway_names: ['Cash on Delivery (COD)'] }), {});
   assert.equal(cod.paymentMode, 'COD');
   assert.equal(cod.codAmount, null);
+});
+
+test('Shopify unpaid order with empty payment_gateway_names is COD, not Prepaid', () => {
+  const pending = mapShopifyOrder(shopifyOrder({
+    financial_status: 'pending',
+    payment_gateway_names: [],
+    gateway: '',
+  }), {});
+  assert.equal(pending.paymentMode, 'COD');
+  const paid = mapShopifyOrder(shopifyOrder({
+    financial_status: 'paid',
+    payment_gateway_names: [],
+  }), {});
+  assert.equal(paid.paymentMode, 'Prepaid');
+});
+
+test('Shopify Due on receipt / draft order maps to COD even when gateways are empty', () => {
+  const terms = mapShopifyOrder(shopifyOrder({
+    financial_status: 'pending',
+    payment_gateway_names: [],
+    payment_terms: { payment_terms_name: 'Due on receipt', payment_terms_type: 'receipt' },
+  }), {});
+  assert.equal(terms.paymentMode, 'COD');
+  const draft = mapShopifyOrder(shopifyOrder({
+    financial_status: 'voided',
+    payment_gateway_names: [],
+    source_name: 'shopify_draft_order',
+    cancelled_at: '2026-11-19T22:24:42+05:30',
+  }), {});
+  assert.equal(draft.paymentMode, 'COD', 'cancelled draft COD must not become Prepaid or Void');
+  assert.equal(draft.status, 'Cancelled');
+});
+
+test('cancelled Shopify lines keep ordered qty so the items table is not wiped', () => {
+  const mapped = mapShopifyOrder(shopifyOrder({
+    cancelled_at: '2026-11-19T22:24:42+05:30',
+    financial_status: 'voided',
+    line_items: [{
+      sku: 'LEHSF69', title: 'Dress', quantity: 1, current_quantity: 0, price: '2199.00',
+      vendor: 'KDS', discount_allocations: [],
+    }],
+  }), {});
+  assert.equal(mapped.items.length, 1);
+  assert.equal(mapped.items[0].qty, 1);
+  assert.equal(mapped.items[0].sku, 'LEHSF69');
+});
+
+test('channel refresh with empty items keeps the existing lines', async () => {
+  const t = await tenant();
+  await channelOrder.ingestChannelOrders(t._id, 'shopify', [{
+    externalOrderId: 'WIPE1', status: 'New', total: 2199, paymentMode: 'COD',
+    items: [{ sku: 'LEHSF69', qty: 1, price: 2199, discount: 0, finalPrice: 2199, name: 'Dress', vendor: 'KDS' }],
+  }]);
+  await channelOrder.ingestChannelOrders(t._id, 'shopify', [{
+    externalOrderId: 'WIPE1', status: 'Cancelled', total: 2199, paymentMode: 'COD', items: [],
+  }], { refresh: true });
+  const saved = await Order.findOne({ tenantId: t._id, externalOrderId: 'WIPE1' }).setOptions({ skipTenantFilter: true }).lean();
+  assert.equal(saved.items.length, 1);
+  assert.equal(saved.items[0].sku, 'LEHSF69');
+  assert.equal(saved.status, 'Cancelled');
 });
 
 test('channel ingest saves codAmount, shippingCharge and currency on the order', async () => {

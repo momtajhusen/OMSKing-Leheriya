@@ -11,6 +11,7 @@ const {
   unmapListing,
   retryFailedMapping,
   explainUnmapped,
+  autoLinkSuggestedUnmapped,
   parseCsv,
   importChannel,
   IMPORT_ORDER,
@@ -209,6 +210,18 @@ async function importListings(req, res) {
   return successResponse(res, summary, `Imported ${channel}`, 201);
 }
 
+async function autoLinkSuggested(req, res) {
+  const tenantId = merchantTenant(req);
+  const summary = await autoLinkSuggestedUnmapped(tenantId, req.user.id);
+  return successResponse(
+    res,
+    summary,
+    summary.linked
+      ? `Linked ${summary.linked} of ${summary.scanned} unmapped listings to matching Master SKUs`
+      : 'No same-code Master SKUs to link',
+  );
+}
+
 async function pullLiveCatalog(req, res) {
   const tenantId = merchantTenant(req);
   const channel = String(req.body?.channel || '').toLowerCase();
@@ -236,6 +249,7 @@ module.exports = {
   createAsNew,
   unmap,
   retry,
+  autoLinkSuggested,
   importListings,
   pullLiveCatalog,
   importOrderHint,

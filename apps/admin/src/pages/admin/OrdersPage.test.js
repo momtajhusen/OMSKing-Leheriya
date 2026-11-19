@@ -42,10 +42,22 @@ test('Status, Payment and Date column headers have a filter option', () => {
   assert.match(listCall, /dateFrom, dateTo/);
 });
 
+test('Date column shows the order date with the order time under it', () => {
+  assert.match(page, /formatDate\(order\.orderDate \|\| order\.createdAt\)/);
+  assert.match(page, /formatDateTime\(order\.orderDate \|\| order\.createdAt\)\.replace/);
+});
+
 test('Amazon and Myntra orders show their SLA (dispatch-by) date in red', () => {
   const header = page.slice(page.indexOf('<TableHeader>'), page.indexOf('</TableHeader>'));
   assert.match(header, /SLA Date/);
   assert.match(page, /order\.slaDate \? \(\s*<span className="[^"]*text-red-600[^"]*"[^>]*>\{formatDateTime\(order\.slaDate\)\}<\/span>/);
+});
+
+test('Myntra MNOW / hyperlocal orders show a Hyperlocal Order badge on the list', () => {
+  assert.match(page, /import \{ isMyntraHyperlocal \} from '\.\.\/\.\.\/lib\/myntraHyperlocal'/);
+  assert.match(page, /isMyntraHyperlocal\(order\)/);
+  assert.match(page, /Hyperlocal Order/);
+  assert.match(page, /bg-red-600/);
 });
 
 test('orders have row checkboxes and a select-all box to pack or generate labels for many orders in one go', () => {
@@ -77,6 +89,12 @@ test('Status header filter is a searchable multi-select list with Select all, cl
   assert.match(filter, /statusParam\(draft, STATUS_TABS\)/);
   assert.match(filter, /aria-label="Clear status filter"/);
   assert.match(filter, /aria-label="Apply status filter"/);
+});
+
+test('Sync Orders pulls Shopify, Amazon and Myntra together and waits for the jobs', () => {
+  assert.match(page, /syncAllChannelOrders/);
+  assert.match(page, /const syncOrders = async/);
+  assert.doesNotMatch(page, /pullMyntraOrders\(\)/);
 });
 
 test('orders get an Order ready badge and can be filtered by Order ready and vendor parcel status', () => {

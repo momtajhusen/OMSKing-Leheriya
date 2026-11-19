@@ -12,6 +12,25 @@ function hydrate(list) {
   return (list || []).map((order) => withSubOrders(order));
 }
 
+/** List rows omit barcode/package; keep a richer detail copy already in the store. */
+function itemDetailScore(items = []) {
+  return items.reduce((score, item) => (
+    score
+    + (item.barcode ? 2 : 0)
+    + (item.package ? 2 : 0)
+    + (Number(item.discount) > 0 ? 1 : 0)
+    + (Number(item.finalPrice) > 0 ? 1 : 0)
+  ), 0);
+}
+
+function preferRicherOrder(prev, next) {
+  if (!prev || prev.id !== next.id) return next;
+  if (itemDetailScore(prev.items) > itemDetailScore(next.items)) {
+    return { ...next, items: prev.items };
+  }
+  return next;
+}
+
 function stripHtml(data) {
   const { labelHtml: _label, invoiceHtml: _invoice, reverseLabelHtml: _reverse, invoicePdf: _pdf, invoiceEmail: _mail, ...rest } = data || {};
   return rest;
@@ -168,11 +187,34 @@ const useOrderStore = create((set, get) => ({
     if (!orderId) return { error: 'Order not found' };
     try {
       const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/label`, { ...extra, ...(subOrderId ? { subOrderId } : {}) });
-      if (data.data?.labelPdfBase64) openPdfBase64(data.data.labelPdfBase64, `label-${orderId}.pdf`);
-      else openPrintHtml(data.data.labelHtml);
+      openPrintHtml(data.data.labelHtml);
       return get().putOrder(data.data);
     } catch (err) {
       return { error: apiError(err, 'Could not generate label') };
+    }
+  },
+
+  /** Shipway-style: label + tax invoice on two 4×6 pages for a thermal printer. */
+  generateLabelInvoice: async (id, extra = {}) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/label-invoice`, extra);
+      openPrintHtml(data.data.labelHtml);
+      return get().putOrder(data.data);
+    } catch (err) {
+      return { error: apiError(err, 'Could not generate label + invoice') };
+    }
+  },
+
+  syncChannelOrder: async (id) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/sync`);
+      return { ...get().putOrder(data.data), message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not sync this order from Shopify') };
     }
   },
 
@@ -229,6 +271,17 @@ const useOrderStore = create((set, get) => ({
     }
   },
 
+  saveItemHsn: async (id, index, hsn) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.patch(`/orders/${encodeURIComponent(orderId)}/items/${index}/hsn`, { hsn });
+      return { ...get().putOrder(data.data), message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not save the HSN code') };
+    }
+  },
+
   mapItemSku: async (id, { sku, masterSkuCode }) => {
     const orderId = get().orderId(id);
     if (!orderId) return { error: 'Order not found' };
@@ -253,6 +306,32 @@ const useOrderStore = create((set, get) => ({
       return next;
     } catch (err) {
       return { error: apiError(err, 'Could not book reverse pickup') };
+    }
+  },
+
+  saveReverseTracking: async (id, { courier, awb, reason } = {}) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.patch(`/orders/${encodeURIComponent(orderId)}/reverse`, { courier, awb, reason });
+      const next = get().putOrder(data.data);
+      useReturnsStore.getState().syncFromOrders(get().orders);
+      return { ...next, message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not save reverse tracking') };
+    }
+  },
+
+  cancelReversePickup: async (id) => {
+    const orderId = get().orderId(id);
+    if (!orderId) return { error: 'Order not found' };
+    try {
+      const { data } = await api.delete(`/orders/${encodeURIComponent(orderId)}/reverse`);
+      const next = get().putOrder(data.data);
+      useReturnsStore.getState().syncFromOrders(get().orders);
+      return { ...next, message: data.message };
+    } catch (err) {
+      return { error: apiError(err, 'Could not cancel reverse pickup') };
     }
   },
 
@@ -305,7 +384,9 @@ const useOrderStore = create((set, get) => ({
     try {
       const [{ data }] = await Promise.all([api.get('/orders'), loadConnectedChannels()]);
       if (!sameCompanySnapshot(started, current())) return get().orders;
-      const rows = ordersOnConnectedChannels(hydrate(data.data || []), useChannelStore.getState());
+      const prevById = new Map(get().orders.map((row) => [row.id, row]));
+      const rows = ordersOnConnectedChannels(hydrate(data.data || []), useChannelStore.getState())
+        .map((row) => preferRicherOrder(prevById.get(row.id), row));
       if (!sameCompanySnapshot(started, current())) return get().orders;
       set({ orders: rows, loaded: true, error: '' });
       useReturnsStore.getState().syncFromOrders(rows);

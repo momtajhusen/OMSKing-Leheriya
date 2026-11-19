@@ -67,3 +67,12 @@ test('warehouse page does not swap itself for a full-page loader on reload, and 
   const layout = fs.readFileSync(new URL('../components/layout/AdminLayout.jsx', import.meta.url), 'utf8');
   assert.match(layout, /useState\(\(\) => readBillCache\(cacheKey\)\)/, 'the bill notice paints from cache instead of pushing the page down after load');
 });
+
+test('Channel & warehouse Edit can save the pickup Ship From address', () => {
+  const settings = fs.readFileSync(new URL('../components/settings/ChannelWarehouseSettings.jsx', import.meta.url), 'utf8');
+  assert.match(settings, /Pickup \/ Ship From address/);
+  assert.match(settings, /address\.line1/);
+  assert.match(settings, /warehousePayload/);
+  assert.match(settings, /api\.patch\(`\/warehouses\/\$\{whForm\.id\}`, body\)/);
+  assert.match(settings, /Use as courier pickup warehouse/);
+});

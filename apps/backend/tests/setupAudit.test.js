@@ -60,6 +60,7 @@ test('tax settings persist, HSN updates a SKU, and the audit row keeps before an
   const saved = await call(settings.patchTax, {
     body: {
       defaultGstRate: 12,
+      defaultHsn: '6109',
       categories: [
         { name: 'Clothing (Below ₹1000)', gstRate: 5 },
         { name: 'Clothing (Above ₹1000)', gstRate: 12 },
@@ -67,16 +68,19 @@ test('tax settings persist, HSN updates a SKU, and the audit row keeps before an
     },
   });
   assert.equal(saved.defaultGstRate, 12);
+  assert.equal(saved.defaultHsn, '6109');
   assert.equal(saved.saved, true);
 
   const again = await call(settings.getTax);
   assert.equal(again.defaultGstRate, 12);
+  assert.equal(again.defaultHsn, '6109');
   assert.equal(again.categories.length, 2);
 
   const same = await call(settings.patchTax, {
-    body: { defaultGstRate: 12, categories: again.categories },
+    body: { defaultGstRate: 12, defaultHsn: '6109', categories: again.categories },
   });
   assert.equal(same.defaultGstRate, 12);
+  assert.equal(same.defaultHsn, '6109');
 
   const product = await Product.create({ tenantId: tenant._id, name: 'Kurta', hsnCode: '', gstRatePercent: 5 });
   await MasterSku.create({

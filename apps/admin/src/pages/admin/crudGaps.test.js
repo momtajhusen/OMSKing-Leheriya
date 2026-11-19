@@ -66,6 +66,9 @@ test('every HSN row can be edited and deleted from Tax settings', () => {
   assert.match(tax, /api\.patch\(`\/settings\/tax\/hsn\/\$\{/);
   assert.match(tax, /api\.delete\(`\/settings\/tax\/hsn\/\$\{/);
   assert.match(tax, /<ConfirmDialog/);
+  assert.match(tax, /defaultHsn/);
+  assert.match(tax, /Default HSN Code/);
+  assert.match(tax, /id="default-hsn"/);
 });
 
 test('a saved channel can be disconnected after a confirm', () => {

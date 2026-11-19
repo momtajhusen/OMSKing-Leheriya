@@ -223,7 +223,16 @@ function kg(weightGrams) {
 function labelBuffer(content) {
   if (!content) return null;
   if (Buffer.isBuffer(content)) return content.slice(0, 4).toString() === '%PDF' ? content : null;
-  const text = String(content).trim();
+  // Some Blue Dart responses return the PDF as a byte array instead of base64.
+  if (Array.isArray(content)) {
+    const bytes = Buffer.from(content);
+    return bytes.slice(0, 4).toString() === '%PDF' ? bytes : null;
+  }
+  if (typeof content === 'object' && content.type === 'Buffer' && Array.isArray(content.data)) {
+    const bytes = Buffer.from(content.data);
+    return bytes.slice(0, 4).toString() === '%PDF' ? bytes : null;
+  }
+  const text = String(content).trim().replace(/^data:application\/pdf;base64,/i, '');
   if (!text) return null;
   try {
     const bytes = Buffer.from(text, 'base64');

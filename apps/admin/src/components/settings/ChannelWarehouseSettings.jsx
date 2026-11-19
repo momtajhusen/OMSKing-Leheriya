@@ -14,8 +14,31 @@ import {
 } from '../../lib/channelWarehouse';
 
 const STILL = 'hover:translate-y-0';
-const blankWarehouse = { id: '', code: '', name: '', type: 'physical', status: 'active', channels: [] };
+const blankAddress = { line1: '', line2: '', city: '', state: '', pincode: '', gstin: '' };
+const blankWarehouse = {
+  id: '', code: '', name: '', type: 'physical', status: 'active', channels: [],
+  address: { ...blankAddress }, contactPerson: '', contactPhone: '', isPickup: true,
+};
 const blankLink = { id: '', channel: '', warehouseId: '', externalLocationId: '', label: '', isPrimaryForChannel: false };
+
+function warehousePayload(form) {
+  const address = {
+    line1: String(form.address?.line1 || '').trim(),
+    line2: String(form.address?.line2 || '').trim(),
+    city: String(form.address?.city || '').trim(),
+    state: String(form.address?.state || '').trim(),
+    pincode: String(form.address?.pincode || '').trim(),
+    gstin: String(form.address?.gstin || '').trim(),
+  };
+  return {
+    name: form.name,
+    status: form.status,
+    contactPerson: String(form.contactPerson || '').trim(),
+    contactPhone: String(form.contactPhone || '').trim(),
+    isPickup: form.type !== 'virtual' && form.isPickup !== false,
+    address,
+  };
+}
 
 export default function ChannelWarehouseSettings() {
   const [data, setData] = useState({ connections: [], channels: [], warehouses: [] });
@@ -85,10 +108,20 @@ export default function ChannelWarehouseSettings() {
 
   const saveWarehouse = async () => {
     const editing = Boolean(whForm.id);
+    const body = warehousePayload(whForm);
+    if (whForm.type === 'physical' && !body.address.line1) {
+      setBanner('Enter the pickup address line (Ship From on labels).');
+      return;
+    }
     const ok = await run(
       () => (editing
-        ? api.patch(`/warehouses/${whForm.id}`, { name: whForm.name, status: whForm.status })
-        : api.post('/warehouses', { code: whForm.code, name: whForm.name, type: whForm.type, channels: whForm.channels })),
+        ? api.patch(`/warehouses/${whForm.id}`, body)
+        : api.post('/warehouses', {
+          code: whForm.code,
+          type: whForm.type,
+          channels: whForm.channels,
+          ...body,
+        })),
       editing ? 'Warehouse saved' : 'Warehouse added',
     );
     if (ok) setWhForm(null);
@@ -175,13 +208,36 @@ export default function ChannelWarehouseSettings() {
               {data.warehouses.map((wh) => (
                 <tr key={wh.id} className="h-12 border-t border-[hsl(var(--color-border-premium))]">
                   <td className="px-3 font-medium">{wh.code}</td>
-                  <td className="truncate px-3">{wh.name}</td>
+                  <td className="px-3">
+                    <div className="truncate font-medium">{wh.name}</div>
+                    {wh.address?.line1 && (
+                      <div className="truncate text-xs text-muted-foreground" title={[wh.address.line1, wh.address.city, wh.address.pincode].filter(Boolean).join(', ')}>
+                        {[wh.address.line1, wh.address.city, wh.address.pincode].filter(Boolean).join(', ')}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3"><Badge variant={wh.type === 'virtual' ? 'secondary' : 'outline'}>{wh.type}</Badge></td>
                   <td className="px-3 capitalize">{wh.status}</td>
                   <td className="px-3">{linkCount(data.connections, wh.id)}</td>
                   <td className="px-3">
                     <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="outline" className={STILL} onClick={() => { setBanner(''); setWhForm({ ...blankWarehouse, ...wh, channels: [] }); }}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={STILL}
+                        onClick={() => {
+                          setBanner('');
+                          setWhForm({
+                            ...blankWarehouse,
+                            ...wh,
+                            channels: [],
+                            address: { ...blankAddress, ...(wh.address || {}) },
+                            contactPerson: wh.contactPerson || '',
+                            contactPhone: wh.contactPhone || '',
+                            isPickup: wh.isPickup !== false,
+                          });
+                        }}
+                      >
                         <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
                       </Button>
                       <Button size="sm" variant="outline" className={`${STILL} text-destructive`} onClick={() => setDeleting(wh)} aria-label={`Delete ${wh.code}`}>
@@ -335,6 +391,73 @@ export default function ChannelWarehouseSettings() {
                   <p className="mt-1 text-xs text-muted-foreground">You can change these links any time below.</p>
                 </div>
               </>
+            )}
+            {whForm.type !== 'virtual' && (
+              <div className="space-y-3 border-t border-[hsl(var(--color-border-premium))] pt-3">
+                <div>
+                  <p className="text-sm font-medium">Pickup / Ship From address</p>
+                  <p className="text-xs text-muted-foreground">Used on courier labels and packing slips for this warehouse.</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Address line 1</label>
+                  <Input
+                    value={whForm.address?.line1 || ''}
+                    onChange={(e) => setWhForm({ ...whForm, address: { ...whForm.address, line1: e.target.value } })}
+                    placeholder="Plot / building / street"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Address line 2</label>
+                  <Input
+                    value={whForm.address?.line2 || ''}
+                    onChange={(e) => setWhForm({ ...whForm, address: { ...whForm.address, line2: e.target.value } })}
+                    placeholder="Landmark (optional)"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm font-medium">City</label>
+                    <Input
+                      value={whForm.address?.city || ''}
+                      onChange={(e) => setWhForm({ ...whForm, address: { ...whForm.address, city: e.target.value } })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">State</label>
+                    <Input
+                      value={whForm.address?.state || ''}
+                      onChange={(e) => setWhForm({ ...whForm, address: { ...whForm.address, state: e.target.value } })}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm font-medium">Pincode</label>
+                    <Input
+                      value={whForm.address?.pincode || ''}
+                      onChange={(e) => setWhForm({ ...whForm, address: { ...whForm.address, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) } })}
+                      inputMode="numeric"
+                      maxLength={6}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Contact phone</label>
+                    <Input
+                      value={whForm.contactPhone || ''}
+                      onChange={(e) => setWhForm({ ...whForm, contactPhone: e.target.value })}
+                      placeholder="+91 …"
+                    />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={whForm.isPickup !== false}
+                    onChange={(e) => setWhForm({ ...whForm, isPickup: e.target.checked })}
+                  />
+                  Use as courier pickup warehouse
+                </label>
+              </div>
             )}
           </div>
         )}

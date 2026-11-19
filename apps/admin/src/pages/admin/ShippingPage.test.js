@@ -58,8 +58,10 @@ test('delivered shipments offer Book reverse, which books the reverse pickup', (
   assert.match(actions, /row\.shipStatus === 'Delivered' && !isChannelManaged\(row\)/);
   assert.match(actions, /Book reverse/);
   assert.match(page, /const bookReversePickup = useOrderStore\(\(s\) => s\.bookReversePickup\)/);
-  assert.match(page, /await bookReversePickup\(reverseFor\.id, \{ reason: reverseReason, courier: reverseCourier \}\)/);
+  assert.match(page, /await bookReversePickup\(reverseFor\.id, \{[\s\S]*courier: reverseCourier,[\s\S]*awb: reverseAwb/);
   assert.match(page, /title="Book reverse pickup"/);
+  assert.match(page, /Reverse AWB/);
+  assert.match(page, /Cancel reverse|reverseAwb/);
 });
 
 test('the Exceptions / RTO card counts both', () => {

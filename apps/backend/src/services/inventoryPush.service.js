@@ -96,10 +96,11 @@ async function queueInventoryPushes(tenantId, userId, masterSkuId, onlyChannels)
     syncStatus: 'synced',
     channel: { $in: channelIds() },
   }));
-  const authority = await getInventoryAuthority(tenantId);
   const allow = Array.isArray(onlyChannels) ? new Set(onlyChannels) : null;
+  // Never write sellable qty to Shopify from OMS — Shopify inventory stays as Shopify has it.
+  // Amazon / Myntra still receive OMS stock when OMS is master.
   const channels = [...new Set(maps.map((row) => row.channel))]
-    .filter((channel) => !(channel === 'shopify' && authority === 'shopify'))
+    .filter((channel) => channel !== 'shopify')
     .filter((channel) => !allow || allow.has(channel));
   const jobs = [];
   for (const channel of channels) {
@@ -108,23 +109,9 @@ async function queueInventoryPushes(tenantId, userId, masterSkuId, onlyChannels)
   return jobs;
 }
 
-async function pushShopify(tenantId, masterSkuId, qty, deps) {
-  const creds = await require('./shopifyAuth.service').shopifyCreds(tenantId);
-  const mapping = qty.mappings.find((row) => row.channel === 'shopify');
-  if (!mapping) {
-    const err = new Error('Shopify stock was not pushed. This Master SKU has no synced Shopify listing.');
-    err.terminal = true;
-    throw err;
-  }
-  const recorded = qty.shopify.filter((loc) => loc.known);
-  if (!recorded.length) return 'Shopify stock was not pushed. OMSKing has no stock record for the linked locations yet.';
-  const rows = recorded.map((loc) => ({
-    variantId: mapping.channelVariantId,
-    locationId: loc.locationId,
-    available: loc.available,
-  }));
-  const result = await shopify.pushInventory(creds, { rows, request: deps.shopifyRequest });
-  return `Shopify locations ${result.sent.map((row) => `${row.locationId}=${row.available}`).join(', ')}.`;
+async function pushShopify() {
+  // OMS must not overwrite Shopify location qty (wrong stock + API floods).
+  return 'Shopify stock was not pushed. OMS does not overwrite Shopify inventory.';
 }
 
 async function pullShopifyMaster(tenantId, userId, masterSkuId, qty, deps) {

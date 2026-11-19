@@ -56,17 +56,52 @@ export async function openAmazonLabel(order) {
 
 const DONE = new Set(['success', 'failed', 'partial_success', 'cancelled']);
 
-/** Queues a live Myntra order pull and waits for the worker to finish it. */
-export async function pullMyntraOrders({ timeoutMs = 120_000 } = {}) {
-  const { data } = await api.post('/integrations/myntra/orders/pull', {});
-  const jobId = data?.data?.id;
+async function waitForJob(jobId, { timeoutMs = 120_000 } = {}) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     const res = await api.get('/integrations/jobs');
     const job = (res.data?.data || []).find((row) => row.id === jobId);
     if (job && DONE.has(job.status)) return job;
     if (job?.status === 'queued' && job.lastError) return job;
   }
-  return { status: 'running', shortSummary: 'Still running. Refresh in a minute.' };
+  return { id: jobId, status: 'running', shortSummary: 'Still running. Refresh in a minute.' };
+}
+
+/** Queues a live Myntra order pull and waits for the worker to finish it. */
+export async function pullMyntraOrders({ timeoutMs = 120_000 } = {}) {
+  const { data } = await api.post('/integrations/myntra/orders/pull', {});
+  return waitForJob(data?.data?.id, { timeoutMs });
+}
+
+/** Queues orders_pull for one live channel and waits until the worker finishes. */
+export async function pullChannelOrders(channel, { timeoutMs = 120_000 } = {}) {
+  const { data } = await api.post('/integrations/jobs', { channel, jobType: 'orders_pull' });
+  return waitForJob(data?.data?.id, { timeoutMs });
+}
+
+/** Sync Orders: Shopify + Amazon + Myntra, in parallel, then wait for each. */
+export async function syncAllChannelOrders({ timeoutMs = 120_000 } = {}) {
+  const channels = ['shopify', 'amazon', 'myntra'];
+  const started = await Promise.all(channels.map(async (channel) => {
+    try {
+      const { data } = await api.post('/integrations/jobs', { channel, jobType: 'orders_pull' });
+      return { channel, jobId: data?.data?.id, error: null };
+    } catch (err) {
+      if (err?.response?.status === 400) {
+        return { channel, jobId: null, error: err.response?.data?.message || err.message || 'not connected' };
+      }
+      throw err;
+    }
+  }));
+  const results = [];
+  for (const row of started) {
+    if (!row.jobId) {
+      results.push({ channel: row.channel, status: 'skipped', lastError: row.error, shortSummary: row.error });
+      continue;
+    }
+    const job = await waitForJob(row.jobId, { timeoutMs });
+    results.push({ ...job, channel: row.channel });
+  }
+  return results;
 }

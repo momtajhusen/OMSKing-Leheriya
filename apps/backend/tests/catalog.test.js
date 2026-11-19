@@ -450,3 +450,38 @@ test('each unmapped listing says why, checked against the real Master SKUs', asy
   assert.equal(listed.suggestedMasterSku, 'LEH-LATE-1');
   assert.match(listed.unmappedReason, /same code/);
 });
+
+test('re-import and auto-link map unmapped rows when same-code Master SKU already exists', async () => {
+  const { autoLinkSuggestedUnmapped } = require('../src/services/catalogMapping.service');
+  const shop = await Tenant.create({ name: 'Rematch shop', slug: `rematch-${Date.now()}`, kind: 'merchant' });
+  const runShop = (work) => als.run({ tenantId: String(shop._id), skipTenantFilter: false }, work);
+
+  await runShop(() => importChannel(shop._id, null, 'amazon', [
+    { channelSkuCode: 'LEH-KD-004', channelVariantId: 'amz-kd004', channelTitle: 'Kota' },
+    { channelSkuCode: 'LEH-DK18', channelVariantId: 'amz-dk18', channelTitle: 'DK18' },
+  ]));
+  assert.equal(await SkuMapping.countDocuments({ tenantId: shop._id, syncStatus: 'unmapped' }), 2);
+
+  await runShop(() => MasterSku.create({ tenantId: shop._id, code: 'LEH-KD-004', name: 'KD004', status: 'active' }));
+  await runShop(() => MasterSku.create({ tenantId: shop._id, code: 'LEH-DK18', name: 'DK18', status: 'active' }));
+
+  const again = await runShop(() => importChannel(shop._id, null, 'amazon', [
+    { channelSkuCode: 'LEH-KD-004', channelVariantId: 'amz-kd004', channelTitle: 'Kota' },
+  ]));
+  assert.equal(again.autoMapped, 1);
+  const remapped = await SkuMapping.findOne({ tenantId: shop._id, channelVariantId: 'amz-kd004' });
+  assert.ok(remapped.masterSkuId);
+  assert.equal(remapped.syncStatus, 'synced');
+
+  const bulk = await runShop(() => autoLinkSuggestedUnmapped(shop._id, null));
+  assert.equal(bulk.linked, 1);
+  assert.equal(await SkuMapping.countDocuments({ tenantId: shop._id, syncStatus: 'unmapped' }), 0);
+
+  await runShop(() => MasterSku.create({ tenantId: shop._id, code: 'LEH-B-10', name: 'B10', status: 'active' }));
+  await runShop(() => importChannel(shop._id, null, 'myntra', [
+    { channelSkuCode: 'MLEH-B-10', channelVariantId: 'myn-b10', channelTitle: 'Myntra B10' },
+  ]));
+  const myn = await SkuMapping.findOne({ tenantId: shop._id, channelVariantId: 'myn-b10' });
+  assert.ok(myn.masterSkuId, 'Myntra M-prefix should auto-map to Master without the M');
+  assert.equal(myn.syncStatus, 'synced');
+});

@@ -25,9 +25,11 @@ router.get('/summary', ...view, requirePermission('dashboard.view'), asyncHandle
 router.get('/', ...view, asyncHandler(orders.listOrders));
 router.get('/:orderId', ...view, asyncHandler(orders.getOrder));
 router.get('/:orderId/customer-history', ...view, asyncHandler(orders.getCustomerHistory));
+router.post('/:orderId/sync', ...edit, asyncHandler(orders.syncChannelOrder));
 router.patch('/:orderId', ...edit, asyncHandler(orders.editOrderDetails));
 router.get('/:orderId/courier-rates', ...ship, asyncHandler(orders.courierRates));
 router.post('/:orderId/label', ...ship, asyncHandler(orders.generateLabel));
+router.post('/:orderId/label-invoice', ...ship, asyncHandler(orders.generateLabelInvoice));
 router.post('/:orderId/ship', ...ship, asyncHandler(orders.shipOrder));
 router.get('/:orderId/amazon-label', ...ship, asyncHandler(orders.amazonLabel));
 router.post('/:orderId/label/cancel', ...cancelShip, asyncHandler(orders.cancelLabel));
@@ -40,7 +42,10 @@ router.patch('/:orderId/sub-orders/:subOrderId/vendor', ...edit, asyncHandler(or
 router.patch('/:orderId/status', ...edit, asyncHandler(orders.patchStatus));
 router.patch('/:orderId/notes', ...edit, asyncHandler(orders.updateNotes));
 router.patch('/:orderId/items/:index/package', ...edit, asyncHandler(orders.updateItemPackage));
+router.patch('/:orderId/items/:index/hsn', ...edit, asyncHandler(orders.updateItemHsn));
 router.post('/:orderId/reverse', ...edit, asyncHandler(orders.bookReverse));
+router.patch('/:orderId/reverse', ...edit, asyncHandler(orders.patchReverse));
+router.delete('/:orderId/reverse', ...edit, asyncHandler(orders.cancelReverse));
 router.post('/:orderId/map-sku', ...edit, requirePermission('catalog.edit'), asyncHandler(orders.mapItemSku));
 
 module.exports = router;

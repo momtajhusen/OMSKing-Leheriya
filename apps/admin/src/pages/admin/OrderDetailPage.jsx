@@ -16,8 +16,9 @@ import ProductThumb from '../../components/ui/ProductThumb';
 import EmptyState from '../../components/ui/EmptyState';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
-import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle, Pencil } from 'lucide-react';
+import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle, Pencil, RefreshCw } from 'lucide-react';
 import { isChannelManaged, packetIdOf, openMyntraDocument, openAmazonLabel } from '../../lib/channelOrders';
+import { isMyntraHyperlocal } from '../../lib/myntraHyperlocal';
 import { shipWarehouseTag } from '../../lib/channelWarehouse';
 import { amazonLabelStep, courierChoice, courierOptionText, labelRequest, pickupSlotText, rateNote } from '../../lib/shippingStatus';
 import { shortOrderId, shortSubOrderId } from '../../lib/orderIds';
@@ -25,19 +26,27 @@ import { vendorPick, mappedVendor, pendingAssigns, vendorSaveAction } from '../.
 import { barcodeBars, printBarcodeLabel } from '../../lib/barcodeLabel';
 import { PACKAGE_SOURCE, packageForm, packageSize, packageWeight } from '../../lib/itemPackage';
 import { canEditOrder, asksShopifyPush, orderEditForm } from '../../lib/orderEdit';
+import { reverseTrackUrl } from '../../lib/reverseTrack';
 import api from '../../lib/api';
 
 const RISK_TONE = { High: 'text-red-600', Medium: 'text-orange-500', Low: 'text-green-600' };
 
 function BarcodeImage({ value }) {
   const { bars, width } = barcodeBars(value);
-  if (!width) return <span>{value || '—'}</span>;
+  // Fixed box so SKU→barcode swap does not shove the Qty/Price columns.
+  if (!width) {
+    return (
+      <span className="inline-flex h-11 w-28 items-center justify-center text-[10px] text-muted-foreground">
+        {value || '—'}
+      </span>
+    );
+  }
   return (
-    <span className="inline-flex flex-col items-center rounded bg-white px-1.5 pt-1 pb-0.5 text-black" title={value}>
-      <svg viewBox={`0 0 ${width} 28`} className="h-7 w-28" preserveAspectRatio="none" role="img" aria-label={`Barcode ${value}`}>
+    <span className="inline-flex h-11 w-28 flex-col items-center justify-center rounded bg-white px-1.5 text-black" title={value}>
+      <svg viewBox={`0 0 ${width} 28`} className="h-7 w-full" preserveAspectRatio="none" role="img" aria-label={`Barcode ${value}`}>
         {bars.map((bar) => <rect key={bar.x} x={bar.x} y="0" width={bar.w} height="28" fill="currentColor" />)}
       </svg>
-      <span className="text-[10px] leading-tight">{value}</span>
+      <span className="truncate text-[10px] leading-tight max-w-full">{value}</span>
     </span>
   );
 }
@@ -55,23 +64,31 @@ export default function OrderDetailPage() {
   const getById = useOrderStore((s) => s.getById);
   const hydrateFromApi = useOrderStore((s) => s.hydrateFromApi);
   const generateLabel = useOrderStore((s) => s.generateLabel);
+  const generateLabelInvoice = useOrderStore((s) => s.generateLabelInvoice);
+  const syncChannelOrder = useOrderStore((s) => s.syncChannelOrder);
+  const cancelLabel = useOrderStore((s) => s.cancelLabel);
   const amazonLabels = useOrderStore((s) => s.amazonLabels);
   const generateInvoice = useOrderStore((s) => s.generateInvoice);
   const assignSubOrder = useOrderStore((s) => s.assignSubOrder);
   const vendorUpdate = useOrderStore((s) => s.vendorUpdate);
   const markDelivered = useOrderStore((s) => s.markDelivered);
   const bookReversePickup = useOrderStore((s) => s.bookReversePickup);
+  const cancelReversePickup = useOrderStore((s) => s.cancelReversePickup);
   const editOrder = useOrderStore((s) => s.editOrder);
   const saveOrderNotes = useOrderStore((s) => s.saveOrderNotes);
   const [notesDraft, setNotesDraft] = useState(null);
   const saveItemPackage = useOrderStore((s) => s.saveItemPackage);
+  const saveItemHsn = useOrderStore((s) => s.saveItemHsn);
   const [packItem, setPackItem] = useState(null);
   const [packForm, setPackForm] = useState(packageForm());
+  const [hsnItem, setHsnItem] = useState(null);
+  const [hsnDraft, setHsnDraft] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState(orderEditForm());
   const [askPush, setAskPush] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [labelOpen, setLabelOpen] = useState(false);
+  const [labelWithInvoice, setLabelWithInvoice] = useState(false);
   const [labelCouriers, setLabelCouriers] = useState([]);
   const [courierCode, setCourierCode] = useState('delhivery');
   const [labelAwb, setLabelAwb] = useState('');
@@ -93,9 +110,8 @@ export default function OrderDetailPage() {
   const [mapCode, setMapCode] = useState('');
   const [masterHits, setMasterHits] = useState([]);
 
-  const loaded = useOrderStore((s) => s.loaded);
   const fetchOrder = useOrderStore((s) => s.fetchOrder);
-  const [lookup, setLookup] = useState({ id: '', done: false });
+  const [detailReady, setDetailReady] = useState(false);
 
   useEffect(() => {
     hydrateFromApi();
@@ -119,36 +135,31 @@ export default function OrderDetailPage() {
     };
   }, [mapItem, mapCode]);
 
+  // Always load the full order (barcode + package) before paint — list rows look like dummy data.
+  useEffect(() => {
+    let live = true;
+    setDetailReady(false);
+    setHistory(null);
+    fetchOrder(orderId).finally(() => {
+      if (live) setDetailReady(true);
+    });
+    return () => { live = false; };
+  }, [orderId, fetchOrder]);
+
   const order = useMemo(() => getById(orderId), [getById, orderId, orders]);
   const highlightId = order && order.id !== orderId ? orderId : '';
   const masterId = order?.id;
 
   useEffect(() => {
-    if (!masterId) return undefined;
+    if (!masterId || !detailReady) return undefined;
     let live = true;
-    setHistory(null);
     api.get(`/orders/${encodeURIComponent(masterId)}/customer-history`)
       .then(({ data }) => { if (live) setHistory(data.data); })
       .catch(() => { if (live) setHistory(null); });
     return () => { live = false; };
-  }, [masterId]);
+  }, [masterId, detailReady]);
 
-  useEffect(() => {
-    if (!loaded || order || lookup.id === orderId) return;
-    setLookup({ id: orderId, done: false });
-    fetchOrder(orderId).finally(() => {
-      setLookup((current) => (current.id === orderId ? { id: orderId, done: true } : current));
-    });
-  }, [loaded, order, orderId, lookup.id, fetchOrder]);
-
-  const hasPackages = Boolean(order?.items?.every((item) => item.package));
-  useEffect(() => {
-    if (!masterId || hasPackages) return;
-    fetchOrder(masterId);
-  }, [masterId, hasPackages, fetchOrder]);
-
-  const lookedUp = lookup.id === orderId && lookup.done;
-  if (!order && (!loaded || !lookedUp)) return <div className="p-6 text-sm text-muted-foreground">Loading order…</div>;
+  if (!detailReady) return <div className="p-6 text-sm text-muted-foreground">Loading order…</div>;
 
   if (!order) {
     return (
@@ -170,7 +181,17 @@ export default function OrderDetailPage() {
     else toast.success(`Label opened. ${next.id} is ${next.status}.`);
   };
 
-  const openLabel = () => {
+  const openLabel = (withInvoice = false) => {
+    setLabelWithInvoice(Boolean(withInvoice));
+    if (withInvoice && order.awb) {
+      setBusy('label-invoice');
+      generateLabelInvoice(order.id).then((next) => {
+        setBusy('');
+        if (next?.error) toast.error(next.error);
+        else toast.success('Label + Invoice (4×6) opened');
+      });
+      return;
+    }
     setCourierCode('delhivery');
     setLabelAwb('');
     setLabelOpen(true);
@@ -180,17 +201,38 @@ export default function OrderDetailPage() {
       .catch(() => setLabelCouriers([]));
   };
 
+  const runSyncOrder = async () => {
+    setBusy('sync');
+    const next = await syncChannelOrder(order.id);
+    setBusy('');
+    if (next?.error) { toast.error(next.error); return; }
+    toast.success(next.message || 'Order synced from Shopify');
+  };
+
+  const runCancelLabel = async () => {
+    setBusy('cancel-label');
+    const next = await cancelLabel(order.id);
+    setBusy('');
+    if (next?.error) { toast.error(next.error); return; }
+    toast.success('Label cancelled. You can generate a new one.');
+  };
+
   const { list: courierList, picked } = courierChoice(labelCouriers, courierCode);
 
   const saveLabel = async () => {
     const request = labelRequest(picked, labelAwb);
     if (request.error) { toast.error(request.error); return; }
-    setBusy('label');
-    const next = await generateLabel(order.id, undefined, request.body);
+    setBusy(labelWithInvoice ? 'label-invoice' : 'label');
+    const next = labelWithInvoice
+      ? await generateLabelInvoice(order.id, request.body)
+      : await generateLabel(order.id, undefined, request.body);
     setBusy('');
     if (next?.error) { toast.error(next.error); return; }
     setLabelOpen(false);
-    toast.success(`${picked.name} label done. ${next.id} is ${next.status}.`);
+    setLabelWithInvoice(false);
+    toast.success(labelWithInvoice
+      ? `Label + Invoice (4×6) opened. ${next.id} is ${next.status}.`
+      : `${picked.name} label done. ${next.id} is ${next.status}.`);
   };
 
   const printAmazonLabel = async () => {
@@ -212,14 +254,10 @@ export default function OrderDetailPage() {
     await printAmazonLabel();
   };
 
-  const openInvoice = () => {
-    setCustomerGstin(order.customerGstin || '');
-    setInvoiceOpen(true);
-  };
-
-  const runInvoice = async () => {
+  /** B2C: one click, no GSTIN modal. */
+  const runInvoice = async (gstin = '') => {
     setBusy('invoice');
-    const next = await generateInvoice(order.id, { customerGstin });
+    const next = await generateInvoice(order.id, { customerGstin: gstin });
     setBusy('');
     if (next?.error) {
       toast.error(next.error);
@@ -227,6 +265,12 @@ export default function OrderDetailPage() {
     }
     setInvoiceOpen(false);
     toast.success(`Invoice ${next.invoiceNo} opened`);
+  };
+
+  /** B2B only: ask for buyer GSTIN, then generate. */
+  const openB2bInvoice = () => {
+    setCustomerGstin(order.customerGstin || '');
+    setInvoiceOpen(true);
   };
 
   const openEdit = () => {
@@ -276,6 +320,23 @@ export default function OrderDetailPage() {
     }
     toast.success(next.message || 'Weight and size saved');
     setPackItem(null);
+  };
+
+  const openHsn = (item, index) => {
+    setHsnItem({ ...item, index });
+    setHsnDraft(String(item.hsn || '').replace(/\D/g, '').slice(0, 8));
+  };
+
+  const saveHsn = async () => {
+    setBusy('hsn');
+    const next = await saveItemHsn(order.id, hsnItem.index, hsnDraft);
+    setBusy('');
+    if (next?.error) {
+      toast.error(next.error);
+      return;
+    }
+    toast.success(next.message || 'HSN saved');
+    setHsnItem(null);
   };
 
   const openMap = (item) => {
@@ -390,6 +451,11 @@ export default function OrderDetailPage() {
             <h1 className="text-xl font-bold">{displayId}</h1>
             <Badge variant={statusBadgeVariant(order.status)}>{order.status}</Badge>
             <Badge variant="outline">{order.channel}</Badge>
+            {isMyntraHyperlocal(order) && (
+              <Badge className="rounded-sm border-transparent bg-red-600 text-white hover:bg-red-600" title="Myntra MNOW immediate dispatch">
+                Hyperlocal Order
+              </Badge>
+            )}
             {shipWarehouseTag(order) && (
               <span className="text-xs text-muted-foreground" title={shipWarehouseTag(order).title}>
                 Ships from {shipWarehouseTag(order).code}
@@ -414,7 +480,9 @@ export default function OrderDetailPage() {
               {history.pastOrders ? (
                 <>
                   <span>Last order status: <span className="font-semibold">{history.lastOrderStatus || '—'}</span></span>
-                  <span>Past orders: <span className="font-semibold">{history.pastOrders}</span></span>
+                  <span>Past orders: <span className="font-semibold">{history.pastOrders}</span>
+                    {history.shopifyOrders ? <span className="text-muted-foreground"> (Shopify {history.shopifyOrders})</span> : null}
+                  </span>
                   <span>Delivered orders: <span className="font-semibold">{history.delivered}</span></span>
                   <span>Cancelled orders: <span className="font-semibold">{history.cancelled}</span></span>
                 </>
@@ -425,6 +493,16 @@ export default function OrderDetailPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
+            <Button
+              variant="outline"
+              disabled={busy === 'label' || busy === 'label-invoice'}
+              onClick={() => openLabel(true)}
+            >
+              <Printer className="w-4 h-4 mr-2" />
+              {busy === 'label-invoice' ? 'Opening…' : 'Generate Label & Invoice'}
+            </Button>
+          )}
           <Button variant="outline" onClick={() => navigate('/orders')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             All orders
@@ -433,6 +511,12 @@ export default function OrderDetailPage() {
             <Button variant="outline" onClick={openEdit}>
               <Pencil className="w-4 h-4 mr-2" />
               Edit order
+            </Button>
+          )}
+          {can(PERMISSIONS.ORDERS_EDIT) && order.channel === 'Shopify' && (
+            <Button variant="outline" disabled={busy === 'sync'} onClick={runSyncOrder}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${busy === 'sync' ? 'animate-spin' : ''}`} />
+              {busy === 'sync' ? 'Syncing…' : 'Sync from Shopify'}
             </Button>
           )}
           {channelManaged && packetId && (
@@ -448,10 +532,16 @@ export default function OrderDetailPage() {
             </>
           )}
           {can(PERMISSIONS.FINANCE_VIEW) && !channelManaged && (
-            <Button variant="outline" disabled={busy === 'invoice'} onClick={openInvoice}>
-              <FileText className="w-4 h-4 mr-2" />
-              {busy === 'invoice' ? 'Opening…' : 'Generate Invoice'}
-            </Button>
+            <>
+              <Button variant="outline" disabled={busy === 'invoice'} onClick={() => runInvoice('')}>
+                <FileText className="w-4 h-4 mr-2" />
+                {busy === 'invoice' ? 'Opening…' : 'Generate Invoice'}
+              </Button>
+              <Button variant="outline" disabled={busy === 'invoice'} onClick={openB2bInvoice}>
+                <FileText className="w-4 h-4 mr-2" />
+                Generate B2B Invoice
+              </Button>
+            </>
           )}
           {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'make' && (
             <Button disabled={busy === 'amazon-label'} onClick={runAmazonLabel}>
@@ -484,9 +574,14 @@ export default function OrderDetailPage() {
             </Button>
           )}
           {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
-            <Button disabled={busy === 'label'} onClick={openLabel}>
+            <Button disabled={busy === 'label'} onClick={() => openLabel(false)}>
               <Printer className="w-4 h-4 mr-2" />
               {busy === 'label' ? 'Opening…' : 'Generate Label'}
+            </Button>
+          )}
+          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (order.awb || ['Dispatched', 'Ready to Ship'].includes(order.status)) && (
+            <Button variant="outline" disabled={busy === 'cancel-label'} onClick={runCancelLabel}>
+              {busy === 'cancel-label' ? 'Cancelling…' : 'Cancel Label'}
             </Button>
           )}
           {can(PERMISSIONS.ORDERS_EDIT) && ['Dispatched', 'In transit'].includes(order.status) && !channelManaged && (
@@ -505,7 +600,7 @@ export default function OrderDetailPage() {
               Mark delivered
             </Button>
           )}
-          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.status === 'Delivered' && !channelManaged && (
+          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.status === 'Delivered' && !channelManaged && !order.reversePickup?.returnId && (
             <Button
               variant="outline"
               onClick={() => {
@@ -518,8 +613,53 @@ export default function OrderDetailPage() {
               Book reverse pickup
             </Button>
           )}
+          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && order.reversePickup?.returnId && (
+            <Button
+              variant="outline"
+              className="text-destructive"
+              disabled={busy === 'cancel-reverse'}
+              onClick={async () => {
+                setBusy('cancel-reverse');
+                const next = await cancelReversePickup(order.id);
+                setBusy('');
+                if (next?.error) {
+                  toast.error(next.error);
+                  return;
+                }
+                toast.success(next.message || 'Reverse pickup cancelled');
+              }}
+            >
+              {busy === 'cancel-reverse' ? 'Cancelling…' : 'Cancel reverse pickup'}
+            </Button>
+          )}
         </div>
       </div>
+
+      {order.reversePickup?.returnId && (
+        <div role="note" className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+          <span className="font-medium">Reverse pickup {order.reversePickup.returnId}</span>
+          {' · '}
+          {order.reversePickup.courier || 'Courier pending'}
+          {' · '}
+          <span className="font-mono">{order.reversePickup.awb || 'AWB pending'}</span>
+          {reverseTrackUrl(order.reversePickup.courier, order.reversePickup.awb) && (
+            <>
+              {' · '}
+              <a
+                href={reverseTrackUrl(order.reversePickup.courier, order.reversePickup.awb)}
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Track
+              </a>
+            </>
+          )}
+          {' · '}
+          <Link to="/returns" className="underline">Open Returns</Link>
+          {' to print the reverse label, add AWB, or cancel.'}
+        </div>
+      )}
 
       {amazonOrder && (
         <div role="note" className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
@@ -661,6 +801,9 @@ export default function OrderDetailPage() {
                 <TableHead>Qty</TableHead>
                 <TableHead>Fulfil from</TableHead>
                 <TableHead>Price</TableHead>
+                <TableHead>Discount</TableHead>
+                <TableHead>Final Amount</TableHead>
+                <TableHead>HSN</TableHead>
                 <TableHead>Weight</TableHead>
                 <TableHead>Size (L × B × H)</TableHead>
               </TableRow>
@@ -690,7 +833,12 @@ export default function OrderDetailPage() {
                         aria-label={`Print barcode for ${item.sku}`}
                         onClick={() => {
                           try {
-                            printBarcodeLabel({ value: item.barcode || item.sku, name: item.name, price: item.price });
+                            printBarcodeLabel({
+                              value: item.barcode || item.sku,
+                              sku: item.sku,
+                              name: item.name,
+                              price: item.finalPrice > 0 ? item.finalPrice : item.price,
+                            });
                           } catch (err) {
                             toast.error(err.message);
                           }
@@ -716,7 +864,37 @@ export default function OrderDetailPage() {
                       <Badge variant="outline">{item.fulfilmentSource || order.fulfilmentSource}</Badge>
                     )}
                   </TableCell>
-                  <TableCell>{formatINR(item.price)}</TableCell>
+                  <TableCell>
+                    <div className="text-xs space-y-0.5">
+                      <div>Price: <span className="font-medium">{formatINR(item.price)}</span></div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {Number(item.discount) > 0 ? (
+                      <span className="font-medium text-red-600">{formatINR(item.discount)}</span>
+                    ) : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-semibold">
+                      {formatINR(item.finalPrice > 0 ? item.finalPrice : item.price)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs">
+                    <div className="flex items-center gap-1">
+                      <span>{item.hsn || '—'}</span>
+                      {can(PERMISSIONS.ORDERS_EDIT) && !order.invoiceGeneratedAt && (
+                        <button
+                          type="button"
+                          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          title="Edit HSN (also updates product and Shopify)"
+                          aria-label={`Edit HSN for ${item.sku}`}
+                          onClick={() => openHsn(item, index)}
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell className="whitespace-nowrap">
                     <div>{packageWeight(item.package)}</div>
                     {item.package && (
@@ -988,14 +1166,18 @@ export default function OrderDetailPage() {
 
       <Modal
         open={labelOpen}
-        onOpenChange={setLabelOpen}
-        title="Generate label"
-        description="Choose the courier for this order. Only couriers enabled for this company are shown."
+        onOpenChange={(open) => { setLabelOpen(open); if (!open) setLabelWithInvoice(false); }}
+        title={labelWithInvoice ? 'Generate Label & Invoice (4×6)' : 'Generate label'}
+        description={labelWithInvoice
+          ? 'Books the courier AWB, then opens Label + Invoice as two 4×6 pages for a thermal printer.'
+          : 'Choose the courier for this order. Only couriers enabled for this company are shown.'}
         footer={
           <>
-            <Button variant="outline" onClick={() => setLabelOpen(false)}>Cancel</Button>
-            <Button disabled={busy === 'label'} onClick={saveLabel}>
-              {busy === 'label' ? 'Booking…' : `Book ${picked.name}`}
+            <Button variant="outline" onClick={() => { setLabelOpen(false); setLabelWithInvoice(false); }}>Cancel</Button>
+            <Button disabled={busy === 'label' || busy === 'label-invoice'} onClick={saveLabel}>
+              {(busy === 'label' || busy === 'label-invoice')
+                ? 'Booking…'
+                : (labelWithInvoice ? `Book ${picked.name} + Invoice` : `Book ${picked.name}`)}
             </Button>
           </>
         }
@@ -1027,19 +1209,19 @@ export default function OrderDetailPage() {
       <Modal
         open={invoiceOpen}
         onOpenChange={setInvoiceOpen}
-        title="Generate invoice"
-        description="Billed To and Ship To come from the order's customer details. For a B2B sale, add the buyer's GSTIN; it is saved on this order only and is not sent to Shopify."
+        title="Generate B2B invoice"
+        description="Billed To and Ship To come from the order's customer details. Enter the buyer's GSTIN for this B2B sale; it is saved on this order only and is not sent to Shopify."
         footer={
           <>
             <Button variant="outline" onClick={() => setInvoiceOpen(false)}>Cancel</Button>
-            <Button disabled={busy === 'invoice'} onClick={runInvoice}>
-              {busy === 'invoice' ? 'Opening…' : 'Generate Invoice'}
+            <Button disabled={busy === 'invoice' || !customerGstin.trim()} onClick={() => runInvoice(customerGstin)}>
+              {busy === 'invoice' ? 'Opening…' : 'Generate B2B Invoice'}
             </Button>
           </>
         }
       >
         <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="invoice-customer-gstin">Customer GSTIN (B2B, optional)</label>
+          <label className="text-sm font-medium" htmlFor="invoice-customer-gstin">Customer GSTIN (B2B)</label>
           <Input
             id="invoice-customer-gstin"
             value={customerGstin}
@@ -1047,7 +1229,7 @@ export default function OrderDetailPage() {
             placeholder="07AAQCP4784P1ZB"
             maxLength={15}
           />
-          <div className="text-xs text-muted-foreground">Leave empty for a normal customer (B2C) invoice.</div>
+          <div className="text-xs text-muted-foreground">Required for B2B. Normal B2C invoices use Generate Invoice (no GSTIN step).</div>
         </div>
       </Modal>
 
@@ -1122,6 +1304,35 @@ export default function OrderDetailPage() {
       </Modal>
 
       <Modal
+        open={Boolean(hsnItem)}
+        onOpenChange={(open) => { if (!open) setHsnItem(null); }}
+        title={`HSN · ${hsnItem?.sku || 'item'}`}
+        description="Saved on this order line, the Master SKU / product, and pushed to Shopify when the SKU is mapped."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setHsnItem(null)}>Cancel</Button>
+            <Button disabled={busy === 'hsn'} onClick={saveHsn}>
+              {busy === 'hsn' ? 'Saving…' : 'Save HSN'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-1">
+          <label className="text-sm font-medium" htmlFor="order-item-hsn">HSN code</label>
+          <Input
+            id="order-item-hsn"
+            inputMode="numeric"
+            maxLength={8}
+            value={hsnDraft}
+            onChange={(e) => setHsnDraft(e.target.value.replace(/\D/g, '').slice(0, 8))}
+            placeholder="4–8 digits"
+            autoFocus
+          />
+          {hsnItem?.name && <div className="text-xs text-muted-foreground">{hsnItem.name}</div>}
+        </div>
+      </Modal>
+
+      <Modal
         open={reverseOpen}
         onOpenChange={setReverseOpen}
         title="Book reverse pickup"
@@ -1133,6 +1344,11 @@ export default function OrderDetailPage() {
               disabled={busy === 'reverse'}
               onClick={async () => {
                 setBusy('reverse');
+                if (!String(reverseAwb || '').trim()) {
+                  toast.error('Enter the reverse AWB from BlueDart / courier so tracking shows on Returns');
+                  setBusy('');
+                  return;
+                }
                 const next = await bookReversePickup(order.id, { reason: reverseReason, courier: reverseCourier, awb: reverseAwb });
                 setBusy('');
                 if (next?.error) {
@@ -1141,6 +1357,7 @@ export default function OrderDetailPage() {
                 }
                 toast.success(`${next?.reversePickup?.returnId || 'Return'} is on the Returns tab`);
                 setReverseOpen(false);
+                setReverseAwb('');
                 navigate('/returns');
               }}
             >
@@ -1165,7 +1382,8 @@ export default function OrderDetailPage() {
           </div>
           <div>
             <label className="text-sm font-medium">Reverse AWB</label>
-            <Input value={reverseAwb} onChange={(e) => setReverseAwb(e.target.value)} placeholder="From the courier booking (optional)" />
+            <Input value={reverseAwb} onChange={(e) => setReverseAwb(e.target.value)} placeholder="AWB from the BlueDart / courier booking" />
+            <p className="mt-1 text-xs text-muted-foreground">Required. OMS does not book BlueDart reverse by API — paste the AWB from the courier portal.</p>
           </div>
         </div>
       </Modal>

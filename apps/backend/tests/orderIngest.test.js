@@ -203,7 +203,7 @@ describe('order ingestion', () => {
     assert.equal(row.subOrders[0].assignedVendor, '');
   });
 
-  it('creates the master SKU from the order line when a new Shopify SKU arrives before the catalog pull', async () => {
+  it('does not invent a Master SKU from a Shopify order when the SKU is not in the catalog', async () => {
     const { tenant } = await seller();
     const tenantId = String(tenant._id);
     const mapped = shopify.mapShopifyOrder({
@@ -213,19 +213,31 @@ describe('order ingestion', () => {
     }, {});
     await ingestChannelOrders(tenantId, 'shopify', [mapped]);
 
-    const master = await MasterSku.findOne({ tenantId: tenant._id, code: 'LEH-AD-21122' }).setOptions({ skipTenantFilter: true });
-    assert.ok(master, 'master SKU is created on the first order');
+    assert.equal(
+      await MasterSku.countDocuments({ tenantId: tenant._id, code: 'LEH-AD-21122' }).setOptions({ skipTenantFilter: true }),
+      0,
+      'order ingest must not create ghost catalog rows for deleted / unknown Shopify SKUs',
+    );
+    assert.equal(
+      await SkuMapping.countDocuments({ tenantId: tenant._id, channelSkuCode: 'LEH-AD-21122' }).setOptions({ skipTenantFilter: true }),
+      0,
+    );
     const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-4407' }).setOptions({ skipTenantFilter: true });
-    assert.equal(String(order.items[0].masterSkuId), String(master._id));
+    assert.equal(order.items[0].masterSkuId, null);
     const row = (await ordersFor(tenant, { status: 'all' })).find((one) => one.id === 'SHP-4407');
-    assert.notEqual(row.status, 'Unfulfillable');
+    assert.equal(row.status, 'Unfulfillable');
+    assert.equal(row.mappingFailed, true);
 
     const { importChannel } = require('../src/services/catalogMapping.service');
     const pull = await importChannel(tenantId, null, 'shopify', [
       { channelSkuCode: 'LEH-AD-21122', channelVariantId: '555', channelProductId: '777', title: 'Bandhani Dupatta', price: 3499 },
     ]);
-    assert.equal(pull.exists, 1);
-    assert.equal(await MasterSku.countDocuments({ tenantId: tenant._id, code: /^LEH-AD-21122/ }).setOptions({ skipTenantFilter: true }), 1);
+    assert.equal(pull.created, 1);
+    await ingestChannelOrders(tenantId, 'shopify', [mapped], { refresh: true });
+    const linked = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-4407' }).setOptions({ skipTenantFilter: true });
+    const master = await MasterSku.findOne({ tenantId: tenant._id, code: 'LEH-AD-21122' }).setOptions({ skipTenantFilter: true });
+    assert.ok(master);
+    assert.equal(String(linked.items[0].masterSkuId), String(master._id));
   });
 
   it('copies the master SKU GST rate and HSN onto a Shopify order line', async () => {

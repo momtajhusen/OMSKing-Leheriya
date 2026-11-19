@@ -144,6 +144,16 @@ async function masterNamesFor(tenantId, skus) {
  * Builds the OMS order shape from one or more Myntra seller-order payloads
  * (GET /partner/v4/order/:sellerOrderId or the create-order push) that share a Myntra orderId.
  */
+/** Myntra MNOW / hyperlocal: courier SFX_HL or AWB like MYSFXHL… */
+function isMyntraHyperlocal({ awb, courier, channelLines } = {}) {
+  const blob = [
+    awb,
+    courier,
+    ...(channelLines || []).flatMap((line) => [line.trackingNumber, line.courierCode]),
+  ].filter(Boolean).join(' ');
+  return /SFX_?HL|HYPERLOCAL|MNOW/i.test(blob);
+}
+
 function mapMyntraOrder(orderId, details, masters = new Map()) {
   const head = details[0] || {};
   const lines = [];
@@ -189,9 +199,12 @@ function mapMyntraOrder(orderId, details, masters = new Map()) {
   const firstWith = (key) => channelLines.find((l) => l[key])?.[key] || '';
   const createdOn = lines.map(({ line }) => parseMyntraDate(line.createdOn)).filter(Boolean).sort((a, b) => a - b)[0];
   const tracking = firstWith('trackingNumber');
+  const courierCode = firstWith('courierCode');
   const address = [head.address, head.locality].filter(Boolean).join(', ');
   const city = [head.city, head.stateName || head.state, head.zipcode].filter(Boolean).join(', ');
   const status = orderStatus(channelLines);
+  const courier = tracking ? (courierCode || 'Myntra Logistics') : '';
+  const hyperlocal = isMyntraHyperlocal({ awb: tracking, courier: courierCode || courier, channelLines });
 
   return {
     orderNo: `MYN-${orderId}`,
@@ -209,8 +222,9 @@ function mapMyntraOrder(orderId, details, masters = new Map()) {
     warehouseCode: String(lines[0]?.line?.warehouse || head.warehouse || ''),
     items,
     total: linesTotal(channelLines),
-    courier: tracking ? (firstWith('courierCode') || 'Myntra Logistics') : '',
+    courier,
     awb: tracking,
+    hyperlocal,
     invoiceNo: firstWith('invoiceNumber'),
     orderDate: createdOn || new Date(),
     channelLines,
@@ -276,6 +290,7 @@ async function upsertMappedOrder(tenantId, mapped) {
   require('./channelOrder.service').applyChannelTotal(existing, linesTotal(lines, [...existing.items, ...mapped.items]));
   existing.awb = mapped.awb || existing.awb;
   existing.courier = mapped.courier || existing.courier;
+  if (mapped.hyperlocal || isMyntraHyperlocal(existing)) existing.hyperlocal = true;
   existing.invoiceNo = mapped.invoiceNo || existing.invoiceNo;
   existing.warehouseCode = mapped.warehouseCode || existing.warehouseCode;
   const bySku = new Map(mapped.items.map((item) => [item.sku, item]));
@@ -465,6 +480,7 @@ module.exports = {
   omsStatus,
   orderStatus,
   parseMyntraDate,
+  isMyntraHyperlocal,
   mapMyntraOrder,
   upsertMappedOrder,
   ingestOrderSkus,

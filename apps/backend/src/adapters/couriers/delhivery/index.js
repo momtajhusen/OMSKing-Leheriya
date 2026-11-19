@@ -88,7 +88,7 @@ async function serviceable(creds, opts = {}) {
 
 async function book(creds, shipment, opts = {}) {
   const token = requireToken(creds);
-  const warehouse = String(creds.pickupWarehouse || '').trim();
+  const warehouse = String(creds.pickupWarehouse || creds.clientName || '').trim();
   if (!warehouse) {
     const err = new Error('Delhivery was not called. Pickup warehouse name is missing.');
     err.statusCode = 400;

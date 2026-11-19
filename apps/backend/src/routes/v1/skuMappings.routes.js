@@ -17,6 +17,7 @@ router.get('/summary', ...view, asyncHandler(sku.mappingSummary));
 router.get('/import-order', ...view, asyncHandler(sku.importOrderHint));
 router.post('/import', ...edit, asyncHandler(sku.importListings));
 router.post('/pull', ...edit, asyncHandler(sku.pullLiveCatalog));
+router.post('/auto-link-suggested', ...edit, asyncHandler(sku.autoLinkSuggested));
 router.post('/', ...edit, asyncHandler(sku.ingest));
 router.post(
   '/:id/map',

@@ -139,8 +139,12 @@ async function appendLedger({
   return doc;
 }
 
-function imageFromSku(sku) {
-  return firstImage(sku?.productId?.images);
+/** Prefer the channel listing photo for this Master SKU (Shopify first), else the shared Product image. */
+function imageFromSku(sku, mappings = []) {
+  const ordered = [...(mappings || [])].sort(
+    (a, b) => Number(b.channel === 'shopify') - Number(a.channel === 'shopify'),
+  );
+  return firstImage(ordered.map((row) => row.imageUrl)) || firstImage(sku?.productId?.images);
 }
 
 function mapBalance(row, warehouse, sku, catalogSku = sku) {
@@ -214,11 +218,28 @@ async function attachImages(tenantId, rows) {
   if (!skuIds.length) return rows;
   const skus = await exec(MasterSku.find({ tenantId, _id: { $in: skuIds } }, 'productId').lean(), null);
   const productIds = [...new Set(skus.map((sku) => sku.productId).filter(Boolean).map(String))];
-  const products = productIds.length
-    ? await exec(Product.find({ tenantId, _id: { $in: productIds } }, 'images').lean(), null)
-    : [];
+  const [products, mappings] = await Promise.all([
+    productIds.length
+      ? exec(Product.find({ tenantId, _id: { $in: productIds } }, 'images').lean(), null)
+      : Promise.resolve([]),
+    exec(SkuMapping.find({
+      tenantId,
+      masterSkuId: { $in: skuIds },
+      isActive: { $ne: false },
+    }, 'channel masterSkuId imageUrl').lean(), null),
+  ]);
   const imageByProduct = new Map(products.map((product) => [String(product._id), firstImage(product.images)]));
-  const imageBySku = new Map(skus.map((sku) => [String(sku._id), imageByProduct.get(String(sku.productId)) || '']));
+  const mapsByMaster = new Map();
+  mappings.forEach((map) => {
+    const id = String(map.masterSkuId);
+    if (!mapsByMaster.has(id)) mapsByMaster.set(id, []);
+    mapsByMaster.get(id).push(map);
+  });
+  const imageBySku = new Map(skus.map((sku) => {
+    const id = String(sku._id);
+    const productUrl = imageByProduct.get(String(sku.productId)) || '';
+    return [id, imageFromSku({ productId: { images: productUrl ? [productUrl] : [] } }, mapsByMaster.get(id) || [])];
+  }));
   rows.forEach((row) => { row.imageUrl = imageBySku.get(row.masterSkuId) || ''; });
   return rows;
 }
@@ -327,7 +348,7 @@ async function skuDetail(tenantId, masterSkuId) {
       productId: product ? String(product._id) : (sku.productId ? String(sku.productId) : null),
       productName: product?.name || '',
       category: product?.category || '',
-      imageUrl: imageFromSku(sku),
+      imageUrl: imageFromSku(sku, mappings),
       barcode: sku.barcode || '',
       hsnCode: sku.hsnCode || '',
       gstRatePercent: sku.gstRatePercent ?? null,

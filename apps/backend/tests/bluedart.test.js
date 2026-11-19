@@ -289,7 +289,7 @@ test('booking a Shopify order on Blue Dart needs no typed AWB, stores the label 
   assert.equal(readiness.couriers.find((row) => row.code === 'bluedart')?.api, true);
 });
 
-test('a failed Shopify fulfil after Blue Dart booked resumes without buying a second waybill', async () => {
+test('a failed Shopify fulfil after Blue Dart booked still returns the label and resumes without a second waybill', async () => {
   const tenant = await seller();
   await CourierAccount.create({
     tenantId: tenant._id, source: 'own', code: 'bluedart', name: 'Bluedart', status: 'active',
@@ -309,10 +309,14 @@ test('a failed Shopify fulfil after Blue Dart booked resumes without buying a se
     if (url.endsWith('/fulfillments.json')) return { status: 200, text: JSON.stringify({ fulfillment: { id: 99 } }) };
     throw new Error(`unexpected Shopify call ${url}`);
   };
-  await assert.rejects(() => bookOtherCourier(tenant._id, 'SHP-BD-RETRY', { courier: 'bluedart' }, {
+  const first = await bookOtherCourier(tenant._id, 'SHP-BD-RETRY', { courier: 'bluedart' }, {
     bluedartCreds: creds, bluedartRequest: blue.request, shopifyCreds: shopCreds, shopifyRequest,
-  }), /Shopify down/);
+  });
+  assert.equal(first.awb, 'BD89186876973');
+  assert.equal(first.shopifyFulfillmentId || '', '');
   assert.equal(blue.calls.filter((call) => call.url.endsWith('/GenerateWayBill')).length, 1);
+  const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-BD-RETRY' });
+  assert.equal(order.status, 'Dispatched');
   const shipment = await bookOtherCourier(tenant._id, 'SHP-BD-RETRY', { courier: 'bluedart' }, {
     bluedartCreds: creds, bluedartRequest: blue.request, shopifyCreds: shopCreds, shopifyRequest,
   });

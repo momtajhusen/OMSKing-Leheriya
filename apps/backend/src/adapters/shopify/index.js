@@ -501,6 +501,25 @@ async function pushVariantCost(creds, opts = {}) {
   return { cost };
 }
 
+/** Writes HSN (harmonized_system_code) onto the Shopify inventory item for a variant. */
+async function pushVariantHsn(creds, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
+  const itemId = await inventoryItemId(shop, token, opts.variantId, request);
+  const hsn = String(opts.hsn || '').trim();
+  const res = await request('PUT', `https://${shop}/admin/api/2024-10/inventory_items/${encodeURIComponent(itemId)}.json`, {
+    headers: shopifyHeaders(token),
+    body: { inventory_item: { id: itemId, harmonized_system_code: hsn || null } },
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Shopify inventory item returned ${res.status}. HSN was not saved to Shopify.`);
+    err.statusCode = res.status === 401 || res.status === 403 || res.status === 404 || res.status === 422 ? 400 : 502;
+    throw err;
+  }
+  return { hsn, inventoryItemId: itemId };
+}
+
 async function readLocationAvailable(creds, opts = {}) {
   const { variantId, locationId } = opts;
   const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
@@ -548,7 +567,12 @@ async function fulfillOrder(creds, opts = {}) {
     err.statusCode = 502;
     throw err;
   }
-  const fulfillmentOrderId = JSON.parse(listed.text || '{}').fulfillment_orders?.[0]?.id;
+  const fos = JSON.parse(listed.text || '{}').fulfillment_orders || [];
+  const openFo = fos.find((fo) => {
+    const status = String(fo?.status || 'open').toLowerCase();
+    return status === 'open' || status === 'in_progress' || status === 'scheduled';
+  });
+  const fulfillmentOrderId = openFo?.id;
   if (!fulfillmentOrderId) {
     const err = new Error('Shopify has no open fulfillment order. Tracking was not sent.');
     err.statusCode = 400;
@@ -627,21 +651,39 @@ async function updateOrderAddress(creds, opts = {}) {
 }
 
 function codGateways(creds) {
-  return String(creds?.codGateways || 'COD, Cash on Delivery')
+  return String(creds?.codGateways || 'COD, Cash on Delivery, cash_on_delivery, Cash on Delivery (COD)')
     .split(',')
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean);
 }
 
+/** Shopify "Payment terms: Due on receipt" (common on draft → order COD) is not a gateway name. */
+function shopifyDueOnReceipt(order) {
+  const terms = order?.payment_terms;
+  if (!terms || typeof terms !== 'object') return false;
+  const type = String(terms.payment_terms_type || '').toLowerCase();
+  const name = String(terms.payment_terms_name || '').toLowerCase();
+  return type === 'receipt' || /due on receipt|cash on delivery|\bcod\b/.test(name);
+}
+
 function shopifyPayment(order, creds) {
   const financial = String(order?.financial_status || '').toLowerCase();
-  if (financial === 'voided') return 'Void';
   if (financial === 'partially_paid') return 'Partially paid';
   const names = [...(order?.payment_gateway_names || []), order?.gateway]
     .filter(Boolean)
     .map((name) => String(name).toLowerCase());
   const gates = codGateways(creds);
-  if (names.some((name) => gates.some((gate) => name.includes(gate)))) return 'COD';
+  const gatewayCod = names.some((name) => gates.some((gate) => name.includes(gate)));
+  const termsCod = shopifyDueOnReceipt(order);
+  // Draft orders often have empty payment_gateway_names; unpaid / due-on-receipt = COD.
+  const unpaidEmpty = !names.length && (financial === 'pending' || financial === '');
+  const draftUnpaid = String(order?.source_name || '').toLowerCase() === 'shopify_draft_order'
+    && (financial === 'pending' || financial === '' || financial === 'voided')
+    && !names.length;
+  const isCod = gatewayCod || termsCod || unpaidEmpty || draftUnpaid;
+  // Cancelled COD still shows as COD (not Prepaid). Void only when a prepaid capture was voided.
+  if (financial === 'voided') return isCod ? 'COD' : 'Void';
+  if (isCod) return 'COD';
   return 'Prepaid';
 }
 
@@ -675,13 +717,21 @@ const amountSum = (rows, key) => (rows || []).reduce((sum, row) => sum + (Number
 
 /**
  * Per-unit Shopify selling price (catalogue / line price). Coupons and discount_allocations
- * are ignored so OMS labels and item rows show the SKU selling price, not the net after promo.
+ * are kept separate on `discount` so OMS can show Price / Discount / Final.
  * GST is still added when the shop prices exclude tax.
  */
 function shopifyUnitPrice(line, taxesIncluded) {
   const ordered = Math.max(1, Number(line.quantity) || 1);
   const tax = taxesIncluded === false ? amountSum(line.tax_lines, 'price') : 0;
   return paise((Number(line.price) * ordered + tax) / ordered);
+}
+
+/** Per-unit coupon share from Shopify discount_allocations or line total_discount. */
+function shopifyLineDiscount(line) {
+  const ordered = Math.max(1, Number(line.quantity) || 1);
+  const allocated = amountSum(line.discount_allocations, 'amount');
+  const totalDiscount = Number(line.total_discount) || 0;
+  return paise((allocated || totalDiscount) / ordered);
 }
 
 function shopifyShipping(order) {
@@ -697,7 +747,12 @@ function mapShopifyOrder(order, creds) {
   if (!externalOrderId || !Array.isArray(order?.line_items)) return null;
   const cancelled = Boolean(order.cancelled_at);
   const items = order.line_items.map((line) => {
-    const qty = line.current_quantity == null ? Math.max(1, Number(line.quantity) || 1) : Number(line.current_quantity) || 0;
+    const orderedQty = Math.max(0, Number(line.quantity) || 0);
+    let qty = line.current_quantity == null ? Math.max(1, orderedQty || 1) : Number(line.current_quantity) || 0;
+    // Cancelled / restocked lines come back with current_quantity 0 — keep ordered qty so OMS does not blank the items table.
+    if (qty === 0 && cancelled && orderedQty > 0) qty = orderedQty;
+    const price = shopifyUnitPrice(line, order.taxes_included);
+    const discount = shopifyLineDiscount(line);
     return {
       name: String(line.title || line.sku || ''),
       sku: String(line.sku || '').trim(),
@@ -706,7 +761,9 @@ function mapShopifyOrder(order, creds) {
       channelVariantId: line.variant_id ? String(line.variant_id) : '',
       channelProductId: line.product_id ? String(line.product_id) : '',
       qty,
-      price: shopifyUnitPrice(line, order.taxes_included),
+      price,
+      discount,
+      finalPrice: paise(Math.max(0, price - discount)),
       locationId: String(line.origin_location?.id || order.location_id || ''),
     };
   }).filter((line) => line.sku && line.qty > 0);
@@ -734,8 +791,84 @@ function mapShopifyOrder(order, creds) {
       cancelled_at: order.cancelled_at || '',
       location_id: String(order.location_id || ''),
       gateways: order.payment_gateway_names || [],
+      source_name: String(order.source_name || ''),
+      payment_terms_name: order.payment_terms?.payment_terms_name || '',
+      payment_terms_type: order.payment_terms?.payment_terms_type || '',
     },
   };
+}
+
+/** Lifetime order count from Shopify customer search (matches Admin "40 orders"). */
+async function customerOrderCount(creds, { email, phone } = {}, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const shop = shopOf(ready);
+  const token = String(ready?.adminToken || '').trim();
+  if (!shop || !token) return { ordersCount: 0 };
+  const queries = [];
+  if (String(email || '').trim()) queries.push(`email:${String(email).trim()}`);
+  const digits = String(phone || '').replace(/\D/g, '').slice(-10);
+  if (digits.length === 10) queries.push(`phone:${digits}`);
+  if (!queries.length) return { ordersCount: 0 };
+  const request = gatedRequest(ready, opts.request, httpGet, { allowSandbox: true });
+  const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
+  // One query at a time — combined OR searches often return empty / hit rate limits harder.
+  for (const q of queries) {
+    const res = await request(`https://${shop}/admin/api/2024-10/customers/search.json?query=${encodeURIComponent(q)}&limit=1`, headers);
+    if (res.status === 429) return { ordersCount: 0, throttled: true };
+    if (res.status < 200 || res.status >= 300) continue;
+    const customer = JSON.parse(res.text || '{}').customers?.[0];
+    const n = Math.max(0, Number(customer?.orders_count) || 0);
+    if (n > 0) return { ordersCount: n };
+  }
+  return { ordersCount: 0 };
+}
+
+/** One Shopify Admin order by id — used by Single Order Sync on the order page. */
+async function pullOneOrder(creds, externalOrderId, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const shop = shopOf(ready);
+  const token = String(ready?.adminToken || '').trim();
+  const id = String(externalOrderId || '').trim();
+  if (!shop || !token) {
+    const err = new Error('Shopify order was not synced. Shop URL and Admin API token are missing.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  if (!id) {
+    const err = new Error('Shopify order was not synced. This OMS order has no Shopify order id.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const request = gatedRequest(ready, opts.request, httpGet, { allowSandbox: true });
+  const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
+  const res = await request(`https://${shop}/admin/api/2024-10/orders/${encodeURIComponent(id)}.json`, headers);
+  if (res.status === 401 || res.status === 403) {
+    const err = new Error('Shopify rejected the Admin API token. This order was not synced.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  if (res.status === 404) {
+    const err = new Error('Shopify has no order with this id. This order was not synced.');
+    err.statusCode = 404;
+    err.terminal = true;
+    throw err;
+  }
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Shopify order API returned ${res.status}. This order was not synced.`);
+    err.statusCode = res.status === 429 ? 429 : 502;
+    throw err;
+  }
+  const mapped = mapShopifyOrder(JSON.parse(res.text || '{}').order, ready);
+  if (!mapped) {
+    const err = new Error('Shopify returned this order without line items. Nothing was updated.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  return mapped;
 }
 
 async function pullOrders(creds, opts = {}) {
@@ -749,12 +882,17 @@ async function pullOrders(creds, opts = {}) {
     throw err;
   }
   const request = gatedRequest(ready, opts.request, httpGet, { allowSandbox: true });
-  const since = ready?.importOrdersFrom ? new Date(ready.importOrdersFrom) : new Date(Date.now() - 30 * 864e5);
+  const sinceRaw = opts.from || ready?.importOrdersFrom;
+  const since = sinceRaw ? new Date(sinceRaw) : new Date(Date.now() - 30 * 864e5);
   const created = Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 864e5) : since;
   const headers = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
   const orders = [];
-  let url = `https://${shop}/admin/api/2024-10/orders.json?status=any&limit=250&created_at_min=${encodeURIComponent(created.toISOString())}`;
-  for (let page = 0; page < 20 && url; page += 1) {
+  // Prefer updated_at_min on Sync so new + recently changed orders arrive without paging 30 days.
+  const useUpdated = Boolean(opts.from);
+  const timeKey = useUpdated ? 'updated_at_min' : 'created_at_min';
+  let url = `https://${shop}/admin/api/2024-10/orders.json?status=any&limit=250&${timeKey}=${encodeURIComponent(created.toISOString())}`;
+  const maxPages = useUpdated ? 5 : 20;
+  for (let page = 0; page < maxPages && url; page += 1) {
     const res = await request(url, headers);
     if (res.status === 401 || res.status === 403) {
       const err = new Error('Shopify rejected the Admin API token. Orders were not pulled.');
@@ -863,6 +1001,8 @@ module.exports = {
   pullCatalog,
   pullProducts: (creds, opts) => pullCatalog(creds, opts).then((result) => result.rows),
   mapShopifyOrder,
+  customerOrderCount,
+  pullOneOrder,
   pullOrders,
   pullReturns,
   returnRowsFromOrders,
@@ -871,6 +1011,7 @@ module.exports = {
   readLocationAvailable,
   readVariantCost,
   pushVariantCost,
+  pushVariantHsn,
   pullLocationOnHand,
   fulfillOrder,
   cancelFulfillment,

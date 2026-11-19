@@ -198,12 +198,26 @@ async function updateProduct(req, res) {
   ['name', 'description', 'brand', 'category', 'status'].forEach((key) => {
     if (req.body[key] != null) product[key] = req.body[key];
   });
-  if (req.body.hsnCode != null) product.hsnCode = assertHsnCode(req.body.hsnCode);
+  const hsnChanged = req.body.hsnCode != null;
+  if (hsnChanged) product.hsnCode = assertHsnCode(req.body.hsnCode);
   if (req.body.gstRatePercent != null) product.gstRatePercent = req.body.gstRatePercent;
   if (req.body.images != null) product.images = normalizeImages(req.body.images);
   if (req.body.tags != null) product.tags = req.body.tags;
   product.updatedBy = req.user.id;
   await product.save();
+  let shopifyPushed = 0;
+  if (hsnChanged) {
+    await MasterSku.updateMany(
+      { tenantId, productId: product._id },
+      { hsnCode: product.hsnCode },
+    ).setOptions({ skipTenantFilter: true });
+    const { pushMasterSkuHsnToShopify } = require('../services/shopifyHsn.service');
+    const variantsForPush = await MasterSku.find({ tenantId, productId: product._id }).select('_id').setOptions({ skipTenantFilter: true });
+    for (const variant of variantsForPush) {
+      const result = await pushMasterSkuHsnToShopify(tenantId, variant._id, product.hsnCode);
+      shopifyPushed += result.pushed || 0;
+    }
+  }
   await recordFromReq(req, {
     tenantId,
     action: 'sku.updated',
@@ -214,7 +228,10 @@ async function updateProduct(req, res) {
     after: productSnap(product),
   });
   const variants = await MasterSku.find({ tenantId, productId: product._id }).setOptions({ skipTenantFilter: true });
-  return successResponse(res, mapProduct(product, variants), 'Product updated');
+  const note = shopifyPushed
+    ? `Product updated. Shopify HSN on ${shopifyPushed} variant${shopifyPushed === 1 ? '' : 's'}.`
+    : 'Product updated';
+  return successResponse(res, mapProduct(product, variants), note);
 }
 
 async function getProduct(req, res) {

@@ -34,6 +34,8 @@ const tenantSchema = new mongoose.Schema({
     taxGst: {
       configured: { type: Boolean, default: false },
       defaultGstRate: { type: Number, default: 18 },
+      /** Used on invoice lines when Master SKU / product HSN is blank. */
+      defaultHsn: { type: String, default: '' },
       categories: [{
         name: { type: String, default: '' },
         gstRate: { type: Number, default: 0 },

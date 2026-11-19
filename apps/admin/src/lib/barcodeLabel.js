@@ -68,26 +68,30 @@ export function formatBarcodePrice(price) {
   return `Rs. ${Math.round(n)}/-`;
 }
 
-export function barcodeLabelPdf({ value, name, price }) {
+export function barcodeLabelPdf({ value, name, price, sku }) {
   const modules = code128Modules(value);
   const total = modules.reduce((sum, w) => sum + w, 0);
   const quiet = 8;
-  const unit = Math.min(1.2, (LABEL_WIDTH_PT - quiet * 2) / total);
+  const unit = Math.min(1.05, (LABEL_WIDTH_PT - quiet * 2) / total);
   let x = (LABEL_WIDTH_PT - unit * total) / 2;
   const priceText = formatBarcodePrice(price);
+  const skuText = String(sku || value || '').trim();
+  const secondLine = [skuText, priceText].filter(Boolean).join(' / ');
+  // 1 Name  2 SKU/Price  3 barcode (shorter)  4 barcode digits (larger)
+  const barY = 16;
+  const barH = 22;
   const bars = [];
-  // Leave room under the bars for barcode digits + Rs. price.
   modules.forEach((width, i) => {
-    if (i % 2 === 0) bars.push(`${x.toFixed(3)} 20 ${(width * unit).toFixed(3)} 36 re`);
+    if (i % 2 === 0) bars.push(`${x.toFixed(3)} ${barY} ${(width * unit).toFixed(3)} ${barH} re`);
     x += width * unit;
   });
   const content = [
-    centeredText(name, 6, 62, 38),
+    centeredText(name, 8, 58, 32),
+    ...(secondLine ? [centeredText(secondLine, 7, 46, 36)] : []),
     'q 0 g',
     ...bars,
     'f Q',
-    centeredText(value, 7, priceText ? 10 : 6, 28),
-    ...(priceText ? [centeredText(priceText, 8, 2, 22)] : []),
+    centeredText(value, 9, 5, 24),
   ].join('\n');
 
   const objects = [
@@ -110,8 +114,8 @@ export function barcodeLabelPdf({ value, name, price }) {
   return pdf;
 }
 
-export function printBarcodeLabel({ value, name, price }) {
-  const pdf = barcodeLabelPdf({ value, name, price });
+export function printBarcodeLabel({ value, name, price, sku }) {
+  const pdf = barcodeLabelPdf({ value, name, price, sku });
   const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
   if (!window.open(url, '_blank')) {
     const link = document.createElement('a');

@@ -127,9 +127,10 @@ test('an AWB booked at Delhivery is saved even if the label PDF fails, and a ret
   await shopifyOrder(tenant._id, 'S-2');
   const delhivery = delhiveryMock({ failLabelOnce: true });
   const shopify = shopifyMock();
-  await assert.rejects(bookShopify(tenant._id, 'S-2', deps(delhivery, shopify)));
-  const saved = await Shipment.findOne({ tenantId: tenant._id, orderNo: 'S-2', status: 'booked' });
-  assert.equal(saved.awb, 'AWB-1');
+  // Packing slip failure must not hide the AWB on the order.
+  const first = await bookShopify(tenant._id, 'S-2', deps(delhivery, shopify));
+  assert.equal(first.awb, 'AWB-1');
+  assert.equal((await fresh(tenant._id, 'S-2')).awb, 'AWB-1');
   const shipment = await bookShopify(tenant._id, 'S-2', deps(delhivery, shopify));
   assert.equal(createCalls(delhivery), 1);
   assert.equal(shipment.awb, 'AWB-1');
@@ -140,7 +141,10 @@ test('an AWB booked at Delhivery is saved even if the label PDF fails, and a ret
 test('a retry after the order save failed puts the AWB on the order without calling the courier', async () => {
   const tenant = await seller();
   await shopifyOrder(tenant._id, 'S-3');
-  await Shipment.create({ tenantId: tenant._id, orderNo: 'S-3', channel: 'shopify', courier: 'delhivery', awb: 'AWB-X', status: 'booked', shopifyFulfillmentId: '88', bookedAt: new Date() });
+  await Shipment.create({
+    tenantId: tenant._id, orderNo: 'S-3', channel: 'shopify', courier: 'delhivery', awb: 'AWB-X',
+    status: 'booked', shopifyFulfillmentId: '88', labelPdf: '%PDF-1.4', bookedAt: new Date(),
+  });
   const delhivery = delhiveryMock();
   await bookShopify(tenant._id, 'S-3', deps(delhivery, shopifyMock()));
   const order = await fresh(tenant._id, 'S-3');
@@ -148,6 +152,21 @@ test('a retry after the order save failed puts the AWB on the order without call
   assert.equal(order.status, 'Dispatched');
   assert.ok(order.labelGeneratedAt);
   assert.equal(delhivery.calls.length, 0);
+});
+
+test('booked Delhivery AWB with empty order.awb is stamped on retry even without Shopify fulfillment', async () => {
+  const tenant = await seller();
+  await shopifyOrder(tenant._id, 'S-3b');
+  await Shipment.create({
+    tenantId: tenant._id, orderNo: 'S-3b', channel: 'shopify', courier: 'delhivery',
+    awb: 'AWB-ORPHAN', status: 'booked', bookedAt: new Date(),
+  });
+  const delhivery = delhiveryMock();
+  await bookShopify(tenant._id, 'S-3b', deps(delhivery, shopifyMock()));
+  const order = await fresh(tenant._id, 'S-3b');
+  assert.equal(order.awb, 'AWB-ORPHAN');
+  assert.equal(order.courier, 'Delhivery');
+  assert.equal(createCalls(delhivery), 0);
 });
 
 test('a label cannot be cancelled once the courier picked the parcel up', async () => {

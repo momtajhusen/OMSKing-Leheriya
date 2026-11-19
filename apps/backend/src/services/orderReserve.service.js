@@ -23,27 +23,37 @@ async function warehouseForLocation(tenantId, channel, locationId) {
   return Warehouse.findOne({ _id: map.warehouseId, tenantId }).setOptions({ skipTenantFilter: true });
 }
 
-async function masterFromShopifyLine(tenantId, sku, item) {
-  const { ingestListing } = require('./catalogMapping.service');
-  try {
-    const out = await ingestListing(tenantId, null, {
+/**
+ * Resolve an existing Shopify ↔ Master SKU link for an order line.
+ * Never creates a Master SKU / Product here — that belongs to catalog pull / CSV.
+ * Order-time createMaster left ghost catalog rows after Shopify deleted the listing.
+ */
+async function existingShopifyMapping(tenantId, sku, item) {
+  if (item.channelVariantId) {
+    const byVariant = await SkuMapping.findOne({
+      tenantId,
       channel: 'shopify',
-      channelSkuCode: sku,
-      channelVariantId: item.channelVariantId || sku,
-      channelProductId: item.channelProductId || '',
-      title: item.name || sku,
-      price: item.price,
-      image: item.imageUrl || '',
-    }, { createMaster: true });
-    return out.mapping?.masterSkuId ? out.mapping : null;
-  } catch (err) {
-    console.error('[ORDER INGEST] master SKU not created for', sku, err.message);
-    return null;
+      channelVariantId: String(item.channelVariantId),
+      masterSkuId: { $ne: null },
+      isActive: { $ne: false },
+    }).setOptions({ skipTenantFilter: true });
+    if (byVariant) return byVariant;
   }
+  if (!sku) return null;
+  return SkuMapping.findOne({
+    tenantId,
+    channel: 'shopify',
+    channelSkuCode: sku,
+    masterSkuId: { $ne: null },
+    isActive: { $ne: false },
+  }).setOptions({ skipTenantFilter: true });
 }
 
 async function prepareChannelItems(tenantId, channel, items = []) {
   const id = channelIdOf(channel);
+  const Tenant = require('../models/Tenant');
+  const tenant = await Tenant.findById(tenantId).select('settings.taxGst.defaultHsn').setOptions({ skipTenantFilter: true }).lean();
+  const defaultHsn = String(tenant?.settings?.taxGst?.defaultHsn || '').trim();
   const next = [];
   for (const item of items) {
     const sku = String(item.sku || '').trim();
@@ -56,7 +66,7 @@ async function prepareChannelItems(tenantId, channel, items = []) {
         masterSkuId: { $ne: null },
       }).setOptions({ skipTenantFilter: true })
       : null;
-    if (!mapping && sku && id === 'shopify') mapping = await masterFromShopifyLine(tenantId, sku, item);
+    if (!mapping && id === 'shopify') mapping = await existingShopifyMapping(tenantId, sku, item);
     const warehouse = await warehouseForLocation(tenantId, id, item.locationId);
     const virtual = warehouse?.type === 'virtual';
     const master = mapping?.masterSkuId && (!Number(item.gst) || !item.hsn)
@@ -65,7 +75,7 @@ async function prepareChannelItems(tenantId, channel, items = []) {
     next.push({
       ...item,
       sku,
-      hsn: item.hsn || master?.hsnCode || '',
+      hsn: item.hsn || master?.hsnCode || defaultHsn || '',
       gst: Number(item.gst) || Number(master?.gstRatePercent) || 0,
       masterSkuId: mapping?.masterSkuId || item.masterSkuId || null,
       skuMappingId: mapping?._id || item.skuMappingId || null,

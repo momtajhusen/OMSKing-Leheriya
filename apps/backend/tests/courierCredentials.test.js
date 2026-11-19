@@ -26,7 +26,7 @@ async function tenant() {
   return Tenant.create({ name: 'Leheriya', slug: `leheriya-${Date.now()}-${Math.random()}`, kind: 'merchant' });
 }
 
-test('Delhivery token saves without a pickup warehouse and does not call Delhivery', async () => {
+test('Delhivery token saves without a pickup warehouse; clientName is used as pickup when booking', async () => {
   const row = await tenant();
   const dto = await createCourier(row._id, null, {
     source: 'own',
@@ -52,8 +52,9 @@ test('Delhivery token saves without a pickup warehouse and does not call Delhive
   assert.equal(creds.apiMode || '', '');
 
   let called = false;
+  let pickupName = '';
   await assert.rejects(
-    () => delhivery.book(creds, {
+    () => delhivery.book({ apiToken: 'token-from-mail' }, {
       name: 'Buyer',
       address: 'Lane 1',
       pincode: '110001',
@@ -70,6 +71,31 @@ test('Delhivery token saves without a pickup warehouse and does not call Delhive
     /Pickup warehouse|Live API was not called/,
   );
   assert.equal(called, false);
+
+  await delhivery.book(creds, {
+    name: 'Buyer',
+    address: 'Lane 1',
+    pincode: '110001',
+    city: 'Delhi',
+    state: 'Delhi',
+    phone: '9999999999',
+    orderNo: 'ORD-1',
+    paymentMode: 'Prepaid',
+    description: 'Kurta',
+    quantity: 1,
+    amount: 100,
+    pickupAddress: 'WH',
+  }, {
+    request: async (method, url, opts = {}) => {
+      called = true;
+      const raw = String(opts.body || '');
+      const data = decodeURIComponent((raw.match(/data=([^&]+)/) || [])[1] || '');
+      pickupName = JSON.parse(data).pickup_location?.name || '';
+      return { status: 200, text: JSON.stringify({ packages: [{ waybill: 'DLV1', status: 'Success' }] }) };
+    },
+  });
+  assert.equal(called, true);
+  assert.equal(pickupName, 'PRDOSCO GLOBAL B2C');
 });
 
 test('Bluedart licence keys stay encrypted and the account fields from the mail are kept', async () => {
