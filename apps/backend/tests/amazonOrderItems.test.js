@@ -64,6 +64,7 @@ test('Amazon order pull reads the order items (seller SKU, title, qty) instead o
   const urls = [];
   const replies = [
     { status: 200, text: JSON.stringify({ access_token: 'token' }) },
+    { status: 200, text: JSON.stringify({ restrictedDataToken: 'rdt-token' }) },
     { status: 200, text: JSON.stringify({ payload: { Orders: [
       { AmazonOrderId: '402-1', OrderStatus: 'Unshipped', OrderTotal: { Amount: '1998' }, NumberOfItemsUnshipped: 2 },
       { AmazonOrderId: '402-2', OrderStatus: 'Unshipped', OrderTotal: { Amount: '500' }, NumberOfItemsUnshipped: 1 },
@@ -74,11 +75,71 @@ test('Amazon order pull reads the order items (seller SKU, title, qty) instead o
     { status: 500, text: '{}' },
   ];
   const rows = await amazon.pullOrders(creds, { request: async (_method, url) => { urls.push(url); return replies.shift(); } });
-  assert.match(urls[2], /\/orders\/v0\/orders\/402-1\/orderItems$/);
+  assert.match(urls[1], /\/tokens\/2021-03-01\/restrictedDataToken$/);
+  assert.match(urls[3], /\/orders\/v0\/orders\/402-1\/orderItems$/);
   assert.deepEqual(rows[0].items, [{ name: 'Blue kurta (Amazon)', sku: 'AMZ-K1', qty: 2, price: 999 }], 'ItemPrice is the line total: unit price = 1998 / 2');
   assert.equal(rows[0].itemsKnown, true);
   assert.equal(rows[1].items[0].sku, '402-2', 'order items call failed: the header placeholder stays');
   assert.equal(rows[1].itemsKnown, false);
+});
+
+test('Amazon order pull maps buyer name and shipping address from RDT order fields', async () => {
+  const replies = [
+    { status: 200, text: JSON.stringify({ access_token: 'token' }) },
+    { status: 200, text: JSON.stringify({ restrictedDataToken: 'rdt' }) },
+    { status: 200, text: JSON.stringify({ payload: { Orders: [{
+      AmazonOrderId: '402-9937308-0690756',
+      OrderStatus: 'Unshipped',
+      OrderTotal: { Amount: '2199', CurrencyCode: 'INR' },
+      NumberOfItemsUnshipped: 1,
+      BuyerInfo: { BuyerEmail: 'buyer@marketplace.amazon.in', BuyerName: 'Hidden' },
+      ShippingAddress: {
+        Name: 'Kavita Singh',
+        AddressLine1: '12 MG Road',
+        AddressLine2: 'Near Metro',
+        City: 'New Delhi',
+        StateOrRegion: 'Delhi',
+        PostalCode: '110001',
+        Phone: '9873384751',
+      },
+    }] } }) },
+    { status: 200, text: JSON.stringify({ payload: { OrderItems: [
+      { SellerSKU: 'LEH-GO3', Title: 'Premium Glass Organza', QuantityOrdered: 1, ItemPrice: { Amount: '2199' } },
+    ] } }) },
+  ];
+  const [row] = await amazon.pullOrders(creds, { request: async () => replies.shift() });
+  assert.equal(row.channelOrderNo, '402-9937308-0690756');
+  assert.equal(row.customer, 'Kavita Singh');
+  assert.equal(row.phone, '9873384751');
+  assert.equal(row.email, 'buyer@marketplace.amazon.in');
+  assert.equal(row.address, '12 MG Road, Near Metro');
+  assert.equal(row.shipState, 'Delhi');
+  assert.match(row.city, /New Delhi/);
+  assert.match(row.city, /110001/);
+});
+
+test('Amazon sync saves customer and address from the pull (not blank strings)', async () => {
+  const tenant = await Tenant.create({ name: 'Amazon buyer shop', slug: `amz-buyer-${Date.now()}`, kind: 'merchant' });
+  const pulled = [{
+    externalOrderId: '402-9937308-0690756',
+    channelOrderNo: '402-9937308-0690756',
+    status: 'Ready to Ship',
+    total: 2199,
+    itemsKnown: true,
+    customer: 'Kavita Singh',
+    phone: '9873384751',
+    email: 'buyer@marketplace.amazon.in',
+    address: '12 MG Road',
+    city: 'New Delhi, Delhi, 110001',
+    shipState: 'Delhi',
+    items: [{ name: 'Premium Glass Organza', sku: 'LEH-GO3', qty: 1, price: 2199 }],
+  }];
+  pulled.tenantId = tenant._id;
+  const [order] = await syncWith(pulled);
+  assert.equal(order.customer, 'Kavita Singh');
+  assert.equal(order.phone, '9873384751');
+  assert.equal(order.address, '12 MG Road');
+  assert.equal(order.channelOrderNo, '402-9937308-0690756');
 });
 
 test('Amazon sync shows the Shopify SKU and photo (Amazon photo first, Shopify photo as fallback)', async () => {

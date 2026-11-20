@@ -10,6 +10,7 @@ const creds = { apiMode: 'sandbox', sellerId: 'SELLER', refreshToken: 'r', lwaCl
 test('Amazon order pull keeps LatestShipDate as the ship-by (SLA) date', async () => {
   const replies = [
     { status: 200, text: JSON.stringify({ access_token: 'token' }) },
+    { status: 200, text: JSON.stringify({ restrictedDataToken: 'rdt' }) },
     { status: 200, text: JSON.stringify({ payload: { Orders: [{
       AmazonOrderId: '402-1', OrderStatus: 'Unshipped', PurchaseDate: '2026-11-01T08:09:00Z',
       LatestShipDate: '2026-11-02T08:30:00Z', OrderTotal: { Amount: '999' }, NumberOfItemsUnshipped: 1,

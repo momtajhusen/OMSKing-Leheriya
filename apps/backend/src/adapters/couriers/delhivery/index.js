@@ -118,6 +118,16 @@ async function book(creds, shipment, opts = {}) {
       ...(shipment.lengthCm ? { shipment_length: shipment.lengthCm } : {}),
       ...(shipment.breadthCm ? { shipment_width: shipment.breadthCm } : {}),
       ...(shipment.heightCm ? { shipment_height: shipment.heightCm } : {}),
+      // Reverse pickup (RVP): deliver the parcel to these return_* fields after customer pickup.
+      ...(shipment.returnAddress ? {
+        return_name: shipment.returnName || creds.clientName || warehouse,
+        return_add: shipment.returnAddress,
+        return_city: shipment.returnCity || '',
+        return_state: shipment.returnState || '',
+        return_country: 'India',
+        return_pin: shipment.returnPincode || '',
+        return_phone: shipment.returnPhone || '',
+      } : {}),
     }],
     pickup_location: { name: warehouse },
   });
@@ -142,6 +152,8 @@ function bookedPayment(pack) {
   return text ? 'Prepaid' : '';
 }
 
+/** Reverse pickup (RVP): same CMU create API with payment_mode Pickup.
+ *  Customer address is the pickup origin; return_* is the warehouse destination. */
 async function bookReturn(creds, shipment, opts) {
   return book(creds, { ...shipment, paymentMode: 'Pickup' }, opts);
 }
@@ -165,12 +177,13 @@ async function requestPickup(creds, opts = {}) {
   const { count } = opts;
   const token = requireToken(creds);
   const request = gatedRequest(creds, opts.request, httpCall);
+  const pickupTime = String(opts.pickupTime || '16:00:00').trim() || '16:00:00';
   const res = await request('POST', `${HOST}/fm/request/new/`, {
     headers: authHeaders(token),
     body: {
       pickup_location: creds.pickupWarehouse,
       pickup_date: new Date().toISOString().slice(0, 10),
-      pickup_time: '16:00:00',
+      pickup_time: pickupTime,
       expected_package_count: count,
     },
   });
@@ -179,7 +192,12 @@ async function requestPickup(creds, opts = {}) {
     err.statusCode = 502;
     throw err;
   }
-  return { count };
+  const json = parseJson(res.text);
+  const nested = json.Upload_Pickup_Request_Response || json.pickup_request || json;
+  const pickupId = String(
+    nested.pickup_id || nested.pickupId || json.pickup_id || json.pickupId || json.pickup_location || '',
+  ).trim();
+  return { count, pickupId, pickupTime: pickupTime.slice(0, 5) };
 }
 
 async function cancelAwb(creds, awb, opts = {}) {
@@ -201,13 +219,35 @@ function mapScanStatus(text) {
   const value = String(text || '').toLowerCase();
   if (!value) return '';
   if (value.includes('rto') || value.includes('return to origin')) return 'rto';
-  if (value.includes('ndr') || value.includes('consignee') || value.includes('undelivered') || value.includes('not available')) return 'ndr';
+  // Delhivery NDR: Status often stays "Pending" while StatusType=UD / Instructions explain the fail.
+  if (
+    /\bud\b/.test(value)
+    || value.includes('ndr')
+    || value.includes('consignee')
+    || value.includes('undelivered')
+    || value.includes('not available')
+    || value.includes('unavailable')
+    || value.includes('refused')
+    || value.includes('rejected')
+    || value.includes('door locked')
+    || value.includes('incorrect address')
+    || value.includes('wrong address')
+    || value.includes('failed delivery')
+    || value.includes('delivery failed')
+  ) return 'ndr';
   if (value.includes('out for delivery')) return 'out_for_delivery';
   if (value.includes('delivered')) return 'delivered';
   if (value.includes('transit')) return 'in_transit';
   if (/not picked|pickup scheduled|pending pickup|pickup request|manifest/.test(value)) return '';
   if (/picked|pick done|pickup done/.test(value)) return 'picked_up';
   return '';
+}
+
+function delhiveryScanBlob(row = {}) {
+  return [row.Scan, row.StatusType, row.statusType, row.Instructions, row.Status]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ');
 }
 
 async function trackShipment(creds, awb, opts = {}) {
@@ -226,7 +266,7 @@ async function trackShipment(creds, awb, opts = {}) {
   const scans = Array.isArray(shipment.Scans) ? shipment.Scans : [];
   const events = scans.map((scan) => {
     const row = scan.ScanDetail || scan;
-    const status = mapScanStatus(row.Scan || row.Instructions || '');
+    const status = mapScanStatus(delhiveryScanBlob(row));
     if (!status) return null;
     return {
       status,
@@ -234,9 +274,15 @@ async function trackShipment(creds, awb, opts = {}) {
       eventKey: `${awb}:${row.ScanDateTime || row.Scan || status}:${status}`,
     };
   }).filter(Boolean);
-  if (!events.length) {
-    const status = mapScanStatus(shipment.Status?.Status || '');
-    if (status) events.push({ status, detail: String(shipment.Status?.Status || ''), eventKey: `${awb}:${status}:current` });
+  // Package Status/StatusType carries the live NDR even when older transit scans already mapped.
+  const packageBlob = delhiveryScanBlob(shipment.Status || {});
+  const packageStatus = mapScanStatus(packageBlob);
+  if (packageStatus) {
+    const detail = String(shipment.Status?.Instructions || shipment.Status?.Status || packageStatus);
+    const already = events.some((row) => row.status === packageStatus && row.detail === detail);
+    if (!already) {
+      events.push({ status: packageStatus, detail, eventKey: `${awb}:${packageStatus}:current` });
+    }
   }
   return events;
 }

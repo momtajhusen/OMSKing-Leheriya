@@ -30,6 +30,15 @@ function cityOf(order) {
   return String(order.city || '').replace(/\b\d{6}\b/, '').replace(/,/g, ' ').trim() || 'City';
 }
 
+/** Channel/Shopify order id for courier portals & recon — never the internal OMS SHP- orderNo. */
+function courierOrderRef(order) {
+  const channel = String(order?.channelOrderNo || '').replace(/^#/, '').trim();
+  if (channel) return channel;
+  const external = String(order?.externalOrderId || '').trim();
+  if (external && !/^gid:\/\//i.test(external) && !/^SHP-/i.test(external)) return external;
+  return String(order?.orderNo || '').trim();
+}
+
 async function delhiveryCreds(tenantId) {
   const { activeCourierCreds } = require('./courierAccount.service');
   return activeCourierCreds(tenantId, 'delhivery');
@@ -107,13 +116,52 @@ async function saveShipment(doc) {
   return Shipment.create(doc);
 }
 
-/** AWB/label already booked — Shopify tracking is best-effort so Generate Label still finishes. */
+/** Push AWB to Shopify as a fulfillment. Failures surface so Unfulfilled is never silent. */
 async function pushShopifyTracking(shopCreds, opts) {
   try {
-    return await shopify.fulfillOrder(shopCreds, opts);
-  } catch {
-    return { fulfillmentId: '' };
+    return await shopify.fulfillOrder(shopCreds, {
+      ...opts,
+      orderId: shopify.restOrderId(opts.orderId) || opts.orderId,
+    });
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    const status = Number(err.statusCode) || 502;
+    const next = new HttpError(
+      status,
+      err.message || 'Shopify was not marked fulfilled. The AWB is saved — fix Shopify and Generate Label / mark Dispatched again.',
+    );
+    if (err.terminal) next.terminal = true;
+    throw next;
   }
+}
+
+/** When an AWB already exists, mark Shopify fulfilled and stamp the shipment. */
+async function syncShopifyFulfillment(tenantId, order, deps = {}) {
+  if (String(order.channel || '').toLowerCase() !== 'shopify') return null;
+  const awb = String(order.awb || '').trim();
+  if (!awb) return null;
+  const shipment = await skip(Shipment.findOne({ tenantId, orderNo: order.orderNo, status: 'booked' }));
+  if (shipment?.shopifyFulfillmentId) return shipment;
+  const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
+  if (!shopify.hasShopifyAuth(shopCreds)) {
+    throw new HttpError(400, 'Shopify shop URL and admin token are missing. The order was not marked fulfilled in Shopify.');
+  }
+  const companyRaw = String(order.courier || shipment?.courier || 'Delhivery');
+  const company = /delhivery/i.test(companyRaw) ? 'Delhivery'
+    : /blue\s*dart|bluedart/i.test(companyRaw) ? 'Blue Dart'
+      : companyRaw;
+  const fulfilled = await pushShopifyTracking(shopCreds, {
+    orderId: order.externalOrderId || order.orderNo,
+    trackingNumber: awb,
+    company,
+    request: deps.shopifyRequest,
+  });
+  if (shipment) {
+    shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
+    await shipment.save();
+    return shipment;
+  }
+  return fulfilled;
 }
 
 const BOOKING_LOCK_MS = 2 * 60 * 1000;
@@ -232,9 +280,9 @@ async function bookShopifyNow(tenantId, orderNo, deps = {}) {
       city: cityOf(order),
       state: '',
       phone: order.phone || pickup.phone,
-      orderNo: order.orderNo,
+      orderNo: courierOrderRef(order),
       paymentMode: pay,
-      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo,
+      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || courierOrderRef(order),
       quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
       amount: order.total || 0,
       codAmount: pay === 'COD' ? codCollectAmount(order) : 0,
@@ -267,12 +315,14 @@ async function bookShopifyNow(tenantId, orderNo, deps = {}) {
   const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: shipment.awb,
+    company: 'Delhivery',
     request: deps.shopifyRequest,
   });
-  if (fulfilled?.fulfillmentId) {
-    shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
-    await shipment.save();
+  if (!fulfilled?.fulfillmentId) {
+    throw new HttpError(502, 'Delhivery AWB is booked, but Shopify was not marked fulfilled. Generate Label again to push tracking.');
   }
+  shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
+  await shipment.save();
   await stampDelhiveryOrder(shipment);
   return shipment;
 }
@@ -410,9 +460,9 @@ async function bookMarutiNow(tenantId, order, account, deps = {}) {
       pincode,
       phone: order.phone || pickup.phone,
       email: order.email,
-      orderNo: order.orderNo,
+      orderNo: courierOrderRef(order),
       paymentMode: pay,
-      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo,
+      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || courierOrderRef(order),
       quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
       amount: order.total || 0,
       codAmount: pay === 'COD' ? codCollectAmount(order) : 0,
@@ -431,6 +481,13 @@ async function bookMarutiNow(tenantId, order, account, deps = {}) {
       bookedAt: new Date(),
     });
   }
+  // Stamp AWB before Shopify so a fulfill failure can retry without a second courier booking.
+  order.awb = shipment.awb;
+  order.courier = account.name;
+  order.labelPaymentMode = pay;
+  order.status = 'Dispatched';
+  order.labelGeneratedAt = order.labelGeneratedAt || new Date();
+  await order.save();
   const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: shipment.awb,
@@ -439,12 +496,6 @@ async function bookMarutiNow(tenantId, order, account, deps = {}) {
   });
   shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
   await shipment.save();
-  order.awb = shipment.awb;
-  order.courier = account.name;
-  order.labelPaymentMode = pay;
-  order.status = 'Dispatched';
-  order.labelGeneratedAt = new Date();
-  await order.save();
   return shipment;
 }
 
@@ -472,9 +523,9 @@ async function bookAmazonShippingNow(tenantId, order, account, deps = {}) {
       pincode,
       phone: order.phone || pickup.phone,
       email: order.email,
-      orderNo: order.orderNo,
+      orderNo: courierOrderRef(order),
       paymentMode: pay,
-      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo,
+      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || courierOrderRef(order),
       quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
       amount: order.total || 0,
       codAmount: pay === 'COD' ? codCollectAmount(order) : 0,
@@ -494,6 +545,12 @@ async function bookAmazonShippingNow(tenantId, order, account, deps = {}) {
       bookedAt: new Date(),
     });
   }
+  order.awb = shipment.awb;
+  order.courier = account.name;
+  order.labelPaymentMode = pay;
+  order.status = 'Dispatched';
+  order.labelGeneratedAt = order.labelGeneratedAt || new Date();
+  await order.save();
   const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: shipment.awb,
@@ -502,12 +559,6 @@ async function bookAmazonShippingNow(tenantId, order, account, deps = {}) {
   });
   shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
   await shipment.save();
-  order.awb = shipment.awb;
-  order.courier = account.name;
-  order.labelPaymentMode = pay;
-  order.status = 'Dispatched';
-  order.labelGeneratedAt = new Date();
-  await order.save();
   return shipment;
 }
 
@@ -534,9 +585,9 @@ async function bookBluedartNow(tenantId, order, account, deps = {}) {
       state: order.shipState || '',
       pincode,
       phone: order.phone || pickup.phone,
-      orderNo: order.orderNo,
+      orderNo: courierOrderRef(order),
       paymentMode: pay,
-      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo,
+      description: (order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || courierOrderRef(order),
       quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
       amount: order.total || 0,
       codAmount: pay === 'COD' ? codCollectAmount(order) : 0,
@@ -555,6 +606,12 @@ async function bookBluedartNow(tenantId, order, account, deps = {}) {
       bookedAt: new Date(),
     });
   }
+  order.awb = shipment.awb;
+  order.courier = account.name;
+  order.labelPaymentMode = pay;
+  order.status = 'Dispatched';
+  order.labelGeneratedAt = order.labelGeneratedAt || new Date();
+  await order.save();
   const fulfilled = await pushShopifyTracking(shopCreds, {
     orderId: order.externalOrderId || order.orderNo,
     trackingNumber: shipment.awb,
@@ -563,12 +620,6 @@ async function bookBluedartNow(tenantId, order, account, deps = {}) {
   });
   shipment.shopifyFulfillmentId = fulfilled.fulfillmentId;
   await shipment.save();
-  order.awb = shipment.awb;
-  order.courier = account.name;
-  order.labelPaymentMode = pay;
-  order.status = 'Dispatched';
-  order.labelGeneratedAt = new Date();
-  await order.save();
   return shipment;
 }
 
@@ -685,13 +736,16 @@ async function cancelShopifyLabel(tenantId, orderNo, { releaseReserve = false, d
     shipment.courierCancelledAt = new Date();
     await shipment.save();
   }
-  if (shipment.shopifyFulfillmentId) {
-    const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
-    await shopify.cancelFulfillment(shopCreds, {
-      fulfillmentId: shipment.shopifyFulfillmentId,
+  // Clear Shopify fulfillment by stored id, or look up live fulfillments on the order.
+  const shopCreds = deps.shopifyCreds || await require('./shopifyAuth.service').shopifyCreds(tenantId);
+  if (shopify.hasShopifyAuth(shopCreds)) {
+    await shopify.cancelOrderFulfillments(shopCreds, {
+      fulfillmentId: shipment.shopifyFulfillmentId || '',
+      orderId: order.externalOrderId || order.orderNo,
       request: deps.shopifyRequest,
     });
   }
+  shipment.shopifyFulfillmentId = '';
   shipment.status = 'cancelled';
   shipment.cancelledAt = new Date();
   if (releaseReserve) {
@@ -700,9 +754,11 @@ async function cancelShopifyLabel(tenantId, orderNo, { releaseReserve = false, d
   }
   await shipment.save();
   order.awb = '';
+  order.courier = '';
   order.labelGeneratedAt = null;
   order.handoverAt = null;
   order.manifestNo = '';
+  order.manifestPickupId = '';
   order.pickedUpAt = null;
   order.status = 'New';
   await order.save();
@@ -912,6 +968,142 @@ async function runShipmentJob(job, deps = {}) {
   return { booked: booked.length, pickup: waiting.length };
 }
 
+function isDelhiveryReverse(name) {
+  return /delhivery/i.test(String(name || ''));
+}
+
+function isBluedartReverse(name) {
+  return /blue\s*dart|bluedart/i.test(String(name || ''));
+}
+
+function reverseCourierLabel(name) {
+  if (isDelhiveryReverse(name)) return 'Delhivery';
+  if (isBluedartReverse(name)) return 'Bluedart';
+  return String(name || '').trim();
+}
+
+/** Book reverse pickup: Delhivery / Blue Dart via API when AWB is blank; other couriers need a pasted AWB. */
+async function bookReversePickup(tenantId, order, { courier, reason, awb, deps = {} } = {}) {
+  const courierName = String(courier || '').trim();
+  if (!courierName) throw new HttpError(400, 'Pick the reverse courier.');
+  let finalAwb = String(awb || '').trim();
+  const pastedAwb = finalAwb;
+  const returnId = order.reversePickup?.returnId
+    || `RET-${courierOrderRef(order) || String(order.orderNo).replace(/-LEH$/i, '')}`;
+  const note = String(reason || 'Customer reverse pickup').trim();
+  const pincode = pinOf(order);
+  const pack = !finalAwb && (isDelhiveryReverse(courierName) || isBluedartReverse(courierName))
+    ? await orderPackage(tenantId, order.items || [])
+    : null;
+  const pickup = !finalAwb && (isDelhiveryReverse(courierName) || isBluedartReverse(courierName))
+    ? await pickupWarehouse(tenantId)
+    : null;
+
+  if (!finalAwb && isDelhiveryReverse(courierName)) {
+    if (!/^\d{6}$/.test(pincode)) {
+      throw new HttpError(400, 'This order has no 6-digit customer pincode, so Delhivery reverse was not booked.');
+    }
+    const creds = deps.delhiveryCreds || await delhiveryCreds(tenantId);
+    const request = deps.delhiveryRequest;
+    await delhivery.serviceable(creds, { pincode, paymentMode: 'Prepaid', request });
+    const booked = await delhivery.bookReturn(creds, {
+      ...pack,
+      name: order.customer || 'Customer',
+      address: order.address || order.city,
+      pincode,
+      city: cityOf(order),
+      state: String(order.shipState || '').trim(),
+      phone: order.phone || pickup.phone,
+      orderNo: returnId,
+      description: note || ((order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo),
+      quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
+      amount: order.total || 0,
+      pickupAddress: pickup.address,
+      returnName: pickup.name,
+      returnAddress: pickup.line1 || pickup.address,
+      returnCity: pickup.city,
+      returnState: pickup.state,
+      returnPincode: pickup.pincode,
+      returnPhone: pickup.phone,
+    }, { request });
+    finalAwb = String(booked.awb || '').trim();
+  }
+
+  if (!finalAwb && isBluedartReverse(courierName)) {
+    if (!/^\d{6}$/.test(pincode)) {
+      throw new HttpError(400, 'This order has no 6-digit customer pincode, so Blue Dart reverse was not booked.');
+    }
+    const CourierAccount = require('../models/CourierAccount');
+    const account = deps.bluedartCreds
+      ? null
+      : await skip(CourierAccount.findOne({ tenantId, code: BLUE_DART, status: 'active' }));
+    if (!deps.bluedartCreds && !bluedartApiReady(account, deps)) {
+      throw new HttpError(
+        400,
+        'Bluedart reverse needs Apigee credentials in Settings › Couriers, or paste the AWB from the Blue Dart portal.',
+      );
+    }
+    const booked = await bluedart.bookReturn(bluedartCreds(account, deps), {
+      ...pack,
+      name: order.customer || 'Customer',
+      address: order.address || order.city,
+      city: cityOf(order),
+      state: String(order.shipState || '').trim(),
+      pincode,
+      phone: order.phone || pickup.phone,
+      orderNo: returnId,
+      description: note || ((order.items || []).map((item) => item.name || item.sku).filter(Boolean).join(', ') || order.orderNo),
+      quantity: (order.items || []).reduce((sum, item) => sum + (Number(item.qty) || 1), 0) || 1,
+      amount: order.total || 0,
+      pickup,
+    }, { request: deps.bluedartRequest });
+    finalAwb = String(booked.awb || '').trim();
+  }
+
+  if (!finalAwb) {
+    throw new HttpError(
+      400,
+      isDelhiveryReverse(courierName)
+        ? 'Delhivery reverse did not return an AWB. Check the API token and warehouse name in Settings › Couriers.'
+        : isBluedartReverse(courierName)
+          ? 'Blue Dart reverse did not return an AWB. Check Bluedart in Settings › Couriers, or paste the AWB from the portal.'
+          : `${courierName} reverse is not booked by OMS API yet. Paste the AWB from the courier portal.`,
+    );
+  }
+
+  const CustomerReturn = require('../models/CustomerReturn');
+  const existing = await skip(CustomerReturn.findOne({ tenantId, returnNo: returnId }));
+  if (!existing) {
+    await CustomerReturn.create({
+      tenantId,
+      returnNo: returnId,
+      orderNo: order.orderNo,
+      channel: order.channel || '',
+      status: 'Pending',
+      reason: note,
+      kind: 'customer',
+      labelAwb: finalAwb,
+      items: (order.items || []).map((item) => ({
+        sku: item.sku || '',
+        qty: item.qty || 1,
+        name: item.name || '',
+      })),
+    });
+  } else if (!existing.labelAwb) {
+    existing.labelAwb = finalAwb;
+    await existing.save();
+  }
+
+  const viaApi = !pastedAwb && (isDelhiveryReverse(courierName) || isBluedartReverse(courierName));
+  return {
+    returnId,
+    awb: finalAwb,
+    courier: reverseCourierLabel(courierName),
+    reason: note,
+    bookedViaApi: viaApi,
+  };
+}
+
 module.exports = {
   bookShopify,
   bookOtherCourier,
@@ -928,4 +1120,7 @@ module.exports = {
   rateEstimate,
   assertStatusChange,
   courierLabelPdf,
+  bookReversePickup,
+  syncShopifyFulfillment,
+  courierOrderRef,
 };

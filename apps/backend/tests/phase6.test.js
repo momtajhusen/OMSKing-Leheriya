@@ -13,6 +13,7 @@ const InventoryLedger = require('../src/models/InventoryLedger');
 const IntegrationJob = require('../src/models/IntegrationJob');
 const CustomerReturn = require('../src/models/CustomerReturn');
 const Shipment = require('../src/models/Shipment');
+const NdrCase = require('../src/models/NdrCase');
 const CourierAccount = require('../src/models/CourierAccount');
 const { stockIn, restockReturn, reserveStock } = require('../src/services/inventory.service');
 const { ensureDefaultWarehouses } = require('../src/services/warehouse.service');
@@ -155,6 +156,182 @@ test('an NDR scan does not create a new order, and reattempt or RTO stays on it'
   assert.equal(rto.order.channelStatus, 'RTO');
   assert.equal(String(rto.order._id), String(order._id));
   assert.equal(await Order.countDocuments({ tenantId: tenant._id }), before);
+});
+
+test('a delivered scan closes the NDR case so it leaves the NDR queue', async () => {
+  const { tenant } = await seller(`ndr-del-${Date.now()}`);
+  const order = await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-NDR-DEL',
+    channelOrderNo: '68977-LEH',
+    channel: 'Shopify',
+    status: 'Dispatched',
+    awb: 'AWB-NDR-DEL',
+    courier: 'Delhivery',
+    source: 'manual',
+  });
+  await applyTracking(tenant._id, {
+    orderNo: order.orderNo, awb: order.awb, status: 'ndr', detail: 'UNDELIVERED', attempt: 1,
+  });
+  assert.ok((await listNdr(tenant._id)).some((row) => row.orderNo === 'SHP-NDR-DEL'));
+  await applyTracking(tenant._id, {
+    orderNo: order.orderNo, awb: order.awb, status: 'delivered', detail: 'Delivered',
+  });
+  assert.equal((await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-NDR-DEL' })).status, 'Delivered');
+  assert.equal((await listNdr(tenant._id)).some((row) => row.orderNo === 'SHP-NDR-DEL'), false);
+});
+
+test('NDR queue hides leftover cases when the order is already Delivered', async () => {
+  const { tenant } = await seller(`ndr-left-${Date.now()}`);
+  await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-NDR-LEFT',
+    channel: 'Shopify',
+    status: 'Delivered',
+    awb: 'AWB-LEFT',
+    source: 'manual',
+  });
+  await NdrCase.create({
+    tenantId: tenant._id, orderNo: 'SHP-NDR-LEFT', awb: 'AWB-LEFT', status: 'reattempt', reason: 'UNDELIVERED', attempt: 2,
+  });
+  assert.equal((await listNdr(tenant._id)).some((row) => row.orderNo === 'SHP-NDR-LEFT'), false);
+});
+
+test('Delhivery Pending scan still opens NDR when Instructions / StatusType say undelivered', async () => {
+  const { tenant } = await seller(`ndr-pending-${Date.now()}`);
+  await CourierAccount.create({
+    tenantId: tenant._id,
+    code: 'delhivery',
+    name: 'Delhivery',
+    source: 'own',
+    status: 'active',
+    credentialsEnc: encryptObject({ apiToken: 'dlv-test' }),
+  });
+  await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-NDR-PEND',
+    channelOrderNo: '70046-LEH',
+    channel: 'Shopify',
+    status: 'Dispatched',
+    awb: '64747510000001',
+    courier: 'Delhivery',
+    source: 'manual',
+  });
+  await Shipment.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-NDR-PEND',
+    channel: 'shopify',
+    courier: 'delhivery',
+    awb: '64747510000001',
+    status: 'booked',
+    trackingEvents: [],
+  });
+  const result = await pollDelhivery(tenant._id, 'SHP-NDR-PEND', {
+    delhiveryCreds: { apiToken: 'dlv-test' },
+    delhiveryRequest: async () => ({
+      status: 200,
+      text: JSON.stringify({
+        ShipmentData: [{
+          Shipment: {
+            Status: { Status: 'Pending', StatusType: 'UD', Instructions: 'Consignee unavailable' },
+            Scans: [
+              { ScanDetail: { Scan: 'In Transit', Instructions: 'In transit', ScanDateTime: '2026-11-19T10:00:00' } },
+              { ScanDetail: { Scan: 'Pending', Instructions: 'Consignee unavailable', ScanDateTime: '2026-11-20T09:00:00', StatusType: 'UD' } },
+            ],
+          },
+        }],
+      }),
+    }),
+  });
+  assert.ok(result.applied >= 1);
+  const listed = await listNdr(tenant._id);
+  const hit = listed.find((row) => row.orderNo === 'SHP-NDR-PEND');
+  assert.ok(hit, 'Delhivery UD / Consignee unavailable must open an NDR row');
+  assert.equal(hit.courier, 'Delhivery');
+  assert.match(String(hit.reason || ''), /consignee|undelivered|unavailable/i);
+});
+
+test('pollOpenShipments checks recent Delhivery AWBs first, not only the oldest 50', async () => {
+  const { tenant } = await seller(`ndr-poll-${Date.now()}`);
+  await CourierAccount.create({
+    tenantId: tenant._id,
+    code: 'delhivery',
+    name: 'Delhivery',
+    source: 'own',
+    status: 'active',
+    credentialsEnc: encryptObject({ apiToken: 'dlv-test' }),
+  });
+  const old = await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-OLD',
+    channel: 'Shopify',
+    status: 'Dispatched',
+    awb: '11111111111111',
+    courier: 'Delhivery',
+    source: 'manual',
+    updatedAt: new Date('2026-01-01'),
+  });
+  await Order.collection.updateOne({ _id: old._id }, { $set: { updatedAt: new Date('2026-01-01') } });
+  for (let i = 0; i < 210; i += 1) {
+    await Order.create({
+      tenantId: tenant._id,
+      orderNo: `SHP-MID-${i}`,
+      channel: 'Shopify',
+      status: 'Dispatched',
+      awb: `2222222222${String(i).padStart(4, '0')}`,
+      courier: 'Delhivery',
+      source: 'manual',
+    });
+  }
+  const recent = await Order.create({
+    tenantId: tenant._id,
+    orderNo: 'SHP-RECENT-NDR',
+    channelOrderNo: '70046-LEH',
+    channel: 'Shopify',
+    status: 'Dispatched',
+    awb: '64747510999999',
+    courier: 'Delhivery',
+    source: 'manual',
+  });
+  await Shipment.create({
+    tenantId: tenant._id,
+    orderNo: recent.orderNo,
+    channel: 'shopify',
+    courier: 'delhivery',
+    awb: recent.awb,
+    status: 'booked',
+    trackingEvents: [],
+  });
+  const seen = [];
+  await pollOpenShipments(tenant._id, {
+    delhiveryCreds: { apiToken: 'dlv-test' },
+    delhiveryRequest: async (_method, url) => {
+      const awb = String(url).split('waybill=')[1] || '';
+      seen.push(awb);
+      if (awb === '64747510999999') {
+        return {
+          status: 200,
+          text: JSON.stringify({
+            ShipmentData: [{
+              Shipment: {
+                Status: { Status: 'Pending', StatusType: 'UD', Instructions: 'Customer refused delivery' },
+                Scans: [{ ScanDetail: { Scan: 'Pending', Instructions: 'Customer refused delivery', StatusType: 'UD', ScanDateTime: 't1' } }],
+              },
+            }],
+          }),
+        };
+      }
+      return {
+        status: 200,
+        text: JSON.stringify({
+          ShipmentData: [{ Shipment: { Status: { Status: 'In Transit' }, Scans: [{ ScanDetail: { Scan: 'In Transit', ScanDateTime: 't0' } }] } }],
+        }),
+      };
+    },
+  });
+  assert.ok(seen.includes('64747510999999'), 'recent Delhivery AWB must be in the poll batch');
+  assert.equal(seen.includes('11111111111111'), false, 'oldest stale AWB must not crowd out recent ones when batch is capped');
+  assert.ok((await listNdr(tenant._id)).some((row) => row.orderNo === 'SHP-RECENT-NDR'));
 });
 
 test('return receive restocks WH-001 and raises channel ATS for the chosen channels', async () => {

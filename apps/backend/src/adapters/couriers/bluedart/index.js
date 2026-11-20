@@ -259,11 +259,17 @@ async function book(creds, shipment, opts = {}) {
   if (!/^\d{6}$/.test(pickupPin)) {
     throw refuse('The pickup warehouse needs a 6-digit pincode before Blue Dart can book. Set it on the warehouse in Settings › Warehouses.');
   }
-  const cod = shipment.paymentMode === 'COD';
+  const reverse = Boolean(shipment.reversePickup);
+  const cod = !reverse && shipment.paymentMode === 'COD';
   const customerCode = String(cod && creds.customerCodeCod ? creds.customerCodeCod : creds.customerCode).trim();
   const call = await session(creds, opts);
   const pickupAt = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const pickupTime = `${String(pickupAt.getHours()).padStart(2, '0')}${String(pickupAt.getMinutes()).padStart(2, '0')}`;
+  const shipperName = String(pickup.name || 'Shipper').slice(0, 30);
+  const shipperLine1 = String(pickup.line1 || pickup.address || '').slice(0, 30);
+  const shipperCity = String(pickup.city || '').slice(0, 30);
+  const shipperState = String(pickup.state || '').slice(0, 30);
+  const shipperPhone = String(pickup.phone || '').replace(/\D/g, '').slice(-10);
   const json = await call('GenerateWayBill', 'POST', '/waybill/v1/GenerateWayBill', {
     Request: {
       Consignee: {
@@ -276,17 +282,28 @@ async function book(creds, shipment, opts = {}) {
         ConsigneeAttention: String(shipment.name || 'Customer').slice(0, 30),
       },
       Shipper: {
-        CustomerAddress1: String(pickup.line1 || pickup.address || '').slice(0, 30),
-        CustomerAddress2: String(pickup.city || '').slice(0, 30),
-        CustomerAddress3: String(pickup.state || '').slice(0, 30),
+        CustomerAddress1: shipperLine1,
+        CustomerAddress2: shipperCity,
+        CustomerAddress3: shipperState,
         CustomerCode: customerCode,
-        CustomerMobile: String(pickup.phone || '').replace(/\D/g, '').slice(-10),
-        CustomerName: String(pickup.name || 'Shipper').slice(0, 30),
+        CustomerMobile: shipperPhone,
+        CustomerName: shipperName,
         CustomerPincode: pickupPin,
         OriginArea: String(creds.originArea || '').trim() || undefined,
-        Sender: String(pickup.name || 'Shipper').slice(0, 30),
-        VendorCode: String(creds.vendorCode || customerCode).trim() || undefined,
+        Sender: shipperName,
+        // Vendor code is forward-only; Blue Dart reverse rejects it on many accounts.
+        ...(reverse ? {} : { VendorCode: String(creds.vendorCode || customerCode).trim() || undefined }),
       },
+      ...(reverse ? {
+        Returnadds: {
+          ReturnAddress1: shipperLine1,
+          ReturnAddress2: shipperCity,
+          ReturnAddress3: shipperState,
+          ReturnPincode: pickupPin,
+          ReturnMobile: shipperPhone,
+          ReturnContact: shipperName,
+        },
+      } : {}),
       Services: {
         ActualWeight: kg(shipment.weightGrams),
         CollectableAmount: cod ? Math.round((Number(shipment.codAmount ?? shipment.amount) || 0) * 100) / 100 : 0,
@@ -303,7 +320,8 @@ async function book(creds, shipment, opts = {}) {
         PieceCount: Math.max(1, Number(shipment.quantity) || 1),
         ProductCode: productCode(creds),
         ProductType: 1,
-        SubProductCode: cod ? 'C' : '',
+        // P = reverse prepaid; C = COD collect; blank = forward prepaid.
+        SubProductCode: reverse ? 'P' : (cod ? 'C' : ''),
         ItemCount: Math.max(1, Number(shipment.quantity) || 1),
         Commodity: {
           CommodityDetail1: String(shipment.description || shipment.orderNo).slice(0, 30),
@@ -311,6 +329,7 @@ async function book(creds, shipment, opts = {}) {
         PickupDate: `/Date(${pickupAt.getTime()})/`,
         PickupTime: pickupTime,
         RegisterPickup: true,
+        IsReversePickup: reverse,
       },
     },
     Profile: profile(creds),
@@ -320,15 +339,20 @@ async function book(creds, shipment, opts = {}) {
     || /fail|error/i.test(String(result.Status?.[0]?.StatusCode || ''));
   const awb = String(result.AWBNo || result.AwbNo || result.AWBNoGenerated || '').trim();
   if (isError || !awb) {
-    throw refuse(explainBlueDart(rawDetail(JSON.stringify(result)), { what: 'label' }) || 'Blue Dart did not return a tracking number. Nothing was booked.');
+    throw refuse(explainBlueDart(rawDetail(JSON.stringify(result)), { what: reverse ? 'reverse pickup' : 'label' }) || 'Blue Dart did not return a tracking number. Nothing was booked.');
   }
   const labelPdf = labelBuffer(result.AWBPrintContent || result.AwbPrintContent || result.LabelPrintContent);
   return {
     awb,
     shipmentId: awb,
-    paymentMode: cod ? 'COD' : 'Prepaid',
+    paymentMode: reverse ? 'Pickup' : (cod ? 'COD' : 'Prepaid'),
     labelPdf,
   };
+}
+
+/** Reverse pickup (RVP): same GenerateWayBill with IsReversePickup + SubProductCode P. */
+async function bookReturn(creds, shipment, opts = {}) {
+  return book(creds, { ...shipment, reversePickup: true, paymentMode: 'Pickup' }, opts);
 }
 
 async function cancel(creds, awb, opts = {}) {
@@ -450,6 +474,7 @@ async function track(creds, awb, opts = {}) {
 
 module.exports = {
   book,
+  bookReturn,
   cancel,
   track,
   host,

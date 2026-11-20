@@ -71,6 +71,14 @@ export default function ProductThumb({ name, src, sku, size = 'sm', className })
   );
 }
 
+/** Placeholder SKUs (blank Shopify SKU fallback) — show the product name in the list instead. */
+function itemLabel(item) {
+  const sku = String(item?.sku || '').trim();
+  const name = String(item?.name || item?.title || '').trim();
+  if (/^(VAR|PROD|LINE)-/i.test(sku)) return name || sku;
+  return sku || name || 'Item';
+}
+
 export function ItemThumbs({ items, limit = 3 }) {
   const rows = (items || []).filter(Boolean);
   if (!rows.length) return <span className="text-xs text-muted-foreground">—</span>;
@@ -79,7 +87,9 @@ export function ItemThumbs({ items, limit = 3 }) {
       {rows.slice(0, limit).map((item, index) => (
         <div key={`${item.sku || item.name || item.title || 'item'}-${index}`} className="flex items-center gap-2">
           <ProductThumb name={item.name || item.title || item.sku} sku={item.sku} src={item.imageUrl || item.image} />
-          <span className="whitespace-nowrap text-xs leading-none">{item.qty ? `${item.qty}× ` : ''}{item.sku || item.name || item.title}</span>
+          <span className="max-w-[14rem] truncate whitespace-nowrap text-xs leading-none" title={itemLabel(item)}>
+            {item.qty ? `${item.qty}× ` : ''}{itemLabel(item)}
+          </span>
         </div>
       ))}
       {rows.length > limit && (

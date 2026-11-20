@@ -126,10 +126,14 @@ export function withSubOrders(order) {
 
 export function findOrderMatch(orders, rawId) {
   const id = decodeURIComponent(String(rawId || ''));
-  return orders.find((order) => (
-    order.id === id
-    || (order.subOrders || []).some((sub) => sub.id === id)
-  )) || null;
+  const bare = id.replace(/^#/, '');
+  return orders.find((order) => {
+    const channel = String(order.channelOrderNo || '').replace(/^#/, '');
+    return order.id === id
+      || order.orderNo === id
+      || channel === bare
+      || (order.subOrders || []).some((sub) => sub.id === id);
+  }) || null;
 }
 
 export function ordersForVendor(orders, vendorName) {

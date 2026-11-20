@@ -90,7 +90,7 @@ export default function NdrPage() {
             setBusy('');
           }
         }}>
-          Check Delhivery
+          Check tracking
         </Button>
         <Button variant="outline" onClick={load}>
           <RefreshCw className="mr-2 h-4 w-4" />
@@ -103,7 +103,7 @@ export default function NdrPage() {
         <CardHeader>
           <CardTitle>NDR queue ({rows.length})</CardTitle>
           <CardDescription>
-            Shopify parcels come from Delhivery tracking. Amazon and Myntra keep NDR in their own courier.
+            Pulls failed-delivery scans from Delhivery / Blue Dart / Shree Maruti. Amazon and Myntra keep NDR in their own courier.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -120,6 +120,7 @@ export default function NdrPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Order</TableHead>
+                    <TableHead>Courier</TableHead>
                     <TableHead>AWB</TableHead>
                     <TableHead>Attempt</TableHead>
                     <TableHead>Reason</TableHead>
@@ -143,6 +144,7 @@ export default function NdrPage() {
                             <div className="text-[11px] text-muted-foreground">{row.orderNo}</div>
                           )}
                         </TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{row.courier || '—'}</TableCell>
                         <TableCell className="font-mono text-xs">{row.awb || '—'}</TableCell>
                         <TableCell>{row.attempt}</TableCell>
                         <TableCell className="max-w-[220px] whitespace-normal break-words text-sm">{row.reason}</TableCell>

@@ -87,10 +87,19 @@ function shipToState(order) {
   return parts.length > 1 ? parts[parts.length - 1] : '';
 }
 
+/** GST-inclusive unit after coupon; catalogue `price` stays for display elsewhere. */
+function invoiceUnitPrice(item) {
+  const final = Number(item?.finalPrice);
+  if (Number.isFinite(final) && final > 0) return final;
+  const price = Number(item?.price) || 0;
+  const discount = Number(item?.discount) || 0;
+  return Math.max(0, price - discount);
+}
+
 function lineTax(item, { warehouseState = '', shipState = '' } = {}) {
   const rate = Number(item.gst) || 0;
   const qty = Math.max(0, Number(item.qty) || 0) || 1;
-  const grossPaise = toPaise(item.price) * qty;
+  const grossPaise = toPaise(invoiceUnitPrice(item)) * qty;
   const taxablePaise = rate ? Math.round((grossPaise * 100) / (100 + rate)) : grossPaise;
   const taxPaise = grossPaise - taxablePaise;
   const from = stateKey(warehouseState);
@@ -390,6 +399,7 @@ module.exports = {
   stateName,
   sameState,
   shipToState,
+  invoiceUnitPrice,
   lineTax,
   hasGstRate,
   resolveLineRate,

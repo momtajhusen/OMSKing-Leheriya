@@ -205,6 +205,20 @@ test('Blue Dart asks for COD collectable amount on COD parcels', async () => {
   assert.equal(blue.calls[1].body.Request.Services.SubProductCode, 'C');
 });
 
+test('Blue Dart bookReturn sets IsReversePickup and SubProductCode P', async () => {
+  const blue = blueMock();
+  const booked = await bluedart.bookReturn(creds, parcel, { request: blue.request });
+  assert.equal(booked.awb, 'BD89186876973');
+  assert.equal(booked.paymentMode, 'Pickup');
+  const waybill = blue.calls[1];
+  assert.equal(waybill.body.Request.Services.IsReversePickup, true);
+  assert.equal(waybill.body.Request.Services.SubProductCode, 'P');
+  assert.equal(waybill.body.Request.Services.CollectableAmount, 0);
+  assert.equal(waybill.body.Request.Shipper.VendorCode, undefined);
+  assert.equal(waybill.body.Request.Returnadds.ReturnPincode, '302002');
+  assert.equal(waybill.body.Request.Consignee.ConsigneePincode, '302001');
+});
+
 test('Blue Dart is never called without API environment, package size, or gateway credentials', async () => {
   await assert.rejects(() => bluedart.book({ ...creds, apiMode: '', accountMode: '' }, parcel), /live or sandbox/);
   const blue = blueMock();
@@ -289,7 +303,7 @@ test('booking a Shopify order on Blue Dart needs no typed AWB, stores the label 
   assert.equal(readiness.couriers.find((row) => row.code === 'bluedart')?.api, true);
 });
 
-test('a failed Shopify fulfil after Blue Dart booked still returns the label and resumes without a second waybill', async () => {
+test('a failed Shopify fulfil after Blue Dart booked keeps the AWB and resumes without a second waybill', async () => {
   const tenant = await seller();
   await CourierAccount.create({
     tenantId: tenant._id, source: 'own', code: 'bluedart', name: 'Bluedart', status: 'active',
@@ -297,26 +311,32 @@ test('a failed Shopify fulfil after Blue Dart booked still returns the label and
   });
   await shopifyOrder(tenant._id, 'SHP-BD-RETRY');
   const blue = blueMock();
-  let shopCalls = 0;
-  const shopifyRequest = async (method, url, opts = {}) => {
-    shopCalls += 1;
-    if (url.includes('fulfillment_orders')) return { status: 200, text: JSON.stringify({ fulfillment_orders: [{ id: 77 }] }) };
-    if (url.endsWith('/fulfillments.json') && shopCalls < 4) {
-      const err = new Error('Shopify down');
-      err.statusCode = 502;
-      throw err;
+  let fulfillAttempts = 0;
+  const shopifyRequest = async (method, url) => {
+    if (url.includes('fulfillment_orders')) return { status: 200, text: JSON.stringify({ fulfillment_orders: [{ id: 77, status: 'open' }] }) };
+    if (url.endsWith('/fulfillments.json')) {
+      fulfillAttempts += 1;
+      if (fulfillAttempts === 1) {
+        const err = new Error('Shopify down');
+        err.statusCode = 502;
+        throw err;
+      }
+      return { status: 200, text: JSON.stringify({ fulfillment: { id: 99 } }) };
     }
-    if (url.endsWith('/fulfillments.json')) return { status: 200, text: JSON.stringify({ fulfillment: { id: 99 } }) };
     throw new Error(`unexpected Shopify call ${url}`);
   };
-  const first = await bookOtherCourier(tenant._id, 'SHP-BD-RETRY', { courier: 'bluedart' }, {
-    bluedartCreds: creds, bluedartRequest: blue.request, shopifyCreds: shopCreds, shopifyRequest,
-  });
-  assert.equal(first.awb, 'BD89186876973');
-  assert.equal(first.shopifyFulfillmentId || '', '');
+  await assert.rejects(
+    () => bookOtherCourier(tenant._id, 'SHP-BD-RETRY', { courier: 'bluedart' }, {
+      bluedartCreds: creds, bluedartRequest: blue.request, shopifyCreds: shopCreds, shopifyRequest,
+    }),
+    /Shopify down/,
+  );
   assert.equal(blue.calls.filter((call) => call.url.endsWith('/GenerateWayBill')).length, 1);
   const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-BD-RETRY' });
   assert.equal(order.status, 'Dispatched');
+  assert.equal(order.awb, 'BD89186876973');
+  const firstShip = await Shipment.findOne({ tenantId: tenant._id, orderNo: 'SHP-BD-RETRY', status: 'booked' });
+  assert.equal(firstShip.shopifyFulfillmentId || '', '');
   const shipment = await bookOtherCourier(tenant._id, 'SHP-BD-RETRY', { courier: 'bluedart' }, {
     bluedartCreds: creds, bluedartRequest: blue.request, shopifyCreds: shopCreds, shopifyRequest,
   });

@@ -6,6 +6,8 @@ const tenantSchema = new mongoose.Schema({
   kind: { type: String, enum: ['platform', 'merchant'], default: 'merchant' },
   legalEntity: {
     legalName: String,
+    /** Label / packing-slip brand; falls back to tenant name when blank. */
+    brandName: String,
     email: String,
     phone: String,
     gstin: String,
@@ -13,6 +15,12 @@ const tenantSchema = new mongoose.Schema({
     address: String,
     city: String,
     district: String,
+    /** GST / invoice seller state (e.g. Delhi, Gujarat) — never assume one tenant's state. */
+    state: String,
+    /** Shown on tax invoice header (e.g. www.example.com). */
+    website: String,
+    /** Public path e.g. /uploads/{tenantId}/logo-….png — used on labels & invoices. */
+    logoUrl: String,
   },
   status: { type: String, enum: ['active', 'suspended', 'trial'], default: 'trial' },
   plan: { type: String, default: 'growth' },

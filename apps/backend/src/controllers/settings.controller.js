@@ -22,13 +22,17 @@ function mapCompany(tenant) {
   return {
     companyName: tenant.name || '',
     legalName: legal.legalName || '',
+    brandName: legal.brandName || '',
     gstin: legal.gstin || '',
     pan: legal.pan || '',
     address: legal.address || '',
     city: legal.city || '',
     district: legal.district || '',
+    state: legal.state || '',
+    website: legal.website || String(tenant.settings?.storefrontUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
     supportEmail: legal.email || '',
     supportPhone: legal.phone || '',
+    logoUrl: legal.logoUrl || '',
     gmailUser: tenant.settings?.mail?.gmailUser || '',
     mailConfigured: Boolean(tenant.settings?.mail?.gmailUser && tenant.settings?.mail?.gmailAppPasswordEnc),
   };
@@ -48,11 +52,20 @@ async function patchCompany(req, res) {
   if (body.companyName != null) tenant.name = String(body.companyName).trim();
   tenant.legalEntity = tenant.legalEntity || {};
   if (body.legalName != null) tenant.legalEntity.legalName = String(body.legalName).trim();
+  if (body.brandName != null) tenant.legalEntity.brandName = String(body.brandName).trim();
   if (body.gstin != null) tenant.legalEntity.gstin = String(body.gstin).trim().toUpperCase();
   if (body.pan != null) tenant.legalEntity.pan = String(body.pan).trim().toUpperCase();
   if (body.address != null) tenant.legalEntity.address = String(body.address).trim();
   if (body.city != null) tenant.legalEntity.city = String(body.city).trim();
   if (body.district != null) tenant.legalEntity.district = String(body.district).trim();
+  if (body.state != null) tenant.legalEntity.state = String(body.state).trim();
+  if (body.website != null) {
+    const website = String(body.website).trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+    tenant.legalEntity.website = website;
+    tenant.settings = tenant.settings || {};
+    tenant.settings.storefrontUrl = website ? `https://${website}` : '';
+    tenant.markModified('settings');
+  }
   if (body.supportEmail != null) tenant.legalEntity.email = String(body.supportEmail).trim().toLowerCase();
   if (body.supportPhone != null) tenant.legalEntity.phone = String(body.supportPhone).trim();
   tenant.markModified('legalEntity');
@@ -81,6 +94,58 @@ async function patchCompany(req, res) {
     after,
   });
   return successResponse(res, after, 'Company saved');
+}
+
+async function uploadCompanyLogo(req, res) {
+  const tenantId = merchantTenant(req);
+  if (!req.file) throw new HttpError(400, 'Choose a logo image (JPEG, PNG, or WebP)');
+  const tenant = await Tenant.findById(tenantId);
+  if (!tenant) throw new HttpError(404, 'Tenant not found');
+  const { publicUploadPath, removeStoredUpload } = require('../middleware/uploadImage');
+  const before = mapCompany(tenant);
+  const nextUrl = publicUploadPath(tenantId, req.file.filename);
+  tenant.legalEntity = tenant.legalEntity || {};
+  const prev = String(tenant.legalEntity.logoUrl || '');
+  tenant.legalEntity.logoUrl = nextUrl;
+  tenant.markModified('legalEntity');
+  await tenant.save();
+  if (prev && prev !== nextUrl) removeStoredUpload(prev, String(tenantId));
+  const after = mapCompany(tenant);
+  await recordFromReq(req, {
+    tenantId: tenant._id,
+    action: 'company.logo_updated',
+    resourceType: 'company',
+    resourceId: tenant._id,
+    resourceDisplay: after.companyName,
+    before,
+    after,
+  });
+  return successResponse(res, after, 'Company logo saved');
+}
+
+async function clearCompanyLogo(req, res) {
+  const tenantId = merchantTenant(req);
+  const tenant = await Tenant.findById(tenantId);
+  if (!tenant) throw new HttpError(404, 'Tenant not found');
+  const { removeStoredUpload } = require('../middleware/uploadImage');
+  const before = mapCompany(tenant);
+  tenant.legalEntity = tenant.legalEntity || {};
+  const prev = String(tenant.legalEntity.logoUrl || '');
+  tenant.legalEntity.logoUrl = '';
+  tenant.markModified('legalEntity');
+  await tenant.save();
+  if (prev) removeStoredUpload(prev, String(tenantId));
+  const after = mapCompany(tenant);
+  await recordFromReq(req, {
+    tenantId: tenant._id,
+    action: 'company.logo_cleared',
+    resourceType: 'company',
+    resourceId: tenant._id,
+    resourceDisplay: after.companyName,
+    before,
+    after,
+  });
+  return successResponse(res, after, 'Company logo removed');
 }
 
 async function getTax(req, res) {
@@ -323,6 +388,8 @@ module.exports = {
   patchPackageDefaults,
   getCompany,
   patchCompany,
+  uploadCompanyLogo,
+  clearCompanyLogo,
   getTax,
   patchTax,
   uploadHsn,

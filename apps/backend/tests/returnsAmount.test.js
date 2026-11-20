@@ -27,6 +27,7 @@ test('return list sends a numeric amount from the order item prices of the retur
   await Order.create({
     tenantId: tenant._id,
     orderNo: 'SHP-5001',
+    channelOrderNo: '#70084-LEH',
     channel: 'Shopify',
     status: 'Delivered',
     items: [
@@ -53,4 +54,7 @@ test('return list sends a numeric amount from the order item prices of the retur
   assert.equal(byId['SHP-RET-2'], 1200);
   assert.equal(byId['SHP-RET-3'], 0, 'another company\'s order price must not leak into this return');
   for (const row of rows) assert.equal(Number.isFinite(row.amount), true);
+  const first = rows.find((row) => row.id === 'SHP-RET-1');
+  assert.equal(first.orderId, 'SHP-5001', 'OMS orderNo stays for lookups');
+  assert.equal(first.channelOrderNo, '70084-LEH');
 });

@@ -7,7 +7,7 @@ describe('order summary', () => {
     const now = new Date().toISOString();
     const orders = [
       {
-        id: 'A', status: 'New', total: 100, channel: 'Shopify', createdAt: now,
+        id: 'SHP-19119531655261', channelOrderNo: '70110-LEH', status: 'New', total: 100, channel: 'Shopify', createdAt: now,
         items: [{ sku: 'K1', name: 'Kurta', qty: 2, price: 50 }], subOrders: [],
       },
       {
@@ -37,6 +37,8 @@ describe('order summary', () => {
     assert.equal(summary.recent.all.length, 3);
     assert.equal(summary.recent.all[0].items, undefined);
     assert.ok(summary.recent.all[0].id);
+    const shopifyRecent = summary.recent.all.find((row) => row.id === 'SHP-19119531655261');
+    assert.equal(shopifyRecent.channelOrderNo, '70110-LEH');
     assert.equal(summary.top[0].sku, 'K1');
     assert.equal(summary.top[0].units, 3);
     assert.equal(summary.channels.find((row) => row.channel === 'Shopify').revenue, 100);

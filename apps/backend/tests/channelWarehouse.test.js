@@ -1,4 +1,5 @@
 process.env.NODE_ENV = 'test';
+process.env.REQUIRE_LOGIN_OTP = 'false';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -61,6 +62,16 @@ test.after(async () => {
   await new Promise((resolve) => server.close(resolve));
   await mongoose.disconnect();
   await memory.stop();
+});
+
+test('rejects a pure numeric warehouse code (channel location / portal id)', async () => {
+  const { token } = await company('numeric-code');
+  const res = await api('POST', '/api/v1/warehouses', {
+    token,
+    json: { code: '345345', name: 'serwer', type: 'physical' },
+  });
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.match(String(res.body?.message || res.body?.error || ''), /not a channel location|portal id|WH-003/i);
 });
 
 test('links: add, edit, make main, and remove a channel ↔ warehouse link; defaults stop being forced', async () => {

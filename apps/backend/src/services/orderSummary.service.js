@@ -228,6 +228,7 @@ function buildOrderSummary(orders, {
       .slice(0, 5)
       .map((order) => ({
         id: order.id,
+        channelOrderNo: order.channelOrderNo || '',
         customer: order.customer || '',
         channel: order.channel,
         total: order.total,

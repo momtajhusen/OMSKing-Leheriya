@@ -43,7 +43,7 @@ export default function DashboardPage() {
   const [jobs, setJobs] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loadError, setLoadError] = useState('');
-  const connected = useConnectedChannels();
+  const connected = useConnectedChannels({ refresh: true });
 
   const trendChannels = channelFilter === 'all'
     ? connected.channels
@@ -339,7 +339,12 @@ export default function DashboardPage() {
                 <TableBody>
                   {recentOrders.map((order) => (
                     <TableRow key={order.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>
-                      <TableCell className="font-medium text-primary">{order.id}</TableCell>
+                      <TableCell className="font-medium text-primary">
+                        <div>{order.channelOrderNo || order.id}</div>
+                        {order.channelOrderNo && order.channelOrderNo !== order.id && (
+                          <div className="text-[11px] font-normal text-muted-foreground">{order.id}</div>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <div>{order.customer}</div>
                         <div className="text-xs text-muted-foreground">{order.channel}</div>

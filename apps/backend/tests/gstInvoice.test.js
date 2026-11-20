@@ -22,7 +22,9 @@ test('one order PDF starts with %PDF, intra-state IGST is 0, and email is skippe
   assert.equal(pdf.igst, 0);
   assert.ok(pdf.cgst > 0 && pdf.sgst > 0);
   const text = pdf.bytes.toString('latin1');
-  assert.match(text, /567890/);
+  assert.match(text, /Invoice No: 567890/);
+  assert.match(text, /Order Id: 567890/);
+  assert.doesNotMatch(text, /Order Id: SHP-9/);
   assert.match(text, /Total CGST:/);
   assert.doesNotMatch(text, /IGST/);
 
@@ -66,6 +68,37 @@ test('one order PDF starts with %PDF, intra-state IGST is 0, and email is skippe
   assert.match(note.bytes.toString('latin1'), /CN-567890/);
 });
 
+test('B2B Shopify invoice: Invoice No and Order Id are the same order id (never SHP- vs bare id)', () => {
+  const order = {
+    channel: 'Shopify',
+    orderNo: 'SHP-7725771391069',
+    externalOrderId: '7725771391069',
+    channelOrderNo: '',
+    orderDate: new Date('2026-11-20T10:00:00Z'),
+    paymentMode: 'COD',
+    customer: 'Indian Farmers Fertilizer Cooperative Limited',
+    city: 'NEW DELHI, Delhi 110017',
+    items: [{ name: 'Bhagalpuri Madhubani Dupatta', sku: 'D1', qty: 10, price: 999, gst: 5, hsn: '5407' }],
+  };
+  const text = buildInvoicePdf(order, {
+    warehouseState: 'Delhi',
+    company: { companyName: 'PRDOSCO GLOBAL PRIVATE LIMITED', gstin: '07AAQCP4784P1ZB' },
+  }).bytes.toString('latin1');
+  assert.match(text, /Invoice No: 7725771391069/);
+  assert.match(text, /Order Id: 7725771391069/);
+  assert.doesNotMatch(text, /Order Id: SHP-7725771391069/);
+
+  const named = buildInvoicePdf({
+    ...order,
+    channelOrderNo: '#70046-LEH',
+  }, {
+    warehouseState: 'Delhi',
+    company: { companyName: 'PRDOSCO GLOBAL PRIVATE LIMITED', gstin: '07AAQCP4784P1ZB' },
+  }).bytes.toString('latin1');
+  assert.match(named, /Invoice No: 70046-LEH/);
+  assert.match(named, /Order Id: 70046-LEH/);
+});
+
 test('invoice PDF follows the client Tax Invoice format (header, three blocks, item table, totals in words)', () => {
   const order = {
     channel: 'Shopify',
@@ -96,7 +129,7 @@ test('invoice PDF follows the client Tax Invoice format (header, three blocks, i
   for (const part of [
     'GSTIN: 07AAQCP4784P1ZB', 'Tax Invoice', 'Original',
     'support@leheriya.com', 'www.leheriya.com', '+91 9873003388',
-    'Invoice No: 51585', 'Order Id: 51585', 'Invoice Date: Dec 29, 25', 'Payment: Prepaid',
+    'Invoice No: 51585', 'Order Id: 51585', 'Invoice Date: 29 DEC 2025', 'Payment: Prepaid',
     'Place of Supply', 'State Code: 07',
     'BILLED TO', 'SHIP TO', 'SUPPLIER',
     'Taxable Val', 'HSN', 'GST', 'CGST', 'SGST',
@@ -158,6 +191,20 @@ test('CGST equals SGST to the paisa and the line still adds up to the gross', ()
   assert.equal(toPaise(tax.taxable) + toPaise(tax.cgst) + toPaise(tax.sgst), toPaise(tax.gross));
   const inter = lineTax({ price: 999, qty: 1, gst: 5 }, { warehouseState: 'Delhi', shipState: 'Goa' });
   assert.deepEqual([inter.taxable, inter.igst], [951.43, 47.57]);
+});
+
+test('invoice GST uses finalPrice after discount, not the catalogue rate', () => {
+  const { lineTax, invoiceUnitPrice, invoiceTotals, toPaise } = require('../src/services/finance.service');
+  const item = { name: 'Suit', sku: 'Leh-bikat-2718', qty: 1, price: 2199, discount: 219.9, finalPrice: 1979.1, gst: 5 };
+  assert.equal(invoiceUnitPrice(item), 1979.1);
+  const tax = lineTax(item, { warehouseState: 'Delhi', shipState: 'Kerala' });
+  assert.equal(tax.gross, 1979.1);
+  assert.equal(toPaise(tax.taxable) + toPaise(tax.igst), toPaise(1979.1));
+  assert.ok(tax.gross < 2199);
+  const { totals } = invoiceTotals({
+    items: [item], channel: 'Shopify', channelOrderNo: '70077-LEH', total: 1979.1, shipState: 'Kerala',
+  }, { warehouseState: 'Delhi' });
+  assert.equal(totals.gross, 1979.1);
 });
 
 test('GST state table has codes 25, 28 and 97 without changing which code a state name resolves to', () => {
@@ -222,11 +269,11 @@ test('PDF place of supply prints the state name and code, the total row has no s
   assert.ok(text.includes('(Delhi \\(07\\))'), 'place of supply is the state, not the city');
   assert.ok(!text.includes('(NEW DELHI)'));
   assert.ok(!text.includes('Rs. 1798.00'), 'unit prices are not summed without qty');
-  assert.ok(text.includes('Invoice Date: Jan 6, 26'));
+  assert.ok(text.includes('Invoice Date: 6 JAN 2026'));
 
   const note = buildInvoicePdf(order, { warehouseState: 'Delhi', kind: 'credit' }).bytes.toString('latin1');
-  assert.ok(note.includes('Credit Note Date: Feb 11, 26'));
-  assert.ok(note.includes('Invoice Date: Jan 6, 26'));
+  assert.ok(note.includes('Credit Note Date: 11 FEB 2026'));
+  assert.ok(note.includes('Invoice Date: 6 JAN 2026'));
 });
 
 test('HTML invoice preview total is the same computed gross as the PDF, not order.total', () => {
@@ -404,7 +451,7 @@ describe('invoice API', () => {
     const issued = (await saved(tenantId, 'SHP-DATE-1')).invoiceGeneratedAt;
     assert.ok(issued);
     const firstPdf = Buffer.from(first.body.data.invoicePdf, 'base64').toString('latin1');
-    assert.ok(!firstPdf.includes('Invoice Date: Jun 1, 25'), 'the first PDF shows the issue date, not the order date');
+    assert.ok(!firstPdf.includes('Invoice Date: 1 JUN 2025'), 'the first PDF shows the issue date, not the order date');
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     await api('POST', '/api/v1/orders/SHP-DATE-1/invoice', { token, json: { email: false } });
@@ -416,6 +463,33 @@ describe('invoice API', () => {
     assert.equal(after.invoiceGeneratedAt.getTime(), issued.getTime());
     assert.ok(after.creditNoteGeneratedAt);
     assert.ok(Buffer.from(note.body.data.invoicePdf, 'base64').toString('latin1').includes('Credit Note Date:'));
+  });
+
+  test('tax invoice PDF from repaired lines is not blank (70093-LEH style custom items)', () => {
+    const order = {
+      channel: 'Shopify',
+      orderNo: 'SHP-19119715975261',
+      channelOrderNo: '70093-LEH',
+      orderDate: new Date('2026-11-20T05:00:00Z'),
+      invoiceGeneratedAt: new Date('2026-11-20T05:06:06Z'),
+      paymentMode: 'COD',
+      customer: 'Indian Farmers Fertiliser Cooperative Limited',
+      address: 'C-1 DISTRICT CENTRE, SAKET',
+      city: 'NEW DELHI, Delhi 110017',
+      shipState: 'Delhi',
+      items: [
+        { name: 'Premium Modal Silk Dupatta - Hand Dyed', sku: 'LINE-51534339801181', qty: 5, price: 2499, gst: 5, hsn: '5407' },
+        { name: 'Premium Silk Patchwork Dupatta - Handcrafted', sku: 'LINE-51534339833949', qty: 15, price: 1499, gst: 5, hsn: '5407' },
+      ],
+    };
+    const text = buildInvoicePdf(order, {
+      warehouseState: 'Delhi',
+      company: { companyName: 'PRDOSCO GLOBAL PRIVATE LIMITED', gstin: '07AAQCP4784P1ZB' },
+    }).bytes.toString('latin1');
+    assert.match(text, /Premium Modal Silk Dupatta/);
+    assert.match(text, /Premium Silk Patchwork Dupatta/);
+    assert.doesNotMatch(text, /ZERO RUPEES ONLY/);
+    assert.match(text, /Invoice No: 70093-LEH/);
   });
 
   test('an issued invoice is frozen: a later price, rate or state change does not alter the re-download or the credit note', async () => {

@@ -30,10 +30,16 @@ test('the Order ID column shows the Shopify order number with the internal id un
   assert.match(body, /row\.channelOrderNo && row\.channelOrderNo !== row\.id/);
 });
 
+test('Shipments table header has a select-all checkbox for the filtered list', () => {
+  assert.match(page, /aria-label="Select all shipments in this list"/);
+  assert.match(page, /togglePage\(prev, selectableIds\)/);
+  assert.match(page, /toggleId\(prev, row\.id\)/);
+  assert.match(page, /selectableIds\.length > 0/);
+});
+
 test('shipments show a Payment column with COD / Prepaid', () => {
-  const header = page.slice(page.indexOf('<TableHeader>'), page.indexOf('</TableHeader>'));
-  assert.match(header, /<TableHead>Payment<\/TableHead>/);
-  assert.match(page.slice(page.indexOf('<TableBody>')), /paymentModeOf\(row\)/);
+  assert.match(page, /<TableHead>Payment<\/TableHead>/);
+  assert.match(page, /paymentModeOf\(row\)/);
 });
 
 test('a Prepaid order labelled COD by the courier pops a red alert straight away', () => {
@@ -44,9 +50,8 @@ test('a Prepaid order labelled COD by the courier pops a red alert straight away
 });
 
 test('booking offers every enabled courier, not only Delhivery', () => {
-  const actions = page.slice(page.indexOf('<TableBody>'), page.indexOf('</TableBody>'));
-  assert.doesNotMatch(actions, />\s*Book Delhivery\s*</);
-  assert.match(actions, /Book courier/);
+  assert.doesNotMatch(page, />\s*Book Delhivery\s*</);
+  assert.match(page, /Book courier/);
   assert.match(page, /readiness\?\.couriers/);
   assert.match(page, /\{bookingCouriers\.map\(\(courier\) => \(/);
   assert.match(page, /generateLabel\(labelFor\.id, undefined, picked\.api \? \{\} : \{ courier: picked\.code, awb: awb\.trim\(\) \}\)/);
@@ -54,13 +59,14 @@ test('booking offers every enabled courier, not only Delhivery', () => {
 });
 
 test('delivered shipments offer Book reverse, which books the reverse pickup', () => {
-  const actions = page.slice(page.indexOf('<TableBody>'), page.indexOf('</TableBody>'));
-  assert.match(actions, /row\.shipStatus === 'Delivered' && !isChannelManaged\(row\)/);
-  assert.match(actions, /Book reverse/);
+  assert.match(page, /row\.shipStatus === 'Delivered' && !isChannelManaged\(row\)/);
+  assert.match(page, /Book reverse/);
   assert.match(page, /const bookReversePickup = useOrderStore\(\(s\) => s\.bookReversePickup\)/);
   assert.match(page, /await bookReversePickup\(reverseFor\.id, \{[\s\S]*courier: reverseCourier,[\s\S]*awb: reverseAwb/);
   assert.match(page, /title="Book reverse pickup"/);
   assert.match(page, /Reverse AWB/);
+  assert.match(page, /delhivery\|blue\\s\*dart\|bluedart\/i\.test\(reverseCourier\)/);
+  assert.match(page, /Leave blank to book via courier API/);
   assert.match(page, /Cancel reverse|reverseAwb/);
 });
 
@@ -74,4 +80,17 @@ test('Shipping filters shipment history by courier without a large courier desk 
   assert.match(page, /courierFilter/);
   assert.match(page, /All couriers/);
   assert.match(page, /shipmentMatchesCourier/);
+});
+
+test('Label generated offers Ready to hand over; Ready offers Schedule Pickup; Pickup & Manifest lists manifests', () => {
+  assert.match(page, /\{ id: 'pickup', label: 'Pickup & Manifest' \}/);
+  assert.match(page, /scheduleManifestPickup/);
+  assert.match(page, /Schedule Pickup/);
+  assert.match(page, /Courier is not notified yet/);
+  assert.match(page, /Download Manifest/);
+  assert.match(page, /manifestPrintHtml/);
+  assert.match(page, /handover-manifests\/\$\{encodeURIComponent\(manifestNo\)\}\/pickup/);
+  assert.match(page, /row\.shipStatus === 'Label generated'/);
+  assert.match(page, /sendToReady\(row\)/);
+  assert.match(page, /generateManifestPickup\(row\)/);
 });

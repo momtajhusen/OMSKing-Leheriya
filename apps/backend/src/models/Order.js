@@ -95,6 +95,7 @@ const orderSchema = new mongoose.Schema({
   labelGeneratedAt: { type: Date },
   handoverAt: { type: Date, default: null },
   manifestNo: { type: String, default: '' },
+  manifestPickupId: { type: String, default: '' },
   pickedUpAt: { type: Date, default: null },
   bookingAt: { type: Date, default: null },
   cancelSource: { type: String, enum: ['', 'oms', 'channel'], default: '' },

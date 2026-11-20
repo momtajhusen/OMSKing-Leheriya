@@ -33,6 +33,7 @@ async function tenant() {
 function amazonPull(orders, itemReplies) {
   const replies = [
     { status: 200, text: JSON.stringify({ access_token: 'token' }) },
+    { status: 200, text: JSON.stringify({ restrictedDataToken: 'rdt' }) },
     { status: 200, text: JSON.stringify({ payload: { Orders: orders } }) },
     ...itemReplies,
   ];
@@ -204,6 +205,22 @@ test('Shopify line total_discount fills discount when discount_allocations are e
   assert.equal(mapped.items[0].finalPrice, 4499.1);
 });
 
+test('order DTO keeps line discount and finalPrice for the order detail table', () => {
+  const { toOrderDto } = require('../src/lib/orderDto');
+  const dto = toOrderDto({
+    orderNo: 'SHP-19118178173021',
+    channel: 'Shopify',
+    channelOrderNo: '70077-LEH',
+    total: 1979.1,
+    items: [{
+      name: 'Suit', sku: 'Leh-bikat-2718', qty: 1, price: 2199, discount: 219.9, finalPrice: 1979.1,
+    }],
+  });
+  assert.equal(dto.items[0].price, 2199);
+  assert.equal(dto.items[0].discount, 219.9);
+  assert.equal(dto.items[0].finalPrice, 1979.1);
+});
+
 test('channel refresh keeps existing line discount when Shopify returns zero allocations', async () => {
   const t = await tenant();
   await channelOrder.ingestChannelOrders(t._id, 'shopify', [{
@@ -270,6 +287,61 @@ test('cancelled Shopify lines keep ordered qty so the items table is not wiped',
   assert.equal(mapped.items.length, 1);
   assert.equal(mapped.items[0].qty, 1);
   assert.equal(mapped.items[0].sku, 'LEHSF69');
+});
+
+test('Shopify lines without a SKU still map so the order items table is not blank', () => {
+  const mapped = mapShopifyOrder(shopifyOrder({
+    id: 19119394455645,
+    name: '#70083-LEH',
+    total_price: '3499.00',
+    line_items: [{
+      id: 11,
+      title: 'Kota Doria Suit',
+      name: 'Kota Doria Suit - Free Size',
+      sku: '',
+      quantity: 1,
+      price: '3499.00',
+      variant_id: 445566,
+      product_id: 778899,
+      vendor: 'Leheriya',
+      discount_allocations: [],
+    }],
+  }), {});
+  assert.equal(mapped.items.length, 1, 'blank SKU must not wipe the items table');
+  assert.equal(mapped.items[0].name, 'Kota Doria Suit');
+  assert.equal(mapped.items[0].qty, 1);
+  assert.equal(mapped.items[0].price, 3499);
+  assert.match(mapped.items[0].sku, /VAR-445566|PROD-778899|LINE-11|Kota/);
+  assert.equal(mapped.items[0].channelVariantId, '445566');
+});
+
+test('custom Shopify lines (no SKU, no variant) still fill the items table — live 70093-LEH', () => {
+  const mapped = mapShopifyOrder({
+    id: 19119715975261,
+    name: '70093-LEH',
+    cancelled_at: '2026-11-20T16:55:11+05:30',
+    financial_status: 'voided',
+    total_price: '34980.00',
+    current_total_price: '0.00',
+    line_items: [
+      {
+        id: 51534339801181, sku: null, variant_id: null, product_id: null,
+        title: 'Premium Modal Silk Dupatta - Hand Dyed', quantity: 5, current_quantity: 0, price: '2499.00',
+        discount_allocations: [],
+      },
+      {
+        id: 51534339833949, sku: null, variant_id: null, product_id: null,
+        title: 'Premium Silk Patchwork Dupatta - Handcrafted', quantity: 15, current_quantity: 0, price: '1499.00',
+        discount_allocations: [],
+      },
+    ],
+  }, {});
+  assert.equal(mapped.items.length, 2, 'custom B2B lines must not leave Order items blank');
+  assert.equal(mapped.items[0].qty, 5);
+  assert.equal(mapped.items[1].qty, 15);
+  assert.equal(mapped.items[0].sku, 'LINE-51534339801181');
+  assert.equal(mapped.items[1].name, 'Premium Silk Patchwork Dupatta - Handcrafted');
+  assert.equal(mapped.status, 'Cancelled');
 });
 
 test('channel refresh with empty items keeps the existing lines', async () => {

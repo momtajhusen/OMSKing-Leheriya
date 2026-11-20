@@ -169,7 +169,7 @@ export default function ChannelSetup({ showPlanNote = true }) {
         warehouseCode: credentials.warehouseCode || credentials.storeId || '',
         importOrdersFrom: credentials.importOrdersFrom || undefined,
       });
-      hydrate([data.data]);
+      hydrate([data.data], { partial: true });
       if (!quiet) toast.success(`${ch.name} saved (encrypted)`);
       return true;
     } catch (err) {
@@ -184,7 +184,7 @@ export default function ChannelSetup({ showPlanNote = true }) {
       const saved = await save(ch, { quiet: true });
       if (!saved) return;
       const { data } = await api.post(`/channels/${ch.id}/test`);
-      hydrate([data.data]);
+      hydrate([data.data], { partial: true });
       if (data.data?.ok) toast.success(data.message || 'Connected');
       else if (data.data?.incomplete) toast(data.message || 'Saved. Extra keys needed for live ping.');
       else toast.error(data.message || 'Test failed');

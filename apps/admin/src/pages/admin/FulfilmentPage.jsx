@@ -30,6 +30,23 @@ function PaymentNote({ order }) {
   return null;
 }
 
+/** Channel/Shopify order id for the table; OMS SHP- stays secondary. */
+function OrderIdCell({ order }) {
+  const channel = String(order.channelOrderNo || '').replace(/^#/, '');
+  return (
+    <TableCell className="font-medium text-primary">
+      <span>{channel || order.id}</span>
+      {channel && channel !== order.id && (
+        <div className="text-[11px] font-normal text-muted-foreground">{order.id}</div>
+      )}
+    </TableCell>
+  );
+}
+
+function orderLabel(order) {
+  return String(order.channelOrderNo || '').replace(/^#/, '') || order.id;
+}
+
 function Panel({ title, icon: Icon, tone, description, children }) {
   return (
     <section className="rounded-xl border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))]">
@@ -124,7 +141,7 @@ function VendorLineCard({ line, current, vendors, busy, onVendor, onPrice, onAss
                 {line.sku}
                 {line.split ? ' · split line' : ''}
                 {' · Master '}
-                {line.masterOrderId}
+                {line.channelOrderNo || line.masterOrderId}
               </p>
             </div>
             <Badge variant={statusBadgeVariant(line.status)} className="shrink-0">{line.status}</Badge>
@@ -188,6 +205,7 @@ function expandVendorLines(orderList) {
       key: sub.id,
       vendorOrderId: sub.id,
       masterOrderId: order.id,
+      channelOrderNo: String(order.channelOrderNo || '').replace(/^#/, ''),
       customer: order.customer,
       channel: order.channel,
       status: sub.status || order.status,
@@ -287,22 +305,22 @@ export default function FulfilmentPage() {
       return;
     }
     if (isChannelManaged(order)) {
-      toast.error(`${order.id} is a ${order.channel} order. Mark it ready in the ${order.channel} seller panel. Delhivery is not used.`);
+      toast.error(`${orderLabel(order)} is a ${order.channel} order. Mark it ready in the ${order.channel} seller panel. Delhivery is not used.`);
       return;
     }
     if (order.fulfilmentSource === 'Virtual' && !isMixedFulfilment(order)) {
-      toast.error(`${order.id} has no WH-001 units. Assign it on vendor routing.`);
+      toast.error(`${orderLabel(order)} has no WH-001 units. Assign it on vendor routing.`);
       return;
     }
     if (order.paymentMode === 'Void') {
-      toast.error(`${order.id} is Void. It is not packed or booked as COD.`);
+      toast.error(`${orderLabel(order)} is Void. It is not packed or booked as COD.`);
       return;
     }
     setBusyKey(order.id);
     const next = await setOrderStatus(order.id, 'Ready to Ship');
     setBusyKey('');
     if (next?.error) toast.error(next.error);
-    else toast.success(`${order.id} packed from WH-001 Offline`);
+    else toast.success(`${orderLabel(order)} packed from WH-001 Offline`);
   };
 
   const assignVendor = async (line) => {
@@ -421,7 +439,7 @@ export default function FulfilmentPage() {
                 <TableBody>
                   {directPage.rows.map((order) => (
                     <TableRow key={order.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>
-                      <TableCell className="font-medium text-primary">{order.id}</TableCell>
+                      <OrderIdCell order={order} />
                       <TableCell>{order.customer}</TableCell>
                       <TableCell><ItemThumbs items={order.items} /></TableCell>
                       <TableCell>{formatINR(order.total)}</TableCell>
@@ -511,7 +529,7 @@ export default function FulfilmentPage() {
                 <TableBody>
                   {holdPage.rows.map((order) => (
                     <TableRow key={order.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>
-                      <TableCell className="font-medium text-primary">{order.id}</TableCell>
+                      <OrderIdCell order={order} />
                       <TableCell>{order.customer}</TableCell>
                       <TableCell><Badge variant="outline">{order.channel}</Badge></TableCell>
                       <TableCell><ItemThumbs items={order.items} /></TableCell>
@@ -558,7 +576,7 @@ export default function FulfilmentPage() {
                 <TableBody>
                   {openPage.rows.map((order) => (
                     <TableRow key={order.id} className="cursor-pointer" onClick={() => navigate(`/orders/${encodeURIComponent(order.id)}`)}>
-                      <TableCell className="font-medium text-primary">{order.id}</TableCell>
+                      <OrderIdCell order={order} />
                       <TableCell>{order.customer}</TableCell>
                       <TableCell><ItemThumbs items={order.items} /></TableCell>
                       <TableCell>

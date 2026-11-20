@@ -50,6 +50,7 @@ const useReturnsStore = create(persist((set, get) => ({
         ...prev,
         id: pickup.returnId,
         orderId: order.id,
+        channelOrderNo: String(order.channelOrderNo || '').replace(/^#/, '') || '',
         customer: order.customer,
         reason: pickup.reason || 'Reverse pickup',
         type: 'reverse_pickup',

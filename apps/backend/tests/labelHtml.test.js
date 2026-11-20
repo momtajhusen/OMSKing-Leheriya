@@ -80,11 +80,39 @@ test('Blue Dart uses the same packing-slip format', () => {
 test('Label + Invoice is two 4×6 pages with tax invoice on page 2', () => {
   const html = labelInvoiceHtml(sample);
   assert.match(html, /size:\s*4in 6in/);
-  assert.match(html, /page-break-after:\s*always/);
+  // Break before page 2 only — never page-break-after (Chrome blank page).
+  assert.match(html, /\.page \+ \.page\s*\{[^}]*page-break-before:\s*always/);
+  assert.doesNotMatch(html, /page-break-after:\s*always/);
+  assert.doesNotMatch(html, /break-after:\s*page\b/);
   assert.equal((html.match(/class="page"/g) || []).length, 2);
   assert.match(html, /Ship to:/);
   assert.match(html, /Tax Invoice/);
   assert.match(html, /Grand Total/);
   assert.match(html, /07AAQCP4784P1ZB/);
   assert.match(html, /LEHKCPC905/);
+});
+
+test('Generate Label alone is one page — no trailing blank sheet', () => {
+  const html = labelHtml(sample);
+  assert.equal((html.match(/class="page"/g) || []).length, 1);
+  assert.doesNotMatch(html, /page-break-after:\s*always/);
+  assert.match(html, /page-break-after:\s*auto/);
+  // Print box stays under paper size so Chrome Minimum margins cannot spill page 2.
+  assert.match(html, /@media print[\s\S]*?\.page\s*\{[^}]*max-height:\s*5\.85in/);
+  assert.match(html, /@media print[\s\S]*?height:\s*5\.85in/);
+});
+
+test('company logo replaces brand text on packing slip and tax invoice page', () => {
+  const logoSrc = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const html = labelInvoiceHtml({ ...sample, logoSrc });
+  assert.match(html, /class="brand-logo"/);
+  assert.match(html, /data:image\/png;base64,/);
+  assert.equal((html.match(/class="brand-logo"/g) || []).length, 2);
+  assert.doesNotMatch(html, /class="brand-mark"/);
+});
+
+test('without logo the packing slip still shows brand text', () => {
+  const html = labelHtml(sample);
+  assert.match(html, /class="brand-mark"/);
+  assert.doesNotMatch(html, /class="brand-logo"/);
 });

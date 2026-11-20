@@ -89,7 +89,7 @@ test('each order item has a Print barcode button in its Barcode cell', () => {
   const table = page.slice(page.indexOf('<CardTitle>Order items</CardTitle>'), page.indexOf('</Table>', page.indexOf('<CardTitle>Order items</CardTitle>')));
   const cell = table.slice(table.indexOf('{item.sku}</TableCell>') + '{item.sku}</TableCell>'.length);
   const barcodeCell = cell.slice(0, cell.indexOf('</TableCell>'));
-  assert.match(barcodeCell, /printBarcodeLabel\(\{[\s\S]*value: item\.barcode \|\| item\.sku,[\s\S]*price: item\.finalPrice > 0 \? item\.finalPrice : item\.price/);
+  assert.match(barcodeCell, /printBarcodeLabel\(\{[\s\S]*value: item\.barcode \|\| item\.sku,[\s\S]*price: item\.price/);
   assert.match(barcodeCell, /aria-label=\{`Print barcode for \$\{item\.sku\}`\}/);
 });
 
@@ -228,6 +228,8 @@ test('order detail waits for a full fetch before paint so list stubs do not flas
   assert.match(store, /fetchOrder: async \(id\) =>/);
   assert.match(store, /api\.get\(`\/orders\/\$\{encodeURIComponent\(id\)\}`\)/);
   assert.match(store, /preferRicherOrder/, 'list hydrate must not wipe barcode/package from a detail fetch');
+  assert.match(store, /mergeDetailItems/, 'list hydrate merges package/hsn/barcode onto list rows');
+  assert.match(store, /item\.package && Number\(item\.package\.weightKg\) > 0/);
   assert.match(page, /const fetchOrder = useOrderStore\(\(s\) => s\.fetchOrder\)/);
   assert.match(page, /setDetailReady\(false\)/);
   assert.match(page, /fetchOrder\(orderId\)\.finally/);
@@ -258,6 +260,7 @@ test('an Amazon order shows an Easy Ship label button with a short note instead 
   assert.match(page, /!channelManaged && !amazonOrder && \(\s*<Button variant="ghost" size="sm" disabled=\{busy === sub\.id\} onClick=\{\(\) => runLabel\(sub\.id\)\}/, 'no Delhivery Label per Amazon sub-order');
   assert.match(page, /amazonLabels\(\[order\.id\]\)/);
   assert.match(page, /Make Easy Ship label/);
+  assert.match(page, /amazonStep === 'make' && \([\s\S]*?runAmazonLabel/, 'header shows Make Easy Ship label');
   assert.match(page, /openAmazonLabel\(/);
   assert.match(page, /Amazon orders use Amazon Easy Ship labels, not Delhivery/);
   assert.match(page, /to="\/shipping"/);
@@ -276,21 +279,20 @@ test('Generate Label asks which courier first: Delhivery by default, any enabled
   assert.match(page, /generateLabelInvoice/);
 });
 
-test('order header actions sit in one right-side Actions dropdown menu', () => {
+test('order header keeps All orders, Sync, and Label & Invoice on the front; rest in Actions', () => {
   assert.match(page, /DropdownMenu/);
   assert.match(page, />\s*Actions\s*</);
   assert.match(page, /DropdownMenuLabel>Label & invoice/);
-  assert.match(page, /shrink-0 self-start/);
-});
-
-test('order Actions has a Sync submenu with All and each connected channel', () => {
-  assert.match(page, /syncChannelOrder/);
-  assert.match(page, /DropdownMenuSub/);
-  assert.match(page, /runSyncAllChannels/);
-  assert.match(page, /runSyncChannel/);
-  assert.match(page, /connected\.channels\.map/);
-  assert.match(page, />\s*All\s*</);
-  assert.match(page, /label=\{busy === 'sync' \? 'Syncing…' : 'Sync'\}/);
+  assert.match(page, /flex shrink-0 flex-wrap items-start justify-end gap-2 self-start/);
+  assert.match(page, /onClick=\{\(\) => navigate\('\/orders'\)\}/);
+  assert.match(page, />\s*All orders\s*</);
+  assert.match(page, /\{busy === 'sync' \? 'Syncing…' : 'Sync'\}/);
+  assert.match(page, /title="Pull the latest copy of this order from the channel"/);
+  assert.match(page, /onClick=\{\(\) => openLabel\(true\)\}/);
+  assert.match(page, /\{busy === 'label-invoice' \? 'Opening…' : 'Generate Label & Invoice'\}/);
+  assert.doesNotMatch(page, /DropdownMenuItem onClick=\{\(\) => navigate\('\/orders'\)\}/);
+  assert.doesNotMatch(page, /DropdownMenuItem[\s\S]{0,180}openLabel\(true\)/);
+  assert.doesNotMatch(page, /DropdownMenuSub/);
   const store = fs.readFileSync(new URL('../../stores/orderStore.js', import.meta.url), 'utf8');
   assert.match(store, /\/orders\/\$\{encodeURIComponent\(orderId\)\}\/sync/);
 });

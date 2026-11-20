@@ -122,6 +122,26 @@ test('two label clicks at once book one AWB', async () => {
   assert.equal(await Shipment.countDocuments({ tenantId: tenant._id, orderNo: 'S-1', status: 'booked' }), 1);
 });
 
+test('Delhivery create uses Shopify channel order id, never OMS SHP orderNo', async () => {
+  const tenant = await seller();
+  await shopifyOrder(tenant._id, 'SHP-19119416836189', {
+    channelOrderNo: '#70084-LEH',
+    externalOrderId: '19119416836189',
+  });
+  const delhivery = delhiveryMock();
+  await bookShopify(tenant._id, 'SHP-19119416836189', deps(delhivery, shopifyMock()));
+  const created = delhivery.calls.find((call) => call.url.includes('create.json'));
+  assert.ok(created, 'Delhivery create was called');
+  const raw = String(created.body || '');
+  const encoded = raw.match(/data=([^&]+)/)?.[1] || '';
+  const payload = decodeURIComponent(encoded);
+  assert.match(payload, /"order":"70084-LEH"/);
+  assert.doesNotMatch(payload, /SHP-19119416836189/);
+  assert.equal(await Shipment.countDocuments({
+    tenantId: tenant._id, orderNo: 'SHP-19119416836189', status: 'booked',
+  }), 1, 'OMS shipment still keys on SHP orderNo');
+});
+
 test('an AWB booked at Delhivery is saved even if the label PDF fails, and a retry does not book again', async () => {
   const tenant = await seller();
   await shopifyOrder(tenant._id, 'S-2');

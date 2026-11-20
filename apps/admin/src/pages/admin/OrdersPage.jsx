@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useNavigationType, useSearchParams } from 'react-router-dom';
+import { saveOrdersListScroll, peekOrdersListScroll, clearOrdersListScroll, writeMainScrollTop } from '../../lib/listScroll';
 import { toast } from 'react-hot-toast';
 import useOrderStore from '../../stores/orderStore';
 import { formatINR, formatDate, formatDateTime, statusBadgeVariant } from '../../utils/format';
@@ -18,7 +19,7 @@ import Modal from '../../components/ui/Modal';
 import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, RotateCcw, CheckCircle, Check, X, Printer } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
-import { isChannelManaged, packetIdOf, openMyntraDocument, syncAllChannelOrders } from '../../lib/channelOrders';
+import { isChannelManaged, packetIdOf, openMyntraDocument, syncAllChannelOrders, pullOrdersNow } from '../../lib/channelOrders';
 import { isMyntraHyperlocal } from '../../lib/myntraHyperlocal';
 import { channelIssuesInvoice } from '../../lib/channelInvoice';
 import { downloadCsv, istDate } from '../../lib/orderMetrics';
@@ -166,6 +167,7 @@ function StatusColumnFilter({ value, onChange }) {
 
 export default function OrdersPage() {
   const navigate = useNavigate();
+  const navType = useNavigationType();
   const { can } = usePermissions();
   const [orderList, setOrderList] = useState([]);
   const [page, setPage] = useState(1);
@@ -186,7 +188,7 @@ export default function OrdersPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [searchParams] = useSearchParams();
   const [channelFilter, setChannelFilter] = useState(() => channelFromSearch(searchParams));
-  const connected = useConnectedChannels();
+  const connected = useConnectedChannels({ refresh: true });
   const connectedKey = connected.loaded ? (connected.labels.join(',') || '__none__') : '';
   const channelTabs = [
     { id: 'all', label: 'All channels' },
@@ -258,6 +260,53 @@ export default function OrdersPage() {
     loadOrders(page);
   }, [page, activeTab, channelFilter, paymentFilter, sourceFilter, readyFilter, parcelFilter, dateFrom, dateTo, query, connectedKey]);
 
+  // Page open / browser refresh: pull channels immediately, then reload the list (no 15‑min wait).
+  useEffect(() => {
+    if (!can(PERMISSIONS.ORDERS_EDIT) && !can(PERMISSIONS.SETTINGS_MANAGE)) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        setSyncing(true);
+        const { created, results, message } = await pullOrdersNow({ hours: 48 });
+        if (cancelled) return;
+        const failed = (results || []).filter((row) => row.status === 'failed');
+        if (created > 0) toast.success(message || `${created} new order${created === 1 ? '' : 's'} from channels`);
+        else if (failed.length && !(results || []).some((row) => row.status === 'success')) {
+          toast.error(failed[0].lastError || 'Could not pull orders');
+        }
+        await loadOrders(page);
+      } catch (err) {
+        if (!cancelled && err?.response?.status !== 403) {
+          /* keep DB list; Sync button still works */
+        }
+      } finally {
+        if (!cancelled) setSyncing(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // Only on first mount / hard refresh — not on every filter change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fresh visit (sidebar / All orders): drop any leftover scroll from an earlier order open.
+  useEffect(() => {
+    if (navType !== 'POP') clearOrdersListScroll();
+  }, [navType]);
+
+  // Browser back from order detail: put the list back where the user left it.
+  useEffect(() => {
+    if (loading || navType !== 'POP') return;
+    const y = peekOrdersListScroll();
+    if (y == null || y <= 0) return;
+    const apply = () => writeMainScrollTop(y);
+    apply();
+    const id = requestAnimationFrame(() => {
+      apply();
+      clearOrdersListScroll();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [loading, orderList.length, navType]);
+
   const filteredOrders = orderList;
 
   const kpiData = {
@@ -300,7 +349,10 @@ export default function OrdersPage() {
     }
   };
 
-  const openOrder = (order) => navigate(`/orders/${encodeURIComponent(order.id)}`);
+  const openOrder = (order) => {
+    saveOrdersListScroll();
+    navigate(`/orders/${encodeURIComponent(order.id)}`);
+  };
 
   const pageIds = filteredOrders.map((order) => order.id);
   const allPageTicked = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
@@ -608,7 +660,12 @@ export default function OrdersPage() {
                     </TableCell>
                     <TableCell>
                       {order.slaDate ? (
-                        <span className="whitespace-nowrap font-medium text-red-600" title="Dispatch by this date">{formatDateTime(order.slaDate)}</span>
+                        <div className="font-medium text-red-600" title="Dispatch by this date">
+                          <div>{formatDate(order.slaDate)}</div>
+                          <div className="text-[11px] font-normal text-red-600/80">
+                            {formatDateTime(order.slaDate).replace(/^.*,\s*/, '')}
+                          </div>
+                        </div>
                       ) : '—'}
                     </TableCell>
                     <TableCell onClick={(event) => event.stopPropagation()}>
@@ -803,8 +860,9 @@ export default function OrdersPage() {
             <Button variant="outline" onClick={() => setReverseFor(null)}>Cancel</Button>
             <Button
               onClick={async () => {
-                if (!String(reverseAwb || '').trim()) {
-                  toast.error('Enter the reverse AWB from BlueDart / courier so tracking shows on Returns');
+                const reverseApi = /delhivery|blue\s*dart|bluedart/i.test(reverseCourier);
+                if (!reverseApi && !String(reverseAwb || '').trim()) {
+                  toast.error('Enter the reverse AWB from the courier portal so tracking shows on Returns');
                   return;
                 }
                 const next = await bookReversePickup(reverseFor.id, {
@@ -845,14 +903,18 @@ export default function OrdersPage() {
             </Select>
           </div>
           <div>
-            <label className="text-sm font-medium">Reverse AWB</label>
+            <label className="text-sm font-medium">Reverse AWB{ /delhivery|blue\s*dart|bluedart/i.test(reverseCourier) ? ' (optional)' : '' }</label>
             <input
               className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-mono"
               value={reverseAwb}
               onChange={(e) => setReverseAwb(e.target.value)}
-              placeholder="AWB from the BlueDart / courier booking"
+              placeholder={/delhivery|blue\s*dart|bluedart/i.test(reverseCourier) ? 'Leave blank to book via courier API' : 'AWB from the courier portal'}
             />
-            <p className="mt-1 text-xs text-muted-foreground">Required. This is what Returns shows as reverse tracking.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {/delhivery|blue\s*dart|bluedart/i.test(reverseCourier)
+                ? 'Delhivery and Bluedart reverse are booked by OMS API from WH-001. Paste an AWB only if you already booked on the portal.'
+                : 'Required. OMS does not book this courier reverse by API — paste the AWB from the courier portal.'}
+            </p>
           </div>
         </div>
       </Modal>

@@ -18,6 +18,12 @@ test('Assignment page heading and loader use the new name', () => {
   assert.match(page, /<PageLoader label="Loading assignment\.\.\." \/>/);
 });
 
+test('Assignment Order ID column shows Shopify channelOrderNo, not only OMS SHP id', () => {
+  assert.match(page, /function OrderIdCell/);
+  assert.match(page, /channelOrderNo/);
+  assert.equal((page.match(/<OrderIdCell order=\{order\} \/>/g) || []).length, 3);
+});
+
 test('hints on other pages point to Assignment, not Fulfilment', () => {
   assert.match(vendors, /Assignment can only assign saved vendors\./);
   assert.match(vendors, /description="Assignments will show here\."/);

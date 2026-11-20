@@ -6,6 +6,7 @@ const { tenantMiddleware } = require('../../middleware/tenant');
 const { requirePermission } = require('../../middleware/requirePermission');
 const { vendorScope } = require('../../middleware/vendorScope');
 const settings = require('../../controllers/settings.controller');
+const { uploadCompanyLogo } = require('../../middleware/uploadImage');
 
 const router = require('express').Router();
 const company = [authMiddleware, tenantMiddleware, vendorScope('settings'), requirePermission('settings.manage')];
@@ -24,6 +25,8 @@ router.patch(
   validate,
   asyncHandler(settings.patchCompany),
 );
+router.post('/company/logo', ...company, uploadCompanyLogo, asyncHandler(settings.uploadCompanyLogo));
+router.delete('/company/logo', ...company, asyncHandler(settings.clearCompanyLogo));
 router.get('/tax', ...company, asyncHandler(settings.getTax));
 router.patch('/tax', ...company, asyncHandler(settings.patchTax));
 router.post('/tax/hsn', ...company, asyncHandler(settings.uploadHsn));

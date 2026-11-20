@@ -40,6 +40,10 @@ function toOrderDto(doc) {
       sku: item.sku,
       qty: item.qty,
       price: item.price,
+      discount: Number(item.discount) || 0,
+      finalPrice: Number(item.finalPrice) > 0
+        ? Number(item.finalPrice)
+        : Math.max(0, (Number(item.price) || 0) - (Number(item.discount) || 0)),
       cost: item.cost,
       hsn: item.hsn,
       gst: item.gst,
@@ -85,6 +89,7 @@ function toOrderDto(doc) {
     labelGeneratedAt: order.labelGeneratedAt || null,
     handoverAt: order.handoverAt || null,
     manifestNo: order.manifestNo || '',
+    manifestPickupId: order.manifestPickupId || '',
     pickedUpAt: order.pickedUpAt || null,
     easyShip: order.easyShip?.packageId ? {
       packageId: order.easyShip.packageId,

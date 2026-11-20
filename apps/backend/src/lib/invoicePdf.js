@@ -1,5 +1,5 @@
 const {
-  invoiceNumber, creditNoteNumber, invoiceTotals, gstStateCode, stateName, fromPaise, toPaise,
+  invoiceNumber, creditNoteNumber, invoiceTotals, invoiceUnitPrice, gstStateCode, stateName, fromPaise, toPaise,
 } = require('../services/finance.service');
 
 function escapePdfText(value) {
@@ -89,10 +89,20 @@ function rs(value) {
   return `Rs. ${Number(value || 0).toFixed(2)}`;
 }
 
+/** Tax invoice date: "20 NOV 2026" (IST). */
 function invoiceDateText(value) {
   const date = value ? new Date(value) : new Date();
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'Asia/Kolkata' });
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  }).formatToParts(date);
+  const day = parts.find((part) => part.type === 'day')?.value;
+  const month = String(parts.find((part) => part.type === 'month')?.value || '').toUpperCase();
+  const year = parts.find((part) => part.type === 'year')?.value;
+  return day && month && year ? `${day} ${month} ${year}` : '';
 }
 
 function pageCanvas() {
@@ -126,7 +136,10 @@ function buildInvoicePdf(order, { company = {}, warehouseState = '', kind = 'inv
   const {
     lines: taxes, totals, intraState, shipState: ship,
   } = invoiceTotals(order, { warehouseState });
-  const orderId = String(order.channelOrderNo || '').replace(/^#/, '') || order.orderNo || order.id || '';
+  // B2B / Shopify: Invoice No and Order Id must be the same order id (channel name, else Shopify id — never SHP- vs bare mismatch).
+  const orderId = String(order.channel || '') === 'Shopify'
+    ? invoiceNo
+    : (String(order.channelOrderNo || '').replace(/^#/, '') || order.orderNo || order.id || '');
   const L = 20;
   const R = 575;
   const page = pageCanvas();
@@ -201,7 +214,7 @@ function buildInvoicePdf(order, { company = {}, warehouseState = '', kind = 'inv
     const nameLines = wrapText(item.name || item.sku || 'Item', 30);
     nameLines.forEach((text, at) => page.text(L + 6, top + 13 + at * 10, text));
     page.text(cols.qty, top + 13, item.qty || 1);
-    page.text(cols.rate, top + 13, rs(item.price));
+    page.text(cols.rate, top + 13, rs(invoiceUnitPrice(item)));
     page.text(cols.taxable, top + 13, rs(tax.taxable));
     page.text(cols.hsn, top + 13, item.hsn || '');
     page.text(cols.gst, top + 13, `${tax.rate}%`);

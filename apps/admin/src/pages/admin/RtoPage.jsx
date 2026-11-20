@@ -20,6 +20,7 @@ import { RotateCcw, ClipboardCheck, CheckCircle, XCircle, RefreshCw, AlertTriang
 
 import { orderChannelLabel } from '../../constants/channelCatalog';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
+import { shortOrderId } from '../../lib/orderIds';
 import Pagination, { useClientPage } from '../../components/ui/Pagination';
 
 
@@ -72,7 +73,15 @@ export default function RtoPage() {
   const filtered = rows.filter((row) => {
     if (activeTab !== 'All' && row.status !== activeTab) return false;
     if (!query) return true;
-    const hay = [row.order.id, row.awb, row.reason, row.order.channel, ...(row.order.items || []).map((item) => item.sku)].join(' ').toLowerCase();
+    const hay = [
+      shortOrderId(row.order),
+      row.order.id,
+      row.order.channelOrderNo,
+      row.awb,
+      row.reason,
+      row.order.channel,
+      ...(row.order.items || []).map((item) => item.sku),
+    ].join(' ').toLowerCase();
     return hay.includes(query);
   });
   const paged = useClientPage(filtered);
@@ -158,61 +167,76 @@ export default function RtoPage() {
           <CardTitle>RTO Shipments ({filtered.length})</CardTitle>
           <CardDescription>QC status is saved in this browser. Restock posts to the inventory ledger.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-w-0">
           {filtered.length === 0 ? (
             <EmptyState title="No RTO shipments" description="An order shows here when it is cancelled after its AWB was issued." />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
+            <>
+              <Table className="!w-full !min-w-0 table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Order ID</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead>Channel</TableHead>
-                    <TableHead>AWB</TableHead>
-                    <TableHead>Reason</TableHead>
-                    <TableHead>Order date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>QC Result</TableHead>
-                    <TableHead>Restock</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead className="w-[18%]">Order · Channel</TableHead>
+                    <TableHead className="w-[16%]">Items</TableHead>
+                    <TableHead className="w-[28%]">AWB · Reason</TableHead>
+                    <TableHead className="w-[14%]">Status · QC</TableHead>
+                    <TableHead className="w-[12%]">Restock</TableHead>
+                    <TableHead className="w-[12%]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {paged.rows.map((row) => {
                     const pending = row.status === 'QC Pending';
+                    const orderLabel = shortOrderId(row.order);
                     return (
                       <TableRow key={row.id}>
-                        <TableCell className="font-medium">
-                          <button type="button" className="text-primary hover:underline" onClick={() => navigate(`/orders/${encodeURIComponent(row.order.id)}`)}>
-                            {row.order.id}
+                        <TableCell className="max-w-none">
+                          <button type="button" className="block max-w-full truncate text-left font-medium text-primary hover:underline" title={orderLabel} onClick={() => navigate(`/orders/${encodeURIComponent(row.order.id)}`)}>
+                            {orderLabel}
                           </button>
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <Badge variant="outline">{row.order.channel}</Badge>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {row.order.createdAt ? formatDate(row.order.createdAt) : '—'}
+                          </div>
                         </TableCell>
-                        <TableCell><ItemThumbs items={row.order.items} /></TableCell>
-                        <TableCell><Badge variant="outline">{row.order.channel}</Badge></TableCell>
-                        <TableCell className="font-mono text-xs">{row.awb}</TableCell>
-                        <TableCell className="max-w-[260px] whitespace-normal break-words text-sm">{row.reason}</TableCell>
-                        <TableCell>{row.order.createdAt ? formatDate(row.order.createdAt) : '—'}</TableCell>
-                        <TableCell><Badge variant={statusBadgeVariant(row.status)}>{row.status}</Badge></TableCell>
-                        <TableCell>{row.qcResult ? <Badge variant="outline">{row.qcResult}</Badge> : <span className="text-sm text-muted-foreground">—</span>}</TableCell>
-                        <TableCell>
+                        <TableCell className="max-w-none"><ItemThumbs items={row.order.items} /></TableCell>
+                        <TableCell className="max-w-none">
+                          <div className="font-mono text-xs break-all">{row.awb || '—'}</div>
+                          {row.courier && <div className="text-xs text-muted-foreground">{row.courier}</div>}
+                          <div className="mt-1 text-sm text-muted-foreground break-words">{row.reason || '—'}</div>
+                        </TableCell>
+                        <TableCell className="max-w-none">
+                          <div className="flex flex-col gap-1 items-start">
+                            <Badge variant={statusBadgeVariant(row.status)}>{row.status}</Badge>
+                            {row.qcResult ? <Badge variant="outline">{row.qcResult}</Badge> : <span className="text-xs text-muted-foreground">QC —</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="max-w-none">
                           {pending ? (
-                            <Select className="w-32" value={restockChoices[row.id] || 'All'} onChange={(e) => setRestockChoices((prev) => ({ ...prev, [row.id]: e.target.value }))}>
-                              {restockDestinations.map((dest) => <option key={dest} value={dest}>{dest === 'None' ? 'No restock' : dest}</option>)}
+                            <Select
+                              className="h-9 w-full min-w-0 text-xs"
+                              aria-label={`Restock for ${orderLabel}`}
+                              value={restockChoices[row.id] || 'All'}
+                              onChange={(e) => setRestockChoices((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                            >
+                              {restockDestinations.map((dest) => (
+                                <option key={dest} value={dest}>{dest === 'None' ? 'No restock' : dest}</option>
+                              ))}
                             </Select>
                           ) : (
                             <Badge variant="secondary">{row.restockDestination || 'None'}</Badge>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="max-w-none">
                           {pending ? (
-                            <div className="flex gap-2">
-                              <Button variant="outline" size="sm" disabled={busy === row.id} onClick={() => qcPass(row)}>
-                                <CheckCircle className="w-4 h-4 mr-1" />
-                                QC Passed
+                            <div className="flex flex-col gap-1.5">
+                              <Button variant="outline" size="sm" className="w-full justify-start" disabled={busy === row.id} onClick={() => qcPass(row)}>
+                                <CheckCircle className="w-4 h-4 mr-1 shrink-0" />
+                                Pass
                               </Button>
-                              <Button variant="outline" size="sm" className="text-destructive" onClick={() => qcFail(row)}>
-                                <XCircle className="w-4 h-4 mr-1" />
+                              <Button variant="outline" size="sm" className="w-full justify-start text-destructive" onClick={() => qcFail(row)}>
+                                <XCircle className="w-4 h-4 mr-1 shrink-0" />
                                 Reject
                               </Button>
                             </div>
@@ -226,7 +250,7 @@ export default function RtoPage() {
                 </TableBody>
               </Table>
               <Pagination page={paged.page} total={paged.total} limit={paged.limit} onPage={paged.setPage} />
-            </div>
+            </>
           )}
         </CardContent>
       </Card>

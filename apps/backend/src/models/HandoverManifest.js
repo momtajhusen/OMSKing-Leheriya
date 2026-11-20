@@ -22,6 +22,9 @@ const handoverManifestSchema = new mongoose.Schema({
   warehouseCode: { type: String, default: '' },
   day: { type: String, default: '' },
   rows: { type: [rowSchema], default: [] },
+  pickupId: { type: String, default: '' },
+  pickupAt: { type: Date, default: null },
+  pickupTime: { type: String, default: '' },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: true, collection: 'handover_manifests' });
 

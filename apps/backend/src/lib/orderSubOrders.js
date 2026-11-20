@@ -279,7 +279,18 @@ function packDimsOf(order) {
 }
 
 function brandOf(order) {
-  return String(order.brandName || order.shopName || order.tenantName || 'Leheriya').trim() || 'Leheriya';
+  return String(order.brandName || order.shopName || order.tenantName || order.companyName || '').trim() || 'Company';
+}
+
+/** Tax-invoice seller line: Legal Name, else Company Name from Tenant Account — never label brand. */
+function invoiceSellerName(order) {
+  return String(order.companyLegalName || order.companyName || order.tenantName || '').trim()
+    || brandOf(order);
+}
+
+function brandCellHtml(model) {
+  const { brandMarkHtml } = require('./companyLogo');
+  return brandMarkHtml(model.brand, model.logoSrc || model.logoUrl, { escapeHtml });
 }
 
 function formatLabelDate(value) {
@@ -347,6 +358,8 @@ function packingSlipModel(order, subOrderId) {
     })(),
     when: formatLabelDate(order.createdAt || order.orderDate || order.labelGeneratedAt),
     brand: brandOf(order),
+    logoSrc: String(order.logoSrc || order.logoUrl || '').trim(),
+    logoUrl: String(order.logoUrl || '').trim(),
     gstin: String(order.gstin || order.companyGstin || '').trim() || '—',
     shipTo: [
       escapeHtml(order.customer || 'Customer'),
@@ -374,10 +387,7 @@ function packingSlipSheet(model, order) {
   return `<div class="sheet">
     <div class="row">
       <div class="cell brand">
-        <div>
-          <div class="brand-mark">${escapeHtml(model.brand)}</div>
-          <div class="brand-sub">${escapeHtml(model.brand)}</div>
-        </div>
+        <div class="brand-wrap">${brandCellHtml(model)}</div>
       </div>
       <div class="cell ship split">
         <div class="k">Ship to:</div>
@@ -433,8 +443,13 @@ function compactInvoiceSheet(model, order) {
     <div class="row"><div class="cell oid" style="flex:1">Tax Invoice · ${escapeHtml(model.invoiceNo)}</div></div>
     <div class="row">
       <div class="cell meta" style="flex:1">
-        <div><b>${escapeHtml(model.brand)}</b></div>
-        <div>${escapeHtml(returnBlock(order))}</div>
+        <div class="brand-wrap" style="margin-bottom:4px">${brandCellHtml(model)}</div>
+        <div><b>${escapeHtml(invoiceSellerName(order))}</b></div>
+        <div>${escapeHtml(order.companyAddress || returnBlock({ ...order, brandName: invoiceSellerName(order) }))}</div>
+        ${order.companyCity ? `<div>${escapeHtml(order.companyCity)}${order.companyState ? `, ${escapeHtml(order.companyState)}` : ''}</div>` : ''}
+        ${order.companyEmail ? `<div>${escapeHtml(order.companyEmail)}</div>` : ''}
+        ${order.companyPhone ? `<div>${escapeHtml(order.companyPhone)}</div>` : ''}
+        ${order.companyWebsite ? `<div>${escapeHtml(order.companyWebsite)}</div>` : ''}
         <div><b>GSTIN:</b> ${escapeHtml(model.gstin)}</div>
       </div>
       <div class="cell meta split" style="flex:1">
@@ -465,42 +480,60 @@ function compactInvoiceSheet(model, order) {
 
 const PACK_STYLES = `
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 0; color: #111; background: #fff;
+    html, body { margin: 0; padding: 0; color: #111; background: #fff;
       font-family: Arial, Helvetica, sans-serif; }
-    .page { width: 4in; min-height: 6in; padding: 0.12in; page-break-after: always; }
-    .page:last-child { page-break-after: auto; }
-    .sheet { width: 100%; border: 1.5px solid #111; }
+    /* Never use page-break-after — Chrome prints a blank trailing page.
+       Only break BEFORE the next .page when Label+Invoice has two sheets. */
+    .page { width: 4in; height: 6in; padding: 0.08in; overflow: hidden;
+      page-break-after: auto; break-after: auto;
+      page-break-before: auto; break-before: auto;
+      page-break-inside: auto; break-inside: auto; }
+    .page + .page { page-break-before: always; break-before: page; }
+    .sheet { width: 100%; height: 100%; border: 1.5px solid #111; overflow: hidden; }
     .row { display: flex; border-bottom: 1.5px solid #111; }
     .row:last-child { border-bottom: 0; }
-    .cell { padding: 8px 10px; }
+    .cell { padding: 6px 8px; }
     .split { border-left: 1.5px solid #111; }
     .brand { flex: 0 0 38%; display: flex; align-items: center; justify-content: center; }
-    .brand-mark { font-family: Georgia, "Times New Roman", serif; font-size: 24px; font-style: italic;
+    .brand-wrap { text-align: center; max-width: 100%; }
+    .brand-logo { display: block; max-width: 1.35in; max-height: 0.7in; margin: 0 auto;
+      object-fit: contain; }
+    .brand-mark { font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-style: italic;
       font-weight: 700; letter-spacing: 0.02em; }
-    .brand-sub { font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 800;
+    .brand-sub { font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: 800;
       font-style: normal; margin-top: 2px; letter-spacing: 0.04em; }
-    .ship { flex: 1; font-size: 12px; line-height: 1.35; }
-    .ship .k { font-weight: 700; margin-bottom: 4px; }
-    .track { flex-direction: column; align-items: stretch; text-align: center; padding: 8px 10px 6px; }
-    .track .who { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
-    .barcode { display: inline-block; max-width: 100%; height: 48px; }
+    .ship { flex: 1; font-size: 11px; line-height: 1.3; }
+    .ship .k { font-weight: 700; margin-bottom: 3px; }
+    .track { flex-direction: column; align-items: stretch; text-align: center; padding: 6px 8px 4px; }
+    .track .who { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+    .barcode { display: inline-block; max-width: 100%; height: 42px; }
     .pay { flex: 0 0 34%; display: flex; align-items: center; justify-content: center;
-      font-size: 24px; font-weight: 900; letter-spacing: 0.02em; }
-    .meta { flex: 1; font-size: 11px; line-height: 1.45; }
+      font-size: 22px; font-weight: 900; letter-spacing: 0.02em; }
+    .meta { flex: 1; font-size: 10px; line-height: 1.35; }
     .meta b { font-weight: 700; }
-    .oid { text-align: center; font-size: 14px; font-weight: 800; padding: 7px 10px; }
-    table.items { width: 100%; border-collapse: collapse; font-size: 11px; }
-    table.items th, table.items td { border-top: 1px solid #111; padding: 5px 6px; vertical-align: top; }
-    table.items th { background: #f3f3f3; text-align: left; font-size: 10px; }
-    table.items .c { text-align: center; width: 28px; }
-    table.items .r { text-align: right; width: 52px; }
-    table.items .sku { font-size: 10px; color: #444; }
-    .ret { font-size: 11px; line-height: 1.4; }
+    .oid { text-align: center; font-size: 13px; font-weight: 800; padding: 5px 8px; }
+    table.items { width: 100%; border-collapse: collapse; font-size: 10px; }
+    table.items th, table.items td { border-top: 1px solid #111; padding: 4px 5px; vertical-align: top; }
+    table.items th { background: #f3f3f3; text-align: left; font-size: 9px; }
+    table.items .c { text-align: center; width: 26px; }
+    table.items .r { text-align: right; width: 48px; }
+    table.items .sku { font-size: 9px; color: #444; }
+    .ret { font-size: 10px; line-height: 1.3; }
     .ret b { font-weight: 700; }
     @media print {
-      body { padding: 0; }
-      .page { width: 4in; height: 6in; min-height: 0; padding: 0.1in; overflow: hidden; }
       @page { size: 4in 6in; margin: 0; }
+      html, body {
+        width: 4in !important; height: auto !important;
+        margin: 0 !important; padding: 0 !important; overflow: hidden !important;
+      }
+      /* Slightly under paper size so Chrome "Minimum" margins cannot spill page 2. */
+      .page {
+        width: 3.95in !important; height: 5.85in !important; max-height: 5.85in !important;
+        margin: 0 !important; padding: 0.05in !important; overflow: hidden !important;
+        page-break-after: auto !important; break-after: auto !important;
+        page-break-inside: auto !important; break-inside: auto !important;
+      }
+      .page + .page { page-break-before: always !important; break-before: page !important; }
     }
 `;
 
@@ -557,6 +590,8 @@ function invoiceHtml(order, { warehouseState = '', kind = 'invoice' } = {}) {
     </tr>`;
   }).join('');
   const title = kind === 'credit' ? `Credit note ${invoiceNo}` : `Tax invoice ${invoiceNo}`;
+  const brand = brandOf(order);
+  const logoBlock = brandCellHtml({ brand, logoSrc: order.logoSrc || order.logoUrl, logoUrl: order.logoUrl });
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -564,12 +599,16 @@ function invoiceHtml(order, { warehouseState = '', kind = 'invoice' } = {}) {
   <title>${escapeHtml(title)}</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px; }
+    .brand-logo { display: block; max-width: 180px; max-height: 72px; object-fit: contain; margin-bottom: 12px; }
+    .brand-mark { font-family: Georgia, "Times New Roman", serif; font-size: 28px; font-style: italic; font-weight: 700; }
+    .brand-sub { font-size: 16px; font-weight: 800; margin-top: 2px; }
     table { width: 100%; border-collapse: collapse; margin-top: 16px; }
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
     @media print { button { display: none; } }
   </style>
 </head>
 <body>
+  <div class="brand-wrap">${logoBlock}</div>
   <h1>${escapeHtml(title)}</h1>
   <p>Order ${escapeHtml(String(order.channelOrderNo || '').replace(/^#/, '') || order.id || order.orderNo)} · ${escapeHtml(order.customer)} · ${escapeHtml(order.address || '')}</p>
   <p>Warehouse ${escapeHtml(warehouseState || '—')} · Ship-to ${escapeHtml(ship || '—')}</p>

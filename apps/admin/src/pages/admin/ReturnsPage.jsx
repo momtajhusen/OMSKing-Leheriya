@@ -248,54 +248,52 @@ export default function ReturnsPage() {
         <CardHeader>
           <CardTitle>Return Requests ({filteredReturns.length})</CardTitle>
         </CardHeader>
-        <CardContent>
-          <Table>
+        <CardContent className="min-w-0">
+          <Table className="!w-full !min-w-0 table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead>Return ID</TableHead>
-                <TableHead>Order ID</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Reason</TableHead>
-                <TableHead>Requested</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Courier · AWB</TableHead>
-                <TableHead>Restock Destination</TableHead>
-                <TableHead>QC · Refund · Claim</TableHead>
-                <TableHead>Actions</TableHead>
+                <TableHead className="w-[18%]">Return · Order</TableHead>
+                <TableHead className="w-[16%]">Items</TableHead>
+                <TableHead className="w-[18%]">Customer · Reason</TableHead>
+                <TableHead className="w-[10%]">Amount</TableHead>
+                <TableHead className="w-[12%]">Courier</TableHead>
+                <TableHead className="w-[12%]">Restock</TableHead>
+                <TableHead className="w-[14%]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredReturns.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={12} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                     No returns yet. A return shows here when a reverse pickup is booked on an order or a channel sends a return.
                   </TableCell>
                 </TableRow>
               )}
               {paged.rows.map((ret) => {
+                const orderLabel = ret.channelOrderNo || ret.orderId;
                 return (
                   <TableRow key={ret.id}>
-                    <TableCell className="font-medium">
-                      <div>{ret.id}</div>
-                      {ret.type === 'reverse_pickup' && <Badge variant="outline">Reverse pickup</Badge>}
-                      {kindOf(ret) === 'rto' && <Badge variant="outline">RTO</Badge>}
+                    <TableCell className="max-w-none">
+                      <div className="space-y-1">
+                        <div className="truncate font-medium" title={ret.id}>{ret.id}</div>
+                        <div className="truncate text-sm text-primary" title={orderLabel}>{orderLabel}</div>
+                        <div className="flex flex-wrap gap-1">
+                          {ret.type === 'reverse_pickup' && <Badge variant="outline">Reverse</Badge>}
+                          {kindOf(ret) === 'rto' && <Badge variant="outline">RTO</Badge>}
+                          <Badge variant={statusBadgeVariant(ret.status)}>{ret.status}</Badge>
+                        </div>
+                        <div className="text-xs text-muted-foreground">{formatDate(ret.requestDate)}</div>
+                      </div>
                     </TableCell>
-                    <TableCell>{ret.orderId}</TableCell>
-                    <TableCell><ItemThumbs items={ret.items} /></TableCell>
-                    <TableCell>{ret.customer}</TableCell>
-                    <TableCell>{ret.reason}</TableCell>
-                    <TableCell>{formatDate(ret.requestDate)}</TableCell>
-                    <TableCell>{formatINR(ret.amount)}</TableCell>
-                    <TableCell>
-                      <Badge variant={statusBadgeVariant(ret.status)}>
-                        {ret.status}
-                      </Badge>
+                    <TableCell className="max-w-none"><ItemThumbs items={ret.items} /></TableCell>
+                    <TableCell className="max-w-none">
+                      <div className="font-medium">{ret.customer || '—'}</div>
+                      <div className="mt-0.5 text-sm text-muted-foreground break-words">{ret.reason || '—'}</div>
                     </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
+                    <TableCell className="max-w-none whitespace-nowrap font-medium">{formatINR(ret.amount)}</TableCell>
+                    <TableCell className="max-w-none text-sm">
                       <div className="font-medium">{ret.courier || '—'}</div>
-                      <div className="font-mono text-xs text-muted-foreground">
+                      <div className="font-mono text-xs text-muted-foreground break-all">
                         {ret.awb || (ret.type === 'reverse_pickup' ? 'AWB pending' : '—')}
                       </div>
                       {ret.type === 'reverse_pickup' && ret.awb && reverseTrackUrl(ret.courier, ret.awb) && (
@@ -323,113 +321,99 @@ export default function ReturnsPage() {
                         </Button>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="max-w-none">
                       {ret.status === 'Pending' ? (
-                        <div className="space-y-1">
+                        <Select
+                          className="h-9 w-full min-w-0 text-xs"
+                          aria-label={`Restock for ${ret.id}`}
+                          value={selectedReturns[ret.id] || 'All'}
+                          onChange={(e) => handleRestockChange(ret.id, e.target.value)}
+                        >
                           {restockDestinations.map((dest) => (
-                            <label key={dest} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="radio"
-                                name={`restock-${ret.id}`}
-                                value={dest}
-                                checked={(selectedReturns[ret.id] || 'All') === dest}
-                                onChange={() => handleRestockChange(ret.id, dest)}
-                                className="w-4 h-4"
-                              />
-                              {dest}
-                            </label>
+                            <option key={dest} value={dest}>{dest}</option>
                           ))}
-                        </div>
+                        </Select>
                       ) : (
-                        <span className="text-sm text-muted-foreground">
+                        <span className="text-sm text-muted-foreground break-words">
                           {ret.restockDestination || 'Not specified'}
                         </span>
                       )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {ret.source === 'api' ? (
-                        <div className="space-y-1">
-                          <div>QC: {ret.qcStatus === 'pending' ? 'not checked' : ret.qcStatus}{ret.qcNote ? ` · ${ret.qcNote}` : ''}</div>
-                          <div className="text-muted-foreground">{refundText(ret)}</div>
+                      {ret.source === 'api' && (
+                        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                          <div>QC: {ret.qcStatus === 'pending' ? 'not checked' : ret.qcStatus}</div>
+                          <div>{refundText(ret)}</div>
                           {claimText(ret.claim) && <Badge variant="outline">{claimText(ret.claim)}</Badge>}
-                          <Button size="sm" variant="ghost" onClick={() => openClaim(ret)}>
+                          <Button size="sm" variant="ghost" className="h-auto px-0" onClick={() => openClaim(ret)}>
                             {claimName(ret.claim?.type) ? 'Claim & refund' : 'Refund'}
                           </Button>
                         </div>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell>
-                      {ret.status === 'Pending' && (
-                        <div className="flex gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleApproveReturn(ret.id)}
-                          >
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Approve
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            className="text-destructive"
-                            onClick={() => handleRejectReturn(ret.id)}
-                          >
-                            <XCircle className="w-4 h-4 mr-1" />
-                            Reject
-                          </Button>
-                        </div>
-                      )}
-                      {ret.status === 'Approved' && (
-                        <div className="flex flex-col gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              const order = useOrderStore.getState().getById(ret.orderId);
-                              printReverseLabel(ret, order);
-                              toast.success(`${ret.type === 'reverse_pickup' ? 'Reverse pickup' : 'Return'} label opened for ${ret.id}`);
-                            }}
-                          >
-                            {ret.type === 'reverse_pickup' ? 'Generate reverse label' : 'Return label'}
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setReceiveFor(ret);
-                              setReceiveWarehouse('WH-001');
-                              setReceiveAction('restock');
-                              setQcNote('');
-                            }}
-                          >
-                            <Package className="w-4 h-4 mr-1" />
-                            Mark received
-                          </Button>
-                          {ret.type === 'reverse_pickup' && (
+                    <TableCell className="max-w-none">
+                      <div className="flex flex-col gap-1.5">
+                        {ret.status === 'Pending' && (
+                          <>
+                            <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => handleApproveReturn(ret.id)}>
+                              <CheckCircle className="w-4 h-4 mr-1 shrink-0" />
+                              Approve
+                            </Button>
+                            <Button variant="outline" size="sm" className="w-full justify-start text-destructive" onClick={() => handleRejectReturn(ret.id)}>
+                              <XCircle className="w-4 h-4 mr-1 shrink-0" />
+                              Reject
+                            </Button>
+                          </>
+                        )}
+                        {ret.status === 'Approved' && (
+                          <>
                             <Button
                               size="sm"
                               variant="outline"
-                              className="text-destructive"
-                              onClick={async () => {
-                                const next = await cancelReversePickup(ret.orderId);
-                                if (next?.error) {
-                                  toast.error(next.error);
-                                  return;
-                                }
-                                toast.success('Reverse pickup cancelled');
+                              className="w-full justify-start"
+                              onClick={() => {
+                                const order = useOrderStore.getState().getById(ret.orderId);
+                                printReverseLabel(ret, order);
+                                toast.success(`${ret.type === 'reverse_pickup' ? 'Reverse pickup' : 'Return'} label opened for ${orderLabel}`);
                               }}
                             >
-                              <XCircle className="w-4 h-4 mr-1" />
-                              Cancel reverse
+                              {ret.type === 'reverse_pickup' ? 'Reverse label' : 'Return label'}
                             </Button>
-                          )}
-                        </div>
-                      )}
-                      {ret.status === 'Completed' && (
-                        <Badge variant="outline">Restocked</Badge>
-                      )}
+                            <Button
+                              size="sm"
+                              className="w-full justify-start"
+                              onClick={() => {
+                                setReceiveFor(ret);
+                                setReceiveWarehouse('WH-001');
+                                setReceiveAction('restock');
+                                setQcNote('');
+                              }}
+                            >
+                              <Package className="w-4 h-4 mr-1 shrink-0" />
+                              Received
+                            </Button>
+                            {ret.type === 'reverse_pickup' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="w-full justify-start text-destructive"
+                                onClick={async () => {
+                                  const next = await cancelReversePickup(ret.orderId);
+                                  if (next?.error) {
+                                    toast.error(next.error);
+                                    return;
+                                  }
+                                  toast.success('Reverse pickup cancelled');
+                                }}
+                              >
+                                <XCircle className="w-4 h-4 mr-1 shrink-0" />
+                                Cancel
+                              </Button>
+                            )}
+                          </>
+                        )}
+                        {ret.status === 'Completed' && (
+                          <Badge variant="outline">Restocked</Badge>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -539,7 +523,7 @@ export default function ReturnsPage() {
       >
         {receiveFor && (
           <div className="space-y-3 text-sm">
-            <p><span className="text-muted-foreground">Return</span> {receiveFor.id} · order {receiveFor.orderId}</p>
+            <p><span className="text-muted-foreground">Return</span> {receiveFor.id} · order {receiveFor.channelOrderNo || receiveFor.orderId}</p>
             <p className="text-muted-foreground">Warehouse: Offline WH-001. Virtual WH-002 is not a restock destination.</p>
             <label className="block">
               <span className="text-muted-foreground">Action</span>

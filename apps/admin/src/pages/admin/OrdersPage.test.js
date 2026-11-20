@@ -50,7 +50,9 @@ test('Date column shows the order date with the order time under it', () => {
 test('Amazon and Myntra orders show their SLA (dispatch-by) date in red', () => {
   const header = page.slice(page.indexOf('<TableHeader>'), page.indexOf('</TableHeader>'));
   assert.match(header, /SLA Date/);
-  assert.match(page, /order\.slaDate \? \(\s*<span className="[^"]*text-red-600[^"]*"[^>]*>\{formatDateTime\(order\.slaDate\)\}<\/span>/);
+  assert.match(page, /order\.slaDate \? \(\s*<div className="font-medium text-red-600"/);
+  assert.match(page, /formatDate\(order\.slaDate\)/);
+  assert.match(page, /formatDateTime\(order\.slaDate\)\.replace/);
 });
 
 test('Myntra MNOW / hyperlocal orders show a Hyperlocal Order badge on the list', () => {

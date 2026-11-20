@@ -17,6 +17,16 @@ test('dashboard KPI cards are only the client list: new orders and sales per cha
   assert.equal((kpis.match(/<KpiCard/g) || []).length, 6);
 });
 
+test('dashboard refreshes connected channels so Amazon and Myntra do not disappear', () => {
+  assert.match(page, /useConnectedChannels\(\{ refresh: true \}\)/);
+});
+
+test('Recent Orders shows the Shopify/channel order id, not only the OMS SHP id', () => {
+  const card = page.slice(page.indexOf('<CardTitle>Recent Orders</CardTitle>'), page.indexOf('<CardTitle>Channel sync activity</CardTitle>'));
+  assert.match(card, /order\.channelOrderNo \|\| order\.id/);
+  assert.match(card, /order\.channelOrderNo && order\.channelOrderNo !== order\.id/);
+});
+
 test('order status is a donut with a readable list, so small slices never print labels on top of each other', () => {
   const card = page.slice(page.indexOf('<CardTitle>Order Status</CardTitle>'), page.indexOf('Sales by Channel'));
   const pie = card.slice(card.indexOf('<Pie'), card.indexOf('</Pie>'));

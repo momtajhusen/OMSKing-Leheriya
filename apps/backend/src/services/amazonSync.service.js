@@ -91,11 +91,14 @@ async function pullAmazonOrders(tenantId, { skipExternalIds = [], afterEach } = 
       orderDate: order.orderDate,
       source: 'channel_api',
       externalOrderId: order.externalOrderId,
+      channelOrderNo: order.channelOrderNo || order.externalOrderId || '',
       channelLines: order.shipByTime ? [{ sellerOrderId: order.externalOrderId, shipByTime: order.shipByTime }] : [],
-      customer: '',
-      email: '',
-      phone: '',
-      address: '',
+      customer: order.customer || '',
+      email: order.email || '',
+      phone: order.phone || '',
+      address: order.address || '',
+      city: order.city || '',
+      shipState: order.shipState || '',
     });
     const { doc, created } = await claimChannelOrder(
       { tenantId, channel: 'Amazon', externalOrderId: order.externalOrderId },
@@ -117,6 +120,14 @@ async function pullAmazonOrders(tenantId, { skipExternalIds = [], afterEach } = 
       if (next.channelLines.length) doc.channelLines = next.channelLines;
       doc.source = 'channel_api';
       if (next.reserveState !== undefined) doc.reserveState = next.reserveState;
+      if (next.channelOrderNo) doc.channelOrderNo = next.channelOrderNo;
+      // Never wipe a filled buyer with an empty RDT miss on a later pull.
+      if (next.customer) doc.customer = next.customer;
+      if (next.email) doc.email = next.email;
+      if (next.phone) doc.phone = next.phone;
+      if (next.address) doc.address = next.address;
+      if (next.city) doc.city = next.city;
+      if (next.shipState) doc.shipState = next.shipState;
     }
     const outcome = await finishChannelOrder(tenantId, doc, {
       created,

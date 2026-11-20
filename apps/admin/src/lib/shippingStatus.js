@@ -31,22 +31,84 @@ export function canHandOver(row) {
   return row?.shipStatus === 'Label generated' && !row.handoverAt;
 }
 
-export const MANIFEST_COLUMNS = ['S.No', 'Manifest no', 'Date', 'Courier', 'Pickup warehouse', 'Order no', 'Channel order no', 'Channel', 'AWB', 'Customer', 'City', 'Pincode', 'Payment', 'COD amount', 'Qty', 'Weight (kg)'];
+export const MANIFEST_COLUMNS = ['S.No', 'Manifest no', 'Date', 'Courier', 'Pickup warehouse', 'Order no', 'OMS order no', 'Channel', 'AWB', 'Customer', 'City', 'Pincode', 'Payment', 'COD amount', 'Qty', 'Weight (kg)'];
 
-/** CSV for a saved handover manifest; the columns change once the client shares their manifest format. */
+/** CSV for a saved handover manifest; Order no is the channel/Shopify id used on courier portals. */
 export function manifestFile(manifest) {
   const rows = (manifest?.rows || []).map((row, index) => [
-    index + 1, manifest.manifestNo, manifest.day, manifest.courier, manifest.warehouseCode || '', row.orderNo, row.channelOrderNo || '',
+    index + 1, manifest.manifestNo, manifest.day, manifest.courier, manifest.warehouseCode || '',
+    String(row.channelOrderNo || '').replace(/^#/, '') || row.orderNo || '',
+    row.orderNo || '',
     row.channel, row.awb, row.customer, row.city, row.pincode || '', row.paymentMode, row.codAmount || 0, row.qty || 0, row.weightKg || 0,
   ]);
   return { name: `${manifest?.manifestNo || 'manifest'}.csv`, header: MANIFEST_COLUMNS, rows };
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function manifestPrintDay(manifest) {
+  const raw = String(manifest?.day || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split('-');
+    const months = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+    return `${Number(d)} ${months[Number(m) - 1] || ''} ${y}`.replace(/\s+/g, ' ').trim();
+  }
+  const when = manifest?.pickupAt ? new Date(manifest.pickupAt) : new Date();
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata',
+  }).format(when).toUpperCase();
+}
+
+/** Printable HTML: one courier manifest with pickup id + Shopify order + AWB rows. */
+export function manifestPrintHtml(manifest) {
+  const courier = String(manifest?.courier || 'Courier').toUpperCase();
+  const pickupId = String(manifest?.pickupId || '').trim() || 'PENDING';
+  const pickupTime = String(manifest?.pickupTime || '').trim() || '—';
+  const rows = (manifest?.rows || []).map((row, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td>${escapeHtml(row.channelOrderNo || row.orderNo || '')}</td>
+      <td>${escapeHtml(row.awb || '')}</td>
+    </tr>`).join('');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Manifest ${escapeHtml(courier)}</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:24px}
+  .head{background:#d9f2d0;padding:12px 16px;border:1px solid #9ccc88}
+  .title{text-align:center;font-size:20px;font-weight:700;letter-spacing:.04em;margin:0 0 10px}
+  .meta{display:flex;justify-content:space-between;gap:12px;font-size:13px;font-weight:600}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+  th,td{border:1px solid #333;padding:8px;text-align:left}
+  th{background:#f3f3f3}
+  @media print{body{margin:12px}}
+</style></head><body>
+  <div class="head">
+    <div class="title">MANIFEST : ${escapeHtml(courier)}</div>
+    <div class="meta">
+      <span>PICKUP ID: ${escapeHtml(pickupId)}</span>
+      <span>PICKUP DATE: ${escapeHtml(manifestPrintDay(manifest))}</span>
+      <span>PICKUP TIME: ${escapeHtml(pickupTime)}</span>
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>S.NO.</th><th>SHOPIFY ORDER ID</th><th>AWB NUMBER</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="3">No parcels</td></tr>'}</tbody>
+  </table>
+</body></html>`;
+}
+
 /** Amazon label button on the order page: 'make' an Easy Ship label, 'print' the stored one, or null (not Amazon / nothing to do). */
 export function amazonLabelStep(order) {
   if (order?.channel !== 'Amazon') return null;
+  if (['Cancelled', 'Delivered', 'Returned'].includes(order.status)) return null;
+  // Amazon often maps to Dispatched before OMS books Easy Ship — still offer Make label until AWB exists.
   if (order.labelGeneratedAt && trackingOf(order)) return 'print';
-  if (['Cancelled', 'Dispatched', 'Delivered', 'Returned'].includes(order.status)) return null;
+  if (trackingOf(order)) return 'print';
   return 'make';
 }
 
@@ -58,11 +120,9 @@ export function courierChoice(couriers, code) {
   return { list, picked: list.find((courier) => courier.code === code) || list[0] };
 }
 
-/** "Delhivery · ₹160 (default)" / "Xpressbees · no rate (enter AWB)" for the courier dropdown. */
+/** Courier dropdown label — name only (rates stay under the field via rateNote). */
 export function courierOptionText(courier) {
-  const rate = courier.estimate ? `₹${courier.estimate.amount}` : 'no rate';
-  const how = courier.code === 'delhivery' ? ' (default)' : (courier.api ? ' (API)' : ' (enter AWB)');
-  return `${courier.name} · ${rate}${how}`;
+  return String(courier?.name || courier?.code || 'Courier').trim() || 'Courier';
 }
 
 /** One line under the dropdown explaining the picked courier's estimate. */

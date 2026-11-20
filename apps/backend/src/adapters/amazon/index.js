@@ -150,13 +150,36 @@ function paymentModeOf(order) {
   return order.PaymentMethod === 'COD' || details.includes('CashOnDelivery') ? 'COD' : 'Prepaid';
 }
 
+/** Buyer + ship-to from Orders API (needs Restricted Data Token for PII). */
+function shipAddressOf(order = {}) {
+  const ship = order.ShippingAddress || {};
+  const buyer = order.BuyerInfo || {};
+  const lines = [ship.AddressLine1, ship.AddressLine2, ship.AddressLine3]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean);
+  const city = String(ship.City || '').trim();
+  const state = String(ship.StateOrRegion || '').trim();
+  const pin = String(ship.PostalCode || '').trim();
+  return {
+    customer: String(ship.Name || buyer.BuyerName || '').trim(),
+    email: String(buyer.BuyerEmail || '').trim(),
+    phone: String(ship.Phone || '').trim(),
+    address: lines.join(', '),
+    city: [city, state, pin].filter(Boolean).join(', '),
+    shipState: state,
+  };
+}
+
 function orderRows(payloadOrders) {
   return (payloadOrders || []).map((order) => {
     const qty = Number(order.NumberOfItemsUnshipped || 0) + Number(order.NumberOfItemsShipped || 0);
     const units = qty > 0 ? qty : 1;
     const amount = money(order.OrderTotal);
+    const amazonOrderId = String(order.AmazonOrderId || '');
+    const addr = shipAddressOf(order);
     return {
-      externalOrderId: String(order.AmazonOrderId || ''),
+      externalOrderId: amazonOrderId,
+      channelOrderNo: amazonOrderId,
       status: ORDER_STATUS[order.OrderStatus] || 'Processing',
       total: amount,
       paymentMode: paymentModeOf(order),
@@ -164,14 +187,34 @@ function orderRows(payloadOrders) {
       shippingCharge: 0,
       orderDate: order.PurchaseDate ? new Date(order.PurchaseDate) : undefined,
       shipByTime: order.LatestShipDate ? new Date(order.LatestShipDate) : undefined,
+      ...addr,
       items: [{
         name: order.OrderStatus ? `Amazon ${order.OrderStatus}` : 'Amazon item',
-        sku: String(order.AmazonOrderId || ''),
+        sku: amazonOrderId,
         qty: units,
         price: paise(amount / units),
       }],
     };
   }).filter((order) => order.externalOrderId);
+}
+
+/** PII on Orders needs an RDT; without it Amazon returns orders but blanks buyer/address. */
+async function restrictedDataToken(creds, request, accessToken, resources) {
+  const res = await request('POST', `${amazonHost(creds)}/tokens/2021-03-01/restrictedDataToken`, {
+    headers: {
+      'x-amz-access-token': accessToken,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: { restrictedResources: resources },
+  });
+  const body = (() => { try { return JSON.parse(res.text || '{}'); } catch { return {}; } })();
+  if (res.status < 200 || res.status >= 300 || !body.restrictedDataToken) {
+    const err = new Error(`Amazon RDT returned ${res.status}. ${lwaDetail(res.text) || 'Buyer and address were not authorized.'}`);
+    err.statusCode = res.status === 400 || res.status === 401 || res.status === 403 ? 400 : 502;
+    throw err;
+  }
+  return body.restrictedDataToken;
 }
 
 /** SP-API ItemPrice / PromotionDiscount are line totals (unit price x QuantityOrdered). */
@@ -315,8 +358,18 @@ async function pullOrders(creds, opts = {}) {
   assertAmazonCreds(creds);
   const request = amazonRequest(creds, opts.request);
   const token = await accessToken(creds, request);
+  let orderToken = token;
+  try {
+    orderToken = await restrictedDataToken(creds, request, token, [{
+      method: 'GET',
+      path: '/orders/v0/orders',
+      dataElements: ['buyerInfo', 'shippingAddress'],
+    }]);
+  } catch {
+    // Items still pull with the LWA token; customer/address stay empty until RDT is allowed.
+  }
   const res = await request('GET', ordersUrl(creds), {
-    headers: { 'x-amz-access-token': token, Accept: 'application/json' },
+    headers: { 'x-amz-access-token': orderToken, Accept: 'application/json' },
   });
   if (res.status < 200 || res.status >= 300) {
     const err = new Error(`Amazon orders API returned ${res.status}. ${lwaDetail(res.text) || 'Orders were not pulled.'}`);
@@ -324,7 +377,44 @@ async function pullOrders(creds, opts = {}) {
     throw err;
   }
   const body = JSON.parse(res.text || '{}');
+  // Order-items calls stay on the LWA access token; RDT is only for buyer/address on the list.
   return withOrderItems(orderRows(body.payload?.Orders || body.Orders || []), creds, request, token);
+}
+
+/** One Amazon order with buyer/address (RDT) + line items — used by order-detail Sync. */
+async function pullOneOrder(creds, amazonOrderId, opts = {}) {
+  assertAmazonCreds(creds);
+  const id = String(amazonOrderId || '').trim();
+  if (!id) {
+    const err = new Error('Amazon order id is missing.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const request = amazonRequest(creds, opts.request);
+  const token = await accessToken(creds, request);
+  let orderToken = token;
+  try {
+    orderToken = await restrictedDataToken(creds, request, token, [{
+      method: 'GET',
+      path: `/orders/v0/orders/${id}`,
+      dataElements: ['buyerInfo', 'shippingAddress'],
+    }]);
+  } catch {
+    // Same as list pull: items still load; address may stay empty without RDT.
+  }
+  const res = await request('GET', `${amazonHost(creds)}/orders/v0/orders/${encodeURIComponent(id)}`, {
+    headers: { 'x-amz-access-token': orderToken, Accept: 'application/json' },
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Amazon order ${id} returned ${res.status}. ${lwaDetail(res.text) || 'Order was not pulled.'}`);
+    err.statusCode = res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404 ? 400 : 502;
+    throw err;
+  }
+  const body = JSON.parse(res.text || '{}');
+  const raw = body.payload || body;
+  const rows = await withOrderItems(orderRows([raw]), creds, request, token);
+  return rows[0] || null;
 }
 
 function returnRows(list) {
@@ -572,6 +662,7 @@ module.exports = {
   pullCatalog,
   pullProducts: (creds, opts) => pullCatalog(creds, opts).then((result) => result.rows),
   pullOrders,
+  pullOneOrder,
   pullReturns,
   probeConnection,
   pushInventory,
@@ -579,4 +670,7 @@ module.exports = {
   httpsCall,
   accessToken,
   lwaDetail,
+  shipAddressOf,
+  orderRows,
+  restrictedDataToken,
 };

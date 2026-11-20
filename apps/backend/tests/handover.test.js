@@ -1,4 +1,5 @@
 process.env.NODE_ENV = 'test';
+process.env.REQUIRE_LOGIN_OTP = 'false';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -11,6 +12,7 @@ const Order = require('../src/models/Order');
 const HandoverManifest = require('../src/models/HandoverManifest');
 const { toOrderDto } = require('../src/lib/orderDto');
 const { buildOrderSummary } = require('../src/services/orderSummary.service');
+const { generatePickup } = require('../src/services/handover.service');
 
 const PASSWORD = 'Password1';
 let memory;
@@ -102,10 +104,37 @@ test('another company cannot hand over or read the manifests; Mark dispatched re
   assert.equal((await api('GET', `/api/v1/orders/handover-manifests/${no}`, { token: b.token })).status, 404);
   assert.equal((await api('GET', '/api/v1/orders/handover-manifests', { token: b.token })).body.data.length, 0);
 
-  await order(a.tenantId, 'SHP-11', { status: 'Ready to Ship' });
+  await order(a.tenantId, 'SHP-11', { status: 'Ready to Ship', awb: '', labelGeneratedAt: null, courier: '' });
   const res = await api('PATCH', '/api/v1/orders/SHP-11/status', { token: a.token, json: { status: 'Dispatched' } });
   assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.ok(res.body.data.pickedUpAt);
+});
+
+test('Generate Pickup stores Delhivery pickup id on the manifest and every parcel on it', async () => {
+  const { tenantId } = await company('pickup');
+  await order(tenantId, 'SHP-P1');
+  await order(tenantId, 'SHP-P2');
+  const { handOver } = require('../src/services/handover.service');
+  const { manifests } = await handOver(tenantId, null, ['SHP-P1', 'SHP-P2']);
+  const manifestNo = manifests[0].manifestNo;
+  const booked = await generatePickup(tenantId, manifestNo, {
+    delhiveryCreds: { apiToken: 'dlv-test', pickupWarehouse: 'WH-001', apiMode: 'live' },
+    delhiveryRequest: async () => ({
+      status: 200,
+      text: JSON.stringify({ pickup_id: 'DLV-PKP-77' }),
+    }),
+  });
+  assert.equal(booked.pickupId, 'DLV-PKP-77');
+  assert.equal(booked.count, 2);
+  assert.equal(booked.pickupTime, '16:00');
+  const again = await generatePickup(tenantId, manifestNo, {
+    delhiveryCreds: { apiToken: 'dlv-test', pickupWarehouse: 'WH-001' },
+    delhiveryRequest: async () => { throw new Error('should not call again'); },
+  });
+  assert.equal(again.pickupId, 'DLV-PKP-77');
+  const rows = await Order.find({ tenantId, manifestNo }).setOptions({ skipTenantFilter: true });
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.manifestPickupId === 'DLV-PKP-77'));
 });
 
 test('dashboard sales count by the marketplace order date, not the import date', () => {

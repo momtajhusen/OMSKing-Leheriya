@@ -27,7 +27,7 @@ import { barcodeBars, printBarcodeLabel } from '../../lib/barcodeLabel';
 import { PACKAGE_SOURCE, packageForm, packageSize, packageWeight } from '../../lib/itemPackage';
 import { canEditOrder, asksShopifyPush, orderEditForm } from '../../lib/orderEdit';
 import { reverseTrackUrl } from '../../lib/reverseTrack';
-import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub } from '../../components/ui/DropdownMenu';
+import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '../../components/ui/DropdownMenu';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
 import { pullChannelOrders } from '../../lib/channelOrders';
 import { orderChannelLabel } from '../../constants/channelCatalog';
@@ -545,7 +545,63 @@ export default function OrderDetailPage() {
             </div>
           )}
         </div>
-        <div className="shrink-0 self-start">
+        <div className="flex shrink-0 flex-wrap items-start justify-end gap-2 self-start">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2 shadow-sm"
+            onClick={() => navigate('/orders')}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            All orders
+          </Button>
+          {can(PERMISSIONS.ORDERS_EDIT) && (
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2 shadow-sm"
+              disabled={busy === 'sync'}
+              title="Pull the latest copy of this order from the channel"
+              onClick={() => {
+                const ch = String(order.channel || '').toLowerCase();
+                if (ch === 'shopify' || connected.ids?.includes(ch)) runSyncChannel(ch);
+                else runSyncAllChannels();
+              }}
+            >
+              <RefreshCw className={`h-4 w-4 ${busy === 'sync' ? 'animate-spin' : ''}`} />
+              {busy === 'sync' ? 'Syncing…' : 'Sync'}
+            </Button>
+          )}
+          {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2 shadow-sm"
+              disabled={busy === 'label' || busy === 'label-invoice'}
+              onClick={() => openLabel(true)}
+            >
+              <Printer className="h-4 w-4" />
+              {busy === 'label-invoice' ? 'Opening…' : 'Generate Label & Invoice'}
+            </Button>
+          )}
+          {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'make' && (
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2 shadow-sm"
+              disabled={busy === 'amazon-label'}
+              onClick={runAmazonLabel}
+            >
+              <Printer className="h-4 w-4" />
+              {busy === 'amazon-label' ? 'Making label…' : 'Make Easy Ship label'}
+            </Button>
+          )}
+          {can(PERMISSIONS.SHIPPING_GENERATE) && amazonStep === 'print' && (
+            <Button type="button" variant="outline" className="gap-2 shadow-sm" onClick={printAmazonLabel}>
+              <Printer className="h-4 w-4" />
+              Amazon label
+            </Button>
+          )}
           <DropdownMenu
             align="end"
             className="w-[min(18.5rem,calc(100vw-2rem))]"
@@ -557,51 +613,21 @@ export default function OrderDetailPage() {
             }
           >
             <DropdownMenuLabel>Order</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => navigate('/orders')}>
-              <ArrowLeft className="h-4 w-4 text-muted-foreground" />
-              All orders
-            </DropdownMenuItem>
             {can(PERMISSIONS.ORDERS_EDIT) && canEditOrder(order) && (
               <DropdownMenuItem onClick={openEdit}>
                 <Pencil className="h-4 w-4 text-muted-foreground" />
                 Edit order
               </DropdownMenuItem>
             )}
-            {can(PERMISSIONS.ORDERS_EDIT) && (
-              <DropdownMenuSub
-                disabled={busy === 'sync' || !connected.ids?.length}
-                label={busy === 'sync' ? 'Syncing…' : 'Sync'}
-                icon={<RefreshCw className={`h-4 w-4 text-muted-foreground ${busy === 'sync' ? 'animate-spin' : ''}`} />}
-              >
-                <DropdownMenuItem disabled={busy === 'sync'} onClick={runSyncAllChannels}>
-                  All
-                </DropdownMenuItem>
-                {connected.channels.map((channel) => (
-                  <DropdownMenuItem
-                    key={channel.id}
-                    disabled={busy === 'sync'}
-                    onClick={() => runSyncChannel(channel.id)}
-                  >
-                    {orderChannelLabel(channel)}
-                  </DropdownMenuItem>
-                ))}
-                {!connected.ids?.length && (
-                  <div className="px-2.5 py-2 text-xs text-muted-foreground">No channel connected</div>
-                )}
-              </DropdownMenuSub>
+            {can(PERMISSIONS.ORDERS_EDIT) && connected.ids?.length > 1 && (
+              <DropdownMenuItem disabled={busy === 'sync'} onClick={runSyncAllChannels}>
+                <RefreshCw className={`h-4 w-4 text-muted-foreground ${busy === 'sync' ? 'animate-spin' : ''}`} />
+                Sync all channels
+              </DropdownMenuItem>
             )}
 
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Label & invoice</DropdownMenuLabel>
-            {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
-              <DropdownMenuItem
-                disabled={busy === 'label' || busy === 'label-invoice'}
-                onClick={() => openLabel(true)}
-              >
-                <Printer className="h-4 w-4 text-muted-foreground" />
-                {busy === 'label-invoice' ? 'Opening…' : 'Generate Label & Invoice'}
-              </DropdownMenuItem>
-            )}
             {(can(PERMISSIONS.SHIPPING_GENERATE) || can(PERMISSIONS.ORDERS_EDIT)) && !channelManaged && !amazonOrder && (
               <DropdownMenuItem disabled={busy === 'label'} onClick={() => openLabel(false)}>
                 <Printer className="h-4 w-4 text-muted-foreground" />
@@ -927,7 +953,8 @@ export default function OrderDetailPage() {
                               value: item.barcode || item.sku,
                               sku: item.sku,
                               name: item.name,
-                              price: item.finalPrice > 0 ? item.finalPrice : item.price,
+                              // Sticker shows catalogue Price (not Final after discount).
+                              price: item.price,
                             });
                           } catch (err) {
                             toast.error(err.message);
@@ -1434,8 +1461,9 @@ export default function OrderDetailPage() {
               disabled={busy === 'reverse'}
               onClick={async () => {
                 setBusy('reverse');
-                if (!String(reverseAwb || '').trim()) {
-                  toast.error('Enter the reverse AWB from BlueDart / courier so tracking shows on Returns');
+                const reverseApi = /delhivery|blue\s*dart|bluedart/i.test(reverseCourier);
+                if (!reverseApi && !String(reverseAwb || '').trim()) {
+                  toast.error('Enter the reverse AWB from the courier portal so tracking shows on Returns');
                   setBusy('');
                   return;
                 }
@@ -1471,9 +1499,17 @@ export default function OrderDetailPage() {
             </Select>
           </div>
           <div>
-            <label className="text-sm font-medium">Reverse AWB</label>
-            <Input value={reverseAwb} onChange={(e) => setReverseAwb(e.target.value)} placeholder="AWB from the BlueDart / courier booking" />
-            <p className="mt-1 text-xs text-muted-foreground">Required. OMS does not book BlueDart reverse by API — paste the AWB from the courier portal.</p>
+            <label className="text-sm font-medium">Reverse AWB{ /delhivery|blue\s*dart|bluedart/i.test(reverseCourier) ? ' (optional)' : '' }</label>
+            <Input
+              value={reverseAwb}
+              onChange={(e) => setReverseAwb(e.target.value)}
+              placeholder={/delhivery|blue\s*dart|bluedart/i.test(reverseCourier) ? 'Leave blank to book via courier API' : 'AWB from the courier portal'}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {/delhivery|blue\s*dart|bluedart/i.test(reverseCourier)
+                ? 'Delhivery and Bluedart reverse are booked by OMS API from WH-001. Paste an AWB only if you already booked on the portal.'
+                : 'Required. OMS does not book this courier reverse by API — paste the AWB from the courier portal.'}
+            </p>
           </div>
         </div>
       </Modal>

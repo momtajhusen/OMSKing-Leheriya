@@ -72,6 +72,15 @@ function uploadMarketingImage(req, res, next) {
   });
 }
 
+function uploadCompanyLogo(req, res, next) {
+  req.avatarFolder = String(req.tenantId || 'unknown');
+  avatarUpload.single('image')(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return next(new HttpError(400, 'Logo must be 2MB or smaller'));
+    return next(err);
+  });
+}
+
 function publicUploadPath(tenantId, filename) {
   return `/uploads/${tenantId}/${filename}`;
 }
@@ -87,6 +96,7 @@ module.exports = {
   uploadProductImage,
   uploadAvatarImage,
   uploadMarketingImage,
+  uploadCompanyLogo,
   publicUploadPath,
   removeStoredUpload,
   uploadsRoot,

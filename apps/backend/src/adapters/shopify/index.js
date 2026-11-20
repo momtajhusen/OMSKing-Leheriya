@@ -555,51 +555,195 @@ async function readLocationAvailable(creds, opts = {}) {
   return Math.max(0, Math.floor(Number(level.available)));
 }
 
-async function fulfillOrder(creds, opts = {}) {
-  const { orderId, trackingNumber } = opts;
-  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
-  const { shop, token } = requireShop(ready);
-  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
-  const headers = shopifyHeaders(token);
-  const listed = await request('GET', `https://${shop}/admin/api/2024-10/orders/${encodeURIComponent(orderId)}/fulfillment_orders.json`, { headers });
+/** REST Admin order id from a numeric id, gid://shopify/Order/…, or SHP-… orderNo. */
+function restOrderId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const gid = raw.match(/gid:\/\/shopify\/Order\/(\d+)/i);
+  if (gid) return gid[1];
+  const shp = raw.match(/^SHP-(\d+)$/i);
+  if (shp) return shp[1];
+  if (/^\d+$/.test(raw)) return raw;
+  return raw.replace(/^#/, '').trim();
+}
+
+function foStatus(fo) {
+  return String(fo?.status || 'open').toLowerCase();
+}
+
+function isOpenFo(fo) {
+  const status = foStatus(fo);
+  return status === 'open' || status === 'in_progress' || status === 'scheduled';
+}
+
+function shopifyErrorText(text, status) {
+  try {
+    const json = JSON.parse(text || '{}');
+    const errors = json.errors || json.error || json.message || json.title;
+    if (typeof errors === 'string' && errors.trim()) return errors.trim();
+    if (Array.isArray(errors) && errors[0]) return String(errors[0].message || errors[0]).trim();
+    if (errors && typeof errors === 'object') return JSON.stringify(errors).slice(0, 200);
+  } catch { /* plain text */ }
+  const plain = String(text || '').replace(/\s+/g, ' ').trim();
+  return plain.slice(0, 200) || String(status || '');
+}
+
+async function listFulfillmentOrders(request, shop, orderId, headers) {
+  const listed = await request(
+    'GET',
+    `https://${shop}/admin/api/2024-10/orders/${encodeURIComponent(orderId)}/fulfillment_orders.json`,
+    { headers },
+  );
   if (listed.status < 200 || listed.status >= 300) {
-    const err = new Error(`Shopify fulfillments returned ${listed.status}. The AWB was booked, but Shopify was not marked fulfilled.`);
+    const err = new Error(
+      `Shopify fulfillments returned ${listed.status}. ${shopifyErrorText(listed.text, listed.status)} The AWB was booked, but Shopify was not marked fulfilled.`,
+    );
     err.statusCode = 502;
     throw err;
   }
-  const fos = JSON.parse(listed.text || '{}').fulfillment_orders || [];
-  const openFo = fos.find((fo) => {
-    const status = String(fo?.status || 'open').toLowerCase();
-    return status === 'open' || status === 'in_progress' || status === 'scheduled';
-  });
-  const fulfillmentOrderId = openFo?.id;
-  if (!fulfillmentOrderId) {
-    const err = new Error('Shopify has no open fulfillment order. Tracking was not sent.');
+  return JSON.parse(listed.text || '{}').fulfillment_orders || [];
+}
+
+function isLiveFulfillment(row) {
+  const status = String(row?.status || '').toLowerCase();
+  return status !== 'cancelled' && status !== 'error' && status !== 'failure';
+}
+
+async function listOrderFulfillments(request, shop, orderId, headers) {
+  const res = await request(
+    'GET',
+    `https://${shop}/admin/api/2024-10/orders/${encodeURIComponent(orderId)}/fulfillments.json`,
+    { headers },
+  );
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(
+      `Shopify fulfillments list returned ${res.status}. ${shopifyErrorText(res.text, res.status)}`,
+    );
+    err.statusCode = 502;
+    throw err;
+  }
+  return (JSON.parse(res.text || '{}').fulfillments || []).filter(isLiveFulfillment);
+}
+
+async function updateFulfillmentTracking(request, shop, fulfillmentId, tracking, company, headers) {
+  const res = await request(
+    'POST',
+    `https://${shop}/admin/api/2024-10/fulfillments/${encodeURIComponent(fulfillmentId)}/update_tracking.json`,
+    {
+      headers,
+      body: {
+        fulfillment: {
+          notify_customer: false,
+          tracking_info: { number: tracking, company: company || 'Delhivery' },
+        },
+      },
+    },
+  );
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(
+      `Shopify tracking update returned ${res.status}. ${shopifyErrorText(res.text, res.status)}`,
+    );
+    err.statusCode = 502;
+    throw err;
+  }
+  return { fulfillmentId: String(fulfillmentId) };
+}
+
+async function fulfillOrder(creds, opts = {}) {
+  const orderId = restOrderId(opts.orderId);
+  const trackingNumber = String(opts.trackingNumber || '').trim();
+  const company = opts.company || 'Delhivery';
+  if (!orderId) {
+    const err = new Error('Shopify order id is missing on this OMS order, so it was not marked fulfilled. Sync the order from Shopify and try again.');
     err.statusCode = 400;
     err.terminal = true;
     throw err;
   }
+  if (!trackingNumber) {
+    const err = new Error('Shopify fulfill needs the courier AWB. Nothing was marked fulfilled.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
+  const headers = shopifyHeaders(token);
+
+  let fos = await listFulfillmentOrders(request, shop, orderId, headers);
+  let openFo = fos.find(isOpenFo);
+
+  // Payment-pending / draft-completed orders often sit on_hold until the hold is released.
+  if (!openFo) {
+    const held = fos.find((fo) => foStatus(fo) === 'on_hold');
+    if (held?.id) {
+      const released = await request(
+        'POST',
+        `https://${shop}/admin/api/2024-10/fulfillment_orders/${encodeURIComponent(held.id)}/release_hold.json`,
+        { headers },
+      );
+      if (released.status < 200 || released.status >= 300) {
+        const err = new Error(
+          `Shopify fulfillment is on hold and could not be released (${released.status}). ${shopifyErrorText(released.text, released.status)}`,
+        );
+        err.statusCode = 400;
+        err.terminal = true;
+        throw err;
+      }
+      fos = await listFulfillmentOrders(request, shop, orderId, headers);
+      openFo = fos.find(isOpenFo) || fos.find((fo) => String(fo?.id) === String(held.id) && isOpenFo(fo));
+    }
+  }
+
+  // Already fulfilled in Shopify (closed FO) — push / refresh tracking on the live fulfillment.
+  if (!openFo?.id) {
+    const live = await listOrderFulfillments(request, shop, orderId, headers);
+    if (live[0]?.id) {
+      return updateFulfillmentTracking(request, shop, live[0].id, trackingNumber, company, headers);
+    }
+    const statuses = fos.map((fo) => foStatus(fo)).filter(Boolean).join(', ') || 'none';
+    const err = new Error(
+      `Shopify has no open fulfillment order (status: ${statuses}). Tracking was not sent — open the order in Shopify or sync it, then Generate Label again.`,
+    );
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
+
   const created = await request('POST', `https://${shop}/admin/api/2024-10/fulfillments.json`, {
     headers,
     body: {
       fulfillment: {
         notify_customer: false,
-        tracking_info: { number: trackingNumber, company: opts.company || 'Delhivery' },
-        line_items_by_fulfillment_order: [{ fulfillment_order_id: fulfillmentOrderId }],
+        tracking_info: { number: trackingNumber, company },
+        line_items_by_fulfillment_order: [{ fulfillment_order_id: openFo.id }],
       },
     },
   });
   if (created.status < 200 || created.status >= 300) {
-    const err = new Error(`Shopify fulfillment create returned ${created.status}.`);
+    const err = new Error(
+      `Shopify fulfillment create returned ${created.status}. ${shopifyErrorText(created.text, created.status)}`,
+    );
     err.statusCode = 502;
     throw err;
   }
   const id = JSON.parse(created.text || '{}').fulfillment?.id;
-  return { fulfillmentId: id ? String(id) : '' };
+  if (!id) {
+    const err = new Error('Shopify did not return a fulfillment id. The order may still be Unfulfilled — try Generate Label again.');
+    err.statusCode = 502;
+    throw err;
+  }
+  return { fulfillmentId: String(id) };
 }
 
 async function cancelFulfillment(creds, opts = {}) {
-  const { fulfillmentId } = opts;
+  const fulfillmentId = String(opts.fulfillmentId || '').trim();
+  if (!fulfillmentId) {
+    const err = new Error('Shopify cancel needs a fulfillment id.');
+    err.statusCode = 400;
+    err.terminal = true;
+    throw err;
+  }
   const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
   const { shop, token } = requireShop(ready);
   const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
@@ -607,11 +751,35 @@ async function cancelFulfillment(creds, opts = {}) {
     headers: shopifyHeaders(token),
   });
   if (res.status < 200 || res.status >= 300) {
-    const err = new Error(`Shopify did not mark the order unfulfilled (${res.status}).`);
+    const err = new Error(
+      `Shopify did not mark the order unfulfilled (${res.status}). ${shopifyErrorText(res.text, res.status)}`,
+    );
     err.statusCode = 502;
     throw err;
   }
   return { fulfillmentId };
+}
+
+/** Cancel every live Shopify fulfillment for an order (by id, or by looking up the order). */
+async function cancelOrderFulfillments(creds, opts = {}) {
+  const ready = await ensureShopifyCreds(creds, { request: opts.tokenRequest, now: opts.now });
+  const { shop, token } = requireShop(ready);
+  const request = gatedRequest(ready, opts.request, httpCall, { allowSandbox: true });
+  const headers = shopifyHeaders(token);
+  const known = String(opts.fulfillmentId || '').trim();
+  let ids = known ? [known] : [];
+  if (!ids.length) {
+    const orderId = restOrderId(opts.orderId);
+    if (!orderId) return { canceled: [] };
+    const live = await listOrderFulfillments(request, shop, orderId, headers);
+    ids = live.map((row) => String(row.id)).filter(Boolean);
+  }
+  const canceled = [];
+  for (const fulfillmentId of ids) {
+    await cancelFulfillment(ready, { fulfillmentId, request: opts.request, tokenRequest: opts.tokenRequest, now: opts.now });
+    canceled.push(fulfillmentId);
+  }
+  return { canceled };
 }
 
 async function updateOrderAddress(creds, opts = {}) {
@@ -742,6 +910,17 @@ function shopifyShipping(order) {
   ), 0));
 }
 
+/** Keep a stable code when Shopify variant has no SKU — never drop the line (blank items table). */
+function shopifyLineSku(line) {
+  const sku = String(line?.sku || '').trim();
+  if (sku) return sku;
+  if (line?.variant_id) return `VAR-${line.variant_id}`;
+  if (line?.product_id) return `PROD-${line.product_id}`;
+  if (line?.id) return `LINE-${line.id}`;
+  const title = String(line?.title || line?.name || 'ITEM').trim().slice(0, 40);
+  return title || 'NO-SKU';
+}
+
 function mapShopifyOrder(order, creds) {
   const externalOrderId = String(order?.id || '').trim();
   if (!externalOrderId || !Array.isArray(order?.line_items)) return null;
@@ -754,8 +933,8 @@ function mapShopifyOrder(order, creds) {
     const price = shopifyUnitPrice(line, order.taxes_included);
     const discount = shopifyLineDiscount(line);
     return {
-      name: String(line.title || line.sku || ''),
-      sku: String(line.sku || '').trim(),
+      name: String(line.title || line.name || line.sku || '').trim(),
+      sku: shopifyLineSku(line),
       imageUrl: String(line.image?.src || line.image_url || '').trim(),
       vendor: String(line.vendor || '').trim(),
       channelVariantId: line.variant_id ? String(line.variant_id) : '',
@@ -766,7 +945,7 @@ function mapShopifyOrder(order, creds) {
       finalPrice: paise(Math.max(0, price - discount)),
       locationId: String(line.origin_location?.id || order.location_id || ''),
     };
-  }).filter((line) => line.sku && line.qty > 0);
+  }).filter((line) => line.qty > 0);
   const partial = String(order.financial_status || '').toLowerCase() === 'partially_paid';
   return {
     externalOrderId,
@@ -868,7 +1047,41 @@ async function pullOneOrder(creds, externalOrderId, opts = {}) {
     err.terminal = true;
     throw err;
   }
-  return mapped;
+  return withLineProductPhotos(mapped, ready, request, headers);
+}
+
+/** Fill missing line photos from the Shopify product (custom / blank-SKU lines often have no line.image). */
+async function withLineProductPhotos(mapped, creds, request, headers) {
+  const shop = shopOf(creds);
+  if (!shop || !mapped?.items?.length) return mapped;
+  const need = [...new Set(mapped.items
+    .filter((item) => !item.imageUrl && item.channelProductId)
+    .map((item) => item.channelProductId))];
+  if (!need.length) return mapped;
+  const photos = new Map();
+  for (const productId of need.slice(0, 10)) {
+    try {
+      const res = await request(
+        `https://${shop}/admin/api/2024-10/products/${encodeURIComponent(productId)}.json?fields=id,image,images`,
+        headers,
+      );
+      if (!res || res.status < 200 || res.status >= 300) continue;
+      const product = JSON.parse(res.text || '{}').product || {};
+      const src = String(product.image?.src || product.images?.[0]?.src || '').trim();
+      if (src) photos.set(productId, src);
+    } catch {
+      /* keep going — photo is optional */
+    }
+  }
+  if (!photos.size) return mapped;
+  return {
+    ...mapped,
+    items: mapped.items.map((item) => (
+      item.imageUrl || !item.channelProductId || !photos.has(item.channelProductId)
+        ? item
+        : { ...item, imageUrl: photos.get(item.channelProductId) }
+    )),
+  };
 }
 
 async function pullOrders(creds, opts = {}) {
@@ -1014,6 +1227,8 @@ module.exports = {
   pushVariantHsn,
   pullLocationOnHand,
   fulfillOrder,
+  restOrderId,
   cancelFulfillment,
+  cancelOrderFulfillments,
   updateOrderAddress,
 };

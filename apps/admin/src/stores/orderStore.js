@@ -12,21 +12,39 @@ function hydrate(list) {
   return (list || []).map((order) => withSubOrders(order));
 }
 
-/** List rows omit barcode/package; keep a richer detail copy already in the store. */
+/** List rows omit barcode/package/hsn; merge those from a richer detail copy already in the store. */
 function itemDetailScore(items = []) {
   return items.reduce((score, item) => (
     score
     + (item.barcode ? 2 : 0)
-    + (item.package ? 2 : 0)
+    + (item.package && Number(item.package.weightKg) > 0 ? 2 : 0)
+    + (item.hsn ? 1 : 0)
     + (Number(item.discount) > 0 ? 1 : 0)
     + (Number(item.finalPrice) > 0 ? 1 : 0)
   ), 0);
 }
 
+function mergeDetailItems(prevItems = [], nextItems = []) {
+  return nextItems.map((item, index) => {
+    const prev = prevItems[index]
+      || prevItems.find((row) => row.sku && row.sku === item.sku)
+      || {};
+    return {
+      ...item,
+      barcode: item.barcode || prev.barcode || '',
+      hsn: item.hsn || prev.hsn || '',
+      package: (item.package && Number(item.package.weightKg) > 0) ? item.package : (prev.package || item.package || null),
+    };
+  });
+}
+
 function preferRicherOrder(prev, next) {
   if (!prev || prev.id !== next.id) return next;
   if (itemDetailScore(prev.items) > itemDetailScore(next.items)) {
-    return { ...next, items: prev.items };
+    return { ...next, items: mergeDetailItems(prev.items, next.items) };
+  }
+  if (itemDetailScore(prev.items) > 0) {
+    return { ...next, items: mergeDetailItems(prev.items, next.items) };
   }
   return next;
 }

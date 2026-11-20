@@ -33,5 +33,6 @@ test('every layout scrolls to the top when the page path changes', () => {
   const publicLayout = read('../components/layout/PublicLayout.jsx');
   assert.doesNotMatch(publicLayout, /window\.scrollTo\(0, 0\)/, 'public layout no longer relies on window scroll alone');
   const hook = read('../hooks/useScrollTopOnNavigate.js');
-  assert.match(hook, /\[pathname\]/, 'only a path change resets scroll, not filters in the query string');
+  assert.match(hook, /pathname/, 'path change still drives scroll reset');
+  assert.match(hook, /navType === 'POP' && pathname === '\/orders'/, 'browser back to orders keeps list scroll');
 });

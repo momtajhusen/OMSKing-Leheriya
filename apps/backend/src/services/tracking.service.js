@@ -104,6 +104,10 @@ async function applyTracking(tenantId, { orderNo, awb, status, detail, attempt, 
     if (!order.pickedUpAt) order.pickedUpAt = new Date();
     if (waybill) order.awb = waybill;
     await order.save();
+    if (ORDER_STATUS[status] === 'Delivered') {
+      // Delivered ends NDR — do not keep it in the failed-delivery queue.
+      await skip(NdrCase.deleteMany({ tenantId, orderNo }));
+    }
     const { notifyEventEmail } = require('./notify.service');
     if (ORDER_STATUS[status] === 'Delivered') {
       await notifyEventEmail(tenantId, 'NOT-005', {
@@ -306,6 +310,7 @@ async function pollOpenShipments(tenantId, deps = {}) {
   if (!delhiveryReady && !amazonCreds && !blueCreds && !marutiCreds) {
     return { checked: 0, failed: 0, skipped: 'courier' };
   }
+  // Recent Dispatched first — Leheriya has 1000+ open AWBs; an unsorted limit(50) never reached fresh Delhivery NDRs.
   const orders = await skip(Order.find({
     tenantId,
     awb: { $nin: ['', null] },
@@ -317,7 +322,7 @@ async function pollOpenShipments(tenantId, deps = {}) {
       { courier: /shree[-\s]?maruti/i },
       { courier: /^maruti$/i },
     ],
-  }).limit(50));
+  }).sort({ updatedAt: -1 }).limit(200));
   const results = [];
   let failed = 0;
   for (const order of orders) {
@@ -357,26 +362,33 @@ async function pollActiveCouriers() {
 }
 
 async function listNdr(tenantId) {
-  const rows = await skip(NdrCase.find({ tenantId }).sort({ updatedAt: -1 }));
+  const rows = await skip(NdrCase.find({ tenantId, status: { $in: ['open', 'reattempt'] } }).sort({ updatedAt: -1 }));
   const orderNos = [...new Set(rows.map((row) => row.orderNo).filter(Boolean))];
   const orders = orderNos.length
-    ? await skip(Order.find({ tenantId, orderNo: { $in: orderNos } }).select('orderNo channelOrderNo channel'))
+    ? await skip(Order.find({ tenantId, orderNo: { $in: orderNos } }).select('orderNo channelOrderNo channel status courier'))
     : [];
   const byNo = new Map(orders.map((order) => [order.orderNo, order]));
-  return rows.map((row) => {
-    const order = byNo.get(row.orderNo);
-    return {
-      orderNo: row.orderNo,
-      channelOrderNo: order?.channelOrderNo || '',
-      channel: order?.channel || '',
-      awb: row.awb,
-      reason: row.reason,
-      attempt: row.attempt,
-      phone: row.phone,
-      address: row.address,
-      status: row.status,
-    };
-  });
+  const CLOSED = new Set(['Delivered', 'Cancelled']);
+  return rows
+    .filter((row) => {
+      const order = byNo.get(row.orderNo);
+      return order && !CLOSED.has(order.status);
+    })
+    .map((row) => {
+      const order = byNo.get(row.orderNo);
+      return {
+        orderNo: row.orderNo,
+        channelOrderNo: order?.channelOrderNo || '',
+        channel: order?.channel || '',
+        courier: order?.courier || '',
+        awb: row.awb,
+        reason: row.reason,
+        attempt: row.attempt,
+        phone: row.phone,
+        address: row.address,
+        status: row.status,
+      };
+    });
 }
 
 module.exports = {

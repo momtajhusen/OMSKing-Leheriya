@@ -78,6 +78,12 @@ test('a saved channel can be disconnected after a confirm', () => {
   assert.match(setup, /Disconnect/);
 });
 
+test('channel save and test merge one row so Amazon/Myntra stay connected', () => {
+  const setup = read('../../components/channels/ChannelSetup.jsx');
+  assert.match(setup, /hydrate\(\[data\.data\], \{ partial: true \}\)/);
+  assert.equal((setup.match(/hydrate\(\[data\.data\], \{ partial: true \}\)/g) || []).length, 2);
+});
+
 test('platform can rename or delete a subscriber, and undo a payment marked paid by mistake', () => {
   const tenants = read('./TenantMgmtPage.jsx');
   assert.match(tenants, /api\.patch\(`\/tenants\/\$\{renaming\.id\}`, \{ name/);

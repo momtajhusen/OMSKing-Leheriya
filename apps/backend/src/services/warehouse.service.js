@@ -168,6 +168,10 @@ async function createWarehouse(tenantId, body) {
   const type = body.type === 'virtual' ? 'virtual' : 'physical';
   const code = String(body.code || '').trim().toUpperCase();
   if (!code) throw new HttpError(400, 'Warehouse code is required');
+  // Channel location / portal warehouse ids are external keys — never warehouse codes.
+  if (/^\d+$/.test(code)) {
+    throw new HttpError(400, 'Use a warehouse code like WH-003, not a channel location or portal id');
+  }
   const clash = await Warehouse.findOne({ tenantId, code }).setOptions({ skipTenantFilter: true });
   if (clash) throw new HttpError(409, `Warehouse ${code} already exists`);
   const row = await Warehouse.create({

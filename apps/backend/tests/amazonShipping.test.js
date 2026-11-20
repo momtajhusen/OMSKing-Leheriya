@@ -285,16 +285,20 @@ test('booking a Shopify order on Amazon Shipping needs no typed AWB, stores the 
   assert.ok(shopify.calls.some((call) => call.url.includes('/cancel.json')));
 });
 
-test('a failed Shopify fulfil after Amazon booked still returns the label and resumes without a second Amazon label', async () => {
+test('a failed Shopify fulfil after Amazon booked keeps the AWB and resumes without a second Amazon label', async () => {
   const tenant = await seller();
   await shopifyOrder(tenant._id, 'SHP-AS2');
   const amazon = amazonMock();
   const failing = async () => ({ status: 500, text: '{}' });
-  const first = await bookOtherCourier(tenant._id, 'SHP-AS2', { courier: 'amazon-shipping' }, {
-    amazonShippingCreds: creds, amazonShippingRequest: amazon.request, shopifyCreds: shopCreds, shopifyRequest: failing,
-  });
-  assert.equal(first.shopifyFulfillmentId || '', '');
+  await assert.rejects(
+    () => bookOtherCourier(tenant._id, 'SHP-AS2', { courier: 'amazon-shipping' }, {
+      amazonShippingCreds: creds, amazonShippingRequest: amazon.request, shopifyCreds: shopCreds, shopifyRequest: failing,
+    }),
+    /Shopify fulfillments returned 500|Shopify was not marked fulfilled/i,
+  );
   const bought = amazon.calls.filter((call) => call.url.endsWith('/shipping/v2/shipments')).length;
+  const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-AS2' });
+  assert.ok(order.awb);
   const shopify = shopifyMock();
   const shipment = await bookOtherCourier(tenant._id, 'SHP-AS2', { courier: 'amazon-shipping' }, {
     amazonShippingCreds: creds, amazonShippingRequest: amazon.request, shopifyCreds: shopCreds, shopifyRequest: shopify.request,

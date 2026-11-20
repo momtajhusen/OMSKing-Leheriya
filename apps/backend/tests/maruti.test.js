@@ -306,7 +306,7 @@ test('booking a Shopify order on Shree Maruti needs no typed AWB, stores the lab
   assert.equal(readiness.couriers.find((row) => row.code === 'shree-maruti')?.api, true);
 });
 
-test('a failed Shopify fulfil after Shree Maruti booked still returns the label and resumes without a second AWB', async () => {
+test('a failed Shopify fulfil after Shree Maruti booked keeps the AWB and resumes without a second AWB', async () => {
   const tenant = await seller();
   await CourierAccount.create({
     tenantId: tenant._id, source: 'own', code: 'shree-maruti', name: 'Shree Maruti', status: 'active',
@@ -314,24 +314,29 @@ test('a failed Shopify fulfil after Shree Maruti booked still returns the label 
   });
   await shopifyOrder(tenant._id, 'SHP-SM-RETRY');
   const mock = marutiMock();
-  let shopCalls = 0;
+  let fulfillAttempts = 0;
   const shopifyRequest = async (method, url) => {
-    shopCalls += 1;
-    if (url.includes('fulfillment_orders')) return { status: 200, text: JSON.stringify({ fulfillment_orders: [{ id: 77 }] }) };
-    if (url.endsWith('/fulfillments.json') && shopCalls < 4) {
-      const err = new Error('Shopify down');
-      err.statusCode = 502;
-      throw err;
+    if (url.includes('fulfillment_orders')) return { status: 200, text: JSON.stringify({ fulfillment_orders: [{ id: 77, status: 'open' }] }) };
+    if (url.endsWith('/fulfillments.json')) {
+      fulfillAttempts += 1;
+      if (fulfillAttempts === 1) {
+        const err = new Error('Shopify down');
+        err.statusCode = 502;
+        throw err;
+      }
+      return { status: 200, text: JSON.stringify({ fulfillment: { id: 99 } }) };
     }
-    if (url.endsWith('/fulfillments.json')) return { status: 200, text: JSON.stringify({ fulfillment: { id: 99 } }) };
     throw new Error(`unexpected Shopify call ${url}`);
   };
-  const first = await bookOtherCourier(tenant._id, 'SHP-SM-RETRY', { courier: 'shree-maruti' }, {
-    marutiCreds: creds, marutiRequest: mock.request, shopifyCreds: shopCreds, shopifyRequest,
-  });
-  assert.equal(first.awb, 'SM123456789');
-  assert.equal(first.shopifyFulfillmentId || '', '');
+  await assert.rejects(
+    () => bookOtherCourier(tenant._id, 'SHP-SM-RETRY', { courier: 'shree-maruti' }, {
+      marutiCreds: creds, marutiRequest: mock.request, shopifyCreds: shopCreds, shopifyRequest,
+    }),
+    /Shopify down/,
+  );
   assert.equal(mock.calls.filter((call) => call.url.endsWith('/gateway/booking-service/orders')).length, 1);
+  const order = await Order.findOne({ tenantId: tenant._id, orderNo: 'SHP-SM-RETRY' });
+  assert.equal(order.awb, 'SM123456789');
   const shipment = await bookOtherCourier(tenant._id, 'SHP-SM-RETRY', { courier: 'shree-maruti' }, {
     marutiCreds: creds, marutiRequest: mock.request, shopifyCreds: shopCreds, shopifyRequest,
   });

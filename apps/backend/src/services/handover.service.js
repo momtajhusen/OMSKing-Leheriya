@@ -48,6 +48,9 @@ function view(doc) {
     warehouseCode: doc.warehouseCode,
     day: doc.day,
     createdAt: doc.createdAt,
+    pickupId: doc.pickupId || '',
+    pickupAt: doc.pickupAt || null,
+    pickupTime: doc.pickupTime || '',
     count: rows.length,
     codTotal: rows.reduce((sum, row) => sum + Math.round((Number(row.codAmount) || 0) * 100), 0) / 100,
     rows,
@@ -114,6 +117,42 @@ async function getManifest(tenantId, manifestNo) {
   return view(doc);
 }
 
+/**
+ * Request courier pickup for a Ready-to-hand-over manifest (Delhivery API).
+ * Does not mark parcels In Transit — that stays Mark dispatched / courier scan.
+ */
+async function generatePickup(tenantId, manifestNo, deps = {}) {
+  const key = String(manifestNo || '').trim();
+  const doc = await skip(HandoverManifest.findOne({ tenantId, manifestNo: key }));
+  if (!doc) throw new HttpError(404, 'Manifest not found');
+  if (doc.pickupId) return view(doc.toObject());
+  const count = (doc.rows || []).length;
+  if (!count) throw new HttpError(400, 'This manifest has no parcels.');
+  if (!/delhivery/i.test(String(doc.courier || ''))) {
+    throw new HttpError(400, `Generate pickup by API is only for Delhivery. ${doc.courier} stays on the courier portal.`);
+  }
+  const { activeCourierCreds } = require('./courierAccount.service');
+  const creds = deps.delhiveryCreds || await activeCourierCreds(tenantId, 'delhivery');
+  const delhivery = require('../adapters/couriers/delhivery');
+  const booked = await delhivery.requestPickup(creds, {
+    count,
+    pickupTime: '16:00:00',
+    request: deps.delhiveryRequest,
+  });
+  const pickupId = String(booked.pickupId || '').trim() || `PKP-${doc.day.replace(/-/g, '')}-${count}`;
+  const pickupTime = String(booked.pickupTime || '16:00').trim();
+  const pickupAt = new Date();
+  doc.pickupId = pickupId;
+  doc.pickupAt = pickupAt;
+  doc.pickupTime = pickupTime;
+  await doc.save();
+  await skip(Order.updateMany(
+    { tenantId, manifestNo: doc.manifestNo },
+    { $set: { manifestPickupId: pickupId } },
+  ));
+  return view(doc.toObject());
+}
+
 module.exports = {
-  handOver, listManifests, getManifest, manifestRow,
+  handOver, listManifests, getManifest, generatePickup, manifestRow,
 };

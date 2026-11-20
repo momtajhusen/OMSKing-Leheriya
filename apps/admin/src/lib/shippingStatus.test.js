@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  amazonLabelStep, courierChoice, courierDeskCard, courierKey, courierOptionText, labelRequest, rateNote, pickupSlotText, shipmentMatchesCourier, shipmentStatus, splitLabelOrders, canHandOver, manifestFile, MANIFEST_COLUMNS,
+  amazonLabelStep, courierChoice, courierDeskCard, courierKey, courierOptionText, labelRequest, rateNote, pickupSlotText, shipmentMatchesCourier, shipmentStatus, splitLabelOrders, canHandOver, manifestFile, manifestPrintHtml, MANIFEST_COLUMNS,
 } from './shippingStatus.js';
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -31,16 +31,36 @@ test('a booked Shopify label (order set to Dispatched) waits in Label generated,
 test('handover manifest CSV has one numbered row per parcel with the courier, warehouse and COD', () => {
   const file = manifestFile({
     manifestNo: 'MF-20261105-DELHIVERY-01', day: '2026-11-05', courier: 'Delhivery', warehouseCode: 'WH-001',
-    rows: [{ orderNo: 'SHP-1', channel: 'Shopify', awb: 'DL1', customer: 'Asha', city: 'Jaipur', pincode: '302001', paymentMode: 'COD', codAmount: 999, qty: 2, weightKg: 0.5 }],
+    rows: [{ orderNo: 'SHP-1', channelOrderNo: '#70084-LEH', channel: 'Shopify', awb: 'DL1', customer: 'Asha', city: 'Jaipur', pincode: '302001', paymentMode: 'COD', codAmount: 999, qty: 2, weightKg: 0.5 }],
   });
   assert.equal(file.name, 'MF-20261105-DELHIVERY-01.csv');
   assert.deepEqual(file.header, MANIFEST_COLUMNS);
-  assert.deepEqual(file.rows[0].slice(0, 9), [1, 'MF-20261105-DELHIVERY-01', '2026-11-05', 'Delhivery', 'WH-001', 'SHP-1', '', 'Shopify', 'DL1']);
+  assert.deepEqual(file.rows[0].slice(0, 9), [1, 'MF-20261105-DELHIVERY-01', '2026-11-05', 'Delhivery', 'WH-001', '70084-LEH', 'SHP-1', 'Shopify', 'DL1']);
   assert.equal(file.rows[0][13], 999);
   const page = read('../pages/admin/ShippingPage.jsx');
   assert.match(page, /\/orders\/handover/);
   assert.match(page, /Move to Ready to hand over/);
   assert.match(page, /canHandOver\(row\)/);
+});
+
+test('print HTML lists every Delhivery AWB with pickup id for the courier manifest', () => {
+  const html = manifestPrintHtml({
+    courier: 'Delhivery',
+    day: '2026-11-20',
+    pickupId: 'PKP-9988',
+    pickupTime: '14:00',
+    rows: [
+      { channelOrderNo: '70084-LEH', orderNo: 'SHP-1', awb: '64747510120610' },
+      { channelOrderNo: '70083-LEH', orderNo: 'SHP-2', awb: '64747510120611' },
+    ],
+  });
+  assert.match(html, /MANIFEST : DELHIVERY/);
+  assert.match(html, /PICKUP ID: PKP-9988/);
+  assert.match(html, /20 NOVEMBER 2026/);
+  assert.match(html, /PICKUP TIME: 14:00/);
+  assert.match(html, /70084-LEH/);
+  assert.match(html, /64747510120610/);
+  assert.match(html, /70083-LEH/);
 });
 
 test('the Easy Ship pickup slot reads as one short line', () => {
@@ -79,6 +99,7 @@ test('an Amazon order offers Make Easy Ship label until it has one, then Amazon 
   assert.equal(amazonLabelStep({ channel: 'Amazon', status: 'Ready to Ship' }), 'make');
   assert.equal(amazonLabelStep({ channel: 'Amazon', status: 'Ready to Ship', awb: 'AWB1', labelGeneratedAt: '2026-11-05' }), 'print');
   assert.equal(amazonLabelStep({ channel: 'Amazon', status: 'Dispatched', awb: 'AWB1', labelGeneratedAt: '2026-11-05' }), 'print');
+  assert.equal(amazonLabelStep({ channel: 'Amazon', status: 'Dispatched' }), 'make', 'Dispatched without AWB still needs Easy Ship label');
   assert.equal(amazonLabelStep({ channel: 'Amazon', status: 'Cancelled' }), null);
   assert.equal(amazonLabelStep({ channel: 'Amazon', status: 'Delivered' }), null);
   assert.equal(amazonLabelStep({ channel: 'Shopify', status: 'Ready to Ship' }), null);
@@ -95,29 +116,30 @@ test('the label courier defaults to Delhivery and only lists the company courier
   assert.equal(labelRequest(couriers[1], ' ').error, 'Enter the Bluedart AWB');
 });
 
-test('Blue Dart own account is booked by API: no typed AWB, the request names the courier and the option says API', () => {
+test('Blue Dart own account is booked by API: no typed AWB, the request names the courier', () => {
   const blue = { code: 'bluedart', name: 'Bluedart', api: true, estimate: null };
   assert.deepEqual(labelRequest(blue, ''), { body: { courier: 'bluedart' } });
-  assert.equal(courierOptionText(blue), 'Bluedart · no rate (API)');
+  assert.equal(courierOptionText(blue), 'Bluedart');
 });
 
-test('Shree Maruti own account is booked by API: no typed AWB, the request names the courier and the option says API', () => {
+test('Shree Maruti own account is booked by API: no typed AWB, the request names the courier', () => {
   const maruti = { code: 'shree-maruti', name: 'Shree Maruti', api: true, estimate: null };
   assert.deepEqual(labelRequest(maruti, ''), { body: { courier: 'shree-maruti' } });
-  assert.equal(courierOptionText(maruti), 'Shree Maruti · no rate (API)');
+  assert.equal(courierOptionText(maruti), 'Shree Maruti');
 });
 
-test('Amazon Shipping is booked by API: no typed AWB, the request names the courier and the option says API', () => {
+test('Amazon Shipping is booked by API: no typed AWB, the request names the courier', () => {
   const amazon = { code: 'amazon-shipping', name: 'Amazon Shipping', api: true, estimate: null };
   assert.deepEqual(labelRequest(amazon, ''), { body: { courier: 'amazon-shipping' } });
-  assert.equal(courierOptionText(amazon), 'Amazon Shipping · no rate (API)');
+  assert.equal(courierOptionText(amazon), 'Amazon Shipping');
 });
 
-test('each label courier shows its rate-card estimate before booking', () => {
+test('courier dropdown shows only the courier name; rate stays in the note under the field', () => {
   const delhivery = { code: 'delhivery', name: 'Delhivery', api: true, estimate: { chargeableKg: 0.75, slabs: 2, amount: 160 } };
   const xb = { code: 'xpressbees', name: 'Xpressbees', api: false, estimate: null };
-  assert.equal(courierOptionText(delhivery), 'Delhivery · ₹160 (default)');
-  assert.equal(courierOptionText(xb), 'Xpressbees · no rate (enter AWB)');
+  assert.equal(courierOptionText(delhivery), 'Delhivery');
+  assert.equal(courierOptionText(xb), 'Xpressbees');
+  assert.doesNotMatch(courierOptionText(delhivery), /no rate|default|API|₹/);
   assert.equal(rateNote(delhivery, { weightGrams: 500 }), 'Estimated ₹160 for 0.75 kg (2 × 0.5 kg). Rate card from Settings › Couriers; the courier bills the final amount.');
   assert.equal(rateNote(xb, { weightGrams: 500 }), 'No rate saved for Xpressbees. Add its ₹ per 0.5 kg in Settings › Couriers.');
   assert.equal(rateNote(delhivery, null), 'Package weight is missing, so no rate. Add item weights or the default package in Settings.');

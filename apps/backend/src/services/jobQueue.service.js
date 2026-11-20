@@ -463,12 +463,26 @@ async function dispatch(job) {
 
 async function claimNext() {
   const now = new Date();
+  const claim = {
+    $set: { status: 'running', startedAt: now, lockedAt: now },
+  };
+  // Order pulls first — Sync / page refresh must not wait behind inventory floods.
+  const orderPull = await IntegrationJob.findOneAndUpdate(
+    {
+      status: 'queued',
+      jobType: 'orders_pull',
+      $or: [{ nextRunAt: null }, { nextRunAt: { $lte: now } }],
+    },
+    claim,
+    { sort: { createdAt: 1 }, new: true },
+  ).setOptions({ skipTenantFilter: true });
+  if (orderPull) return orderPull;
   return IntegrationJob.findOneAndUpdate(
     {
       status: 'queued',
       $or: [{ nextRunAt: null }, { nextRunAt: { $lte: now } }],
     },
-    { $set: { status: 'running', startedAt: now, lockedAt: now } },
+    claim,
     { sort: { createdAt: 1 }, new: true },
   ).setOptions({ skipTenantFilter: true });
 }
@@ -669,6 +683,7 @@ module.exports = {
   enqueueManual,
   notLiveMessage,
   keysReady,
+  hasLiveConnection,
   listJobs,
   listPlatformJobs,
   requeueJob,

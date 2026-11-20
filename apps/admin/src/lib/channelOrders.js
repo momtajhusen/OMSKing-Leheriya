@@ -59,13 +59,26 @@ const DONE = new Set(['success', 'failed', 'partial_success', 'cancelled']);
 async function waitForJob(jobId, { timeoutMs = 120_000 } = {}) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     const res = await api.get('/integrations/jobs');
     const job = (res.data?.data || []).find((row) => row.id === jobId);
     if (job && DONE.has(job.status)) return job;
     if (job?.status === 'queued' && job.lastError) return job;
   }
   return { id: jobId, status: 'running', shortSummary: 'Still running. Refresh in a minute.' };
+}
+
+/**
+ * Instant pull from live channels (no job queue). Used on Orders page open/refresh and Sync.
+ * @returns {Promise<{ results: object[], created: number, message?: string }>}
+ */
+export async function pullOrdersNow({ hours = 48, channels } = {}) {
+  const { data } = await api.post('/orders/pull-now', { hours, channels }, { timeout: 90_000 });
+  return {
+    results: data?.data?.results || [],
+    created: data?.data?.created || 0,
+    message: data?.message,
+  };
 }
 
 /** Queues a live Myntra order pull and waits for the worker to finish it. */
@@ -80,8 +93,18 @@ export async function pullChannelOrders(channel, { timeoutMs = 120_000 } = {}) {
   return waitForJob(data?.data?.id, { timeoutMs });
 }
 
-/** Sync Orders: Shopify + Amazon + Myntra, in parallel, then wait for each. */
+/** Sync Orders: instant channel pull (falls back to queued jobs only if pull-now is unavailable). */
 export async function syncAllChannelOrders({ timeoutMs = 120_000 } = {}) {
+  try {
+    const { results, created, message } = await pullOrdersNow({ hours: 48 });
+    return results.map((row) => ({
+      ...row,
+      created: row.created ?? (row.channel === results[0]?.channel ? created : row.created),
+      shortSummary: row.shortSummary || message,
+    }));
+  } catch (err) {
+    if (err?.response?.status !== 404) throw err;
+  }
   const channels = ['shopify', 'amazon', 'myntra'];
   const started = await Promise.all(channels.map(async (channel) => {
     try {

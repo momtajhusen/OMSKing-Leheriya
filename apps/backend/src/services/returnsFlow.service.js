@@ -108,13 +108,20 @@ async function listReturns(tenantId) {
   ]);
   const orderNos = [...new Set(rows.map((row) => row.orderNo).filter(Boolean))];
   const orders = orderNos.length
-    ? await skip(Order.find({ tenantId, orderNo: { $in: orderNos } }).select('orderNo items.sku items.price items.qty').lean())
+    ? await skip(Order.find({ tenantId, orderNo: { $in: orderNos } }).select('orderNo channelOrderNo externalOrderId items.sku items.price items.qty').lean())
     : [];
   const orderByNo = new Map(orders.map((order) => [order.orderNo, order]));
-  return rows.map((row) => ({
-    amount: returnAmount(row, orderByNo.get(row.orderNo)),
+  return rows.map((row) => {
+    const order = orderByNo.get(row.orderNo);
+    const channel = String(order?.channelOrderNo || '').replace(/^#/, '').trim();
+    const external = String(order?.externalOrderId || '').trim();
+    const channelOrderNo = channel
+      || (external && !/^gid:\/\//i.test(external) && !/^SHP-/i.test(external) ? external : '');
+    return {
+    amount: returnAmount(row, order),
     id: row.returnNo,
     orderId: row.orderNo,
+    channelOrderNo,
     reason: row.reason,
     status: row.status,
     type: row.kind === 'rto' ? 'rto' : 'customer_return',
@@ -130,7 +137,8 @@ async function listReturns(tenantId) {
     awb: row.labelAwb,
     labelGeneratedAt: row.status === 'Approved' || row.status === 'Completed' ? row.updatedAt : null,
     requestDate: row.createdAt,
-  }));
+  };
+  });
 }
 
 function pinOf(order) {
