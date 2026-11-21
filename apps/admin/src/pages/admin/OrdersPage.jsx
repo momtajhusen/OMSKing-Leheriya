@@ -191,7 +191,8 @@ export default function OrdersPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [searchParams] = useSearchParams();
   const [channelFilter, setChannelFilter] = useState(() => channelFromSearch(searchParams));
-  const connected = useConnectedChannels({ refresh: true });
+  // Do not force-refresh channels on every visit — store hydrate is enough and avoids a competing round-trip.
+  const connected = useConnectedChannels();
   const connectedKey = connected.loaded ? (connected.labels.join(',') || '__none__') : '';
   const channelTabs = [
     { id: 'all', label: 'All channels' },
@@ -268,17 +269,23 @@ export default function OrdersPage() {
   };
 
   useEffect(() => {
+    // Wait for channel list once so we do not fetch unfiltered then re-fetch filtered (double load).
+    if (!connected.loaded) return;
     loadOrders(page, { soft: orderList.length > 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, activeTab, channelFilter, paymentFilter, sourceFilter, readyFilter, parcelFilter, dateFrom, dateTo, query, connectedKey]);
 
-  // Background channel pull — never blocks the list paint.
+  // Background channel pull — silent, deferred, throttled. Never drives SoftRefresh / Syncing button.
   useEffect(() => {
     if (!can(PERMISSIONS.ORDERS_EDIT) && !can(PERMISSIONS.SETTINGS_MANAGE)) return undefined;
     let cancelled = false;
-    (async () => {
+    const AUTO_PULL_KEY = 'orders-auto-pull-at';
+    const AUTO_PULL_GAP_MS = 10 * 60 * 1000;
+    const timer = setTimeout(async () => {
       try {
-        setSyncing(true);
+        const last = Number(sessionStorage.getItem(AUTO_PULL_KEY) || 0);
+        if (Date.now() - last < AUTO_PULL_GAP_MS) return;
+        sessionStorage.setItem(AUTO_PULL_KEY, String(Date.now()));
         const { created, results, message } = await pullOrdersNow({ hours: 48 });
         if (cancelled) return;
         const failed = (results || []).filter((row) => row.status === 'failed');
@@ -292,11 +299,12 @@ export default function OrdersPage() {
         if (!cancelled && err?.response?.status !== 403) {
           /* keep DB list; Sync button still works */
         }
-      } finally {
-        if (!cancelled) setSyncing(false);
       }
-    })();
-    return () => { cancelled = true; };
+    }, 2500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
     // Only on first mount / hard refresh — not on every filter change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -465,40 +473,37 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Orders ({total})</h1>
-          <p className="text-xs text-muted-foreground">Packing desk tabs: Unfulfillable, New, Packed, Ready To Ship. Shipping tabs: Pickup & Manifest, In Transit, Delivered, RTO.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="shrink-0 text-xl font-bold">Orders ({total})</h1>
+        <div className="flex flex-nowrap items-center justify-end gap-2 overflow-x-auto">
           {can(PERMISSIONS.ORDERS_EDIT) && (
-            <Button variant="outline" size="sm" onClick={packSelected} disabled={!selectedIds.length || Boolean(bulkBusy)}>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={packSelected} disabled={!selectedIds.length || Boolean(bulkBusy)}>
               {bulkBusy === 'pack' ? 'Packing…' : `Pack selected (${selectedIds.length})`}
             </Button>
           )}
           {can(PERMISSIONS.SHIPPING_GENERATE) && (
-            <Button variant="outline" size="sm" onClick={labelSelected} disabled={!selectedIds.length || Boolean(bulkBusy)}>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={labelSelected} disabled={!selectedIds.length || Boolean(bulkBusy)}>
               {bulkBusy === 'label' ? 'Queuing…' : `Generate labels (${selectedIds.length})`}
             </Button>
           )}
           {activeTab === 'Ready to Ship' && can(PERMISSIONS.SHIPPING_GENERATE) && (
-            <Button variant="outline" size="sm" onClick={openManifests}>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={openManifests}>
               <FileText className="w-4 h-4 mr-2" />
               Courier manifests
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={syncOrders} disabled={syncing}>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={syncOrders} disabled={syncing}>
             <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? 'Syncing…' : 'Sync Orders'}
           </Button>
-          <Button variant="outline" size="sm" onClick={exportOrders}>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={exportOrders}>
             <Download className="w-4 h-4 mr-2" />
             Export
           </Button>
         </div>
       </div>
 
-      <SoftRefresh show={refreshing || syncing} />
+      <SoftRefresh show={refreshing} />
       {loading && orderList.length === 0 ? (
         <PageLoader label="Loading orders..." />
       ) : (

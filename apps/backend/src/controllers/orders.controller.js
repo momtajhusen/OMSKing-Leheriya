@@ -19,7 +19,8 @@ const { customerHistory } = require('../services/customerHistory.service');
 const { codCollectAmount, isPaid } = require('../utils/payment');
 const { tenantMemo, bustTenantMemo } = require('../lib/tenantMemo');
 
-const DESK_TTL_MS = 8_000;
+/** Keep desk warm across tab/filter navigation so Orders does not rebuild 4k rows every click. */
+const DESK_TTL_MS = 45_000;
 
 function nextProcessing(status) {
   if (status === 'New' || status === 'Pending') return 'Processing';

@@ -99,6 +99,19 @@ test('Sync Orders pulls Shopify, Amazon and Myntra together and waits for the jo
   assert.doesNotMatch(page, /pullMyntraOrders\(\)/);
 });
 
+test('Orders soft refresh is only for list reload — Syncing does not cover the page', () => {
+  assert.match(page, /<SoftRefresh show=\{refreshing\}/);
+  assert.doesNotMatch(page, /SoftRefresh show=\{refreshing \|\| syncing\}/);
+});
+
+test('Orders auto channel pull is silent, deferred and throttled so open stays interactive', () => {
+  const mount = page.slice(page.indexOf('Background channel pull'), page.indexOf('Fresh visit'));
+  assert.match(mount, /orders-auto-pull-at/);
+  assert.match(mount, /pullOrdersNow/);
+  assert.doesNotMatch(mount, /setSyncing\(true\)/);
+  assert.match(page, /if \(!connected\.loaded\) return/);
+});
+
 test('orders get an Order ready badge and can be filtered by Order ready and vendor parcel status', () => {
   const listCall = page.slice(page.indexOf('const loadOrders'), page.indexOf('const filteredOrders'));
   assert.match(listCall, /ready: readyFilter/);

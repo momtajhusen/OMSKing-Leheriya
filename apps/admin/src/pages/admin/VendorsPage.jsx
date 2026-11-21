@@ -241,9 +241,12 @@ export default function VendorsPage() {
             setAutoAssign(next);
             toast.success(next ? 'Auto assignment is on' : 'Auto assignment is off');
           }}
-          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${autoAssign ? 'bg-primary' : 'bg-muted'}`}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0 transition-colors ${autoAssign ? 'bg-primary' : 'bg-muted'}`}
         >
-          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${autoAssign ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          <span
+            aria-hidden
+            className={`pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${autoAssign ? 'translate-x-5' : 'translate-x-0'}`}
+          />
         </button>
       </div>
 
