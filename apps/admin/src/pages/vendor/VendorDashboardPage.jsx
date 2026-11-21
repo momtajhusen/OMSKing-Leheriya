@@ -44,8 +44,6 @@ export default function VendorDashboardPage() {
     else toast.success(`${row.orderId} accepted`);
   };
 
-  if (!loaded) return <PageLoader label="Loading dashboard..." />;
-
   return (
     <VendorPage
       title="Dashboard"
@@ -59,6 +57,10 @@ export default function VendorDashboardPage() {
         <VendorStat label="Assigned value" value={formatINR(assignedValue)} icon={IndianRupee} tone="rose" />
       </div>
 
+      {!loaded ? (
+        <PageLoader label="Loading dashboard..." />
+      ) : (
+        <>
       <div className="premium-card overflow-hidden p-0">
         <div className="border-b border-[hsl(var(--color-border-premium))] px-4 py-3">
           <h2 className="text-base font-semibold">Needs your Yes / No</h2>
@@ -109,7 +111,8 @@ export default function VendorDashboardPage() {
             </VendorSheet>
           )}
         </div>
-      </div>
+      </div>        </>
+      )}
     </VendorPage>
   );
 }

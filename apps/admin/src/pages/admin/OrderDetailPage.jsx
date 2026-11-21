@@ -14,6 +14,7 @@ import Input from '../../components/ui/Input';
 import Breadcrumbs from '../../components/ui/Breadcrumbs';
 import ProductThumb from '../../components/ui/ProductThumb';
 import EmptyState from '../../components/ui/EmptyState';
+import PageLoader from '../../components/ui/PageLoader';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PERMISSIONS } from '../../constants/permissions';
 import { FileText, Printer, ArrowLeft, Store, RotateCcw, CheckCircle, Pencil, RefreshCw, ChevronDown } from 'lucide-react';
@@ -163,8 +164,6 @@ export default function OrderDetailPage() {
       .catch(() => { if (live) setHistory(null); });
     return () => { live = false; };
   }, [masterId, detailReady]);
-
-  if (!detailReady) return <div className="p-6 text-sm text-muted-foreground">Loading order…</div>;
 
   if (!order) {
     return (
@@ -750,6 +749,11 @@ export default function OrderDetailPage() {
           </DropdownMenu>
         </div>
       </div>
+
+      {!detailReady ? (
+        <PageLoader label="Loading order..." />
+      ) : (
+        <>
 
       {order.reversePickup?.returnId && (
         <div role="note" className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
@@ -1512,7 +1516,8 @@ export default function OrderDetailPage() {
             </p>
           </div>
         </div>
-      </Modal>
+      </Modal>        </>
+      )}
     </div>
   );
 }

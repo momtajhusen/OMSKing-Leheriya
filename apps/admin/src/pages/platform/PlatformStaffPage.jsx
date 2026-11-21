@@ -18,8 +18,6 @@ export default function PlatformStaffPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <PageLoader label="Loading platform staff..." />;
-
   return (
     <PlatformPage
       title="Platform staff"
@@ -49,6 +47,13 @@ export default function PlatformStaffPage() {
           </TableBody>
         </Table>
       </PlatformSheet>
+
+      {loading ? (
+        <PageLoader label="Loading platform staff..." />
+      ) : (
+        <>
+        </>
+      )}
     </PlatformPage>
   );
 }

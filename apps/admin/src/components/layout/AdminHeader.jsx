@@ -35,7 +35,6 @@ import { ROLE_LABELS } from '../../constants/roles';
 import { usePermissions } from '../../hooks/usePermissions';
 import BrandLogo from '../brand/BrandLogo';
 import { ProfileAvatar, useProfilePhoto } from '../account/ProfilePhoto';
-import ReportButton from '../report/ReportButton';
 import AutoFixButton from '../report/AutoFixButton';
 import { Camera } from 'lucide-react';
 
@@ -189,7 +188,6 @@ function AdminHeader() {
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2">
-        {user && <ReportButton mode="merchant" />}
         {user && <AutoFixButton />}
 
         <DropdownMenu

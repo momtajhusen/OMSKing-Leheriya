@@ -195,8 +195,6 @@ export default function ReportsPage() {
     toast.success(`${TABS.find((tab) => tab.id === activeTab)?.label} report exported`);
   };
 
-  if (!loaded) return <PageLoader label="Loading reports..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -209,6 +207,11 @@ export default function ReportsPage() {
           Export {TABS.find((tab) => tab.id === activeTab)?.label}
         </Button>
       </div>
+
+      {!loaded ? (
+        <PageLoader label="Loading reports..." />
+      ) : (
+        <>
 
       <div className="flex gap-2 border-b overflow-x-auto">
         {TABS.map((tab) => (
@@ -527,6 +530,7 @@ export default function ReportsPage() {
             </CardContent>
           </Card>
         </div>
+      )}        </>
       )}
     </div>
   );

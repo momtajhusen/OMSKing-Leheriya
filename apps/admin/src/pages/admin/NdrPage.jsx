@@ -66,8 +66,6 @@ export default function NdrPage() {
     }
   };
 
-  if (!loaded) return <PageLoader label="Loading NDR..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -98,6 +96,11 @@ export default function NdrPage() {
         </Button>
         </div>
       </div>
+
+      {!loaded ? (
+        <PageLoader label="Loading NDR..." />
+      ) : (
+        <>
 
       <Card>
         <CardHeader>
@@ -182,7 +185,8 @@ export default function NdrPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card>        </>
+      )}
     </div>
   );
 }

@@ -32,8 +32,9 @@ test('product list shows short Offline and Virtual stock columns per Master SKU,
 });
 
 test('changing page, searching or saving keeps the product list on screen instead of the full-page loader', () => {
-  assert.match(page, /if \(loading && rows\.length === 0\) return <PageLoader label="Loading products\.\.\." \/>;/);
+  assert.match(page, /\{loading && rows\.length === 0 \? \(\s*<PageLoader label="Loading products\.\.\." \/>/);
   assert.doesNotMatch(page, /if \(loading\) return <PageLoader/);
+  assert.doesNotMatch(page, /if \(loading && rows\.length === 0\) return <PageLoader/);
   assert.match(page, /<CardContent aria-busy=\{loading\} className=\{cn\('transition-opacity', loading && 'pointer-events-none opacity-60'\)\}>/);
 });
 

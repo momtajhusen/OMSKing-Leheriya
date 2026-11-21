@@ -372,8 +372,6 @@ export default function ShippingPage() {
     } else toast.success(`${order.id} tracking saved on ${order.channel}. Delhivery was not used.`);
   };
 
-  if (!loaded) return <PageLoader label="Loading shipping..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -406,6 +404,11 @@ export default function ShippingPage() {
           </Button>
         </div>
       </div>
+
+      {!loaded ? (
+        <PageLoader label="Loading shipping..." />
+      ) : (
+        <>
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <KpiCard label="Label Pending" value={count('Label Pending')} icon={Package} onClick={() => setActiveTab('Label Pending')} />
@@ -851,7 +854,8 @@ export default function ShippingPage() {
             <li key={row.id}>{row.channelOrderNo || row.id} · AWB {row.tracking || '—'} · {row.customer}</li>
           ))}
         </ul>
-      </Modal>
+      </Modal>        </>
+      )}
     </div>
   );
 }

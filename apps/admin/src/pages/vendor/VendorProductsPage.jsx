@@ -32,8 +32,6 @@ export default function VendorProductsPage() {
     ? items.filter((row) => row.product.toLowerCase().includes(query) || row.sku.toLowerCase().includes(query))
     : items;
 
-  if (!loaded) return <PageLoader label="Loading products..." />;
-
   return (
     <VendorPage
       title="My Products"
@@ -48,6 +46,10 @@ export default function VendorProductsPage() {
         />
       </div>
 
+      {!loaded ? (
+        <PageLoader label="Loading products..." />
+      ) : (
+        <>
       {visible.length === 0 ? (
         <EmptyState
           icon={<PackageSearch className="h-6 w-6 text-muted-foreground" />}
@@ -86,6 +88,7 @@ export default function VendorProductsPage() {
             </TableBody>
           </Table>
         </VendorSheet>
+      )}        </>
       )}
     </VendorPage>
   );

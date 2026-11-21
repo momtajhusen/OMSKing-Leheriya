@@ -198,8 +198,6 @@ export default function VendorsPage() {
     closeVendor();
   };
 
-  if (!loaded) return <PageLoader label="Loading vendors..." />;
-
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -220,6 +218,11 @@ export default function VendorsPage() {
           </Button>
         </div>
       </div>
+
+      {!loaded ? (
+        <PageLoader label="Loading vendors..." />
+      ) : (
+        <>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/80 bg-gradient-to-r from-emerald-500/[0.06] via-transparent to-transparent px-4 py-3">
         <div className="min-w-0 flex-1">
@@ -574,7 +577,8 @@ export default function VendorsPage() {
             </div>
           )}
         </div>
-      </Modal>
+      </Modal>        </>
+      )}
     </div>
   );
 }

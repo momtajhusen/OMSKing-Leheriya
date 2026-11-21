@@ -150,8 +150,6 @@ export default function SkuMappingPage() {
     { id: 'unlisted', label: 'Unlisted', count: counts.unlisted },
   ];
 
-  if (loading) return <PageLoader label="Loading SKU mappings..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -163,6 +161,11 @@ export default function SkuMappingPage() {
         </div>
         <Button variant="outline" onClick={() => navigate('/import')}>Bulk import</Button>
       </div>
+
+      {loading ? (
+        <PageLoader label="Loading SKU mappings..." />
+      ) : (
+        <>
 
       <Card className="bg-primary/5 border-primary/20">
         <CardContent className="p-3">
@@ -374,7 +377,8 @@ export default function SkuMappingPage() {
           )}
           <Pagination page={masterPage} total={masterTotal} limit={PAGE_SIZE} onPage={setMasterPage} />
         </CardContent>
-      </Card>
+      </Card>        </>
+      )}
     </div>
   );
 }

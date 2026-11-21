@@ -353,8 +353,6 @@ export default function PlatformWebsiteImagesPage() {
     }))
     .filter((group) => group.shown.length);
 
-  if (loading) return <PageLoader label="Loading website images…" />;
-
   const percent = total ? Math.round((uploadedCount / total) * 100) : 0;
 
   return (
@@ -363,6 +361,10 @@ export default function PlatformWebsiteImagesPage() {
       subtitle="Photos for the public OMSKing website. Every slot shows where it appears, the exact size, and a ChatGPT prompt. An upload goes live on the site straight away."
       action={(
         <a href="/" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-4 text-sm font-medium transition hover:bg-muted">
+      {loading ? (
+        <PageLoader label="Loading website images…" />
+      ) : (
+        <>
           <ExternalLink className="h-4 w-4" />
           Open website
         </a>
@@ -568,7 +570,8 @@ export default function PlatformWebsiteImagesPage() {
         {removeFor && rows[removeFor] && (
           <img src={mediaUrl(rows[removeFor].url)} alt="" className="max-h-56 w-full rounded-lg object-contain" />
         )}
-      </Modal>
+      </Modal>        </>
+      )}
     </PlatformPage>
   );
 }

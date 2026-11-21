@@ -144,14 +144,16 @@ export default function TenantMgmtPage() {
     }
   };
 
-  if (loading) return <PageLoader label="Loading subscribers..." />;
-
   return (
     <PlatformPage
       title="Subscribers"
       subtitle="Each row is a merchant tenant — own users, channels, and data. Not a vendor packing list."
       action={
         <Button onClick={startWizard}>
+      {loading ? (
+        <PageLoader label="Loading subscribers..." />
+      ) : (
+        <>
           <Plus className="w-4 h-4 mr-2" />
           New Tenant
         </Button>
@@ -403,7 +405,8 @@ export default function TenantMgmtPage() {
         onClose={() => setRemoving(null)}
       >
         Only a company added by mistake can be deleted: its logins, roles and warehouses are removed. If it already has orders, products or a connected channel, it is kept and you are asked to Suspend it instead.
-      </ConfirmDialog>
+      </ConfirmDialog>        </>
+      )}
     </PlatformPage>
   );
 }

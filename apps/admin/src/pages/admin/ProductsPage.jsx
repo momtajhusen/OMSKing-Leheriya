@@ -153,8 +153,6 @@ export default function ProductsPage() {
     }
   };
 
-  if (loading && rows.length === 0) return <PageLoader label="Loading products..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -175,6 +173,11 @@ export default function ProductsPage() {
           )}
         </div>
       </div>
+
+      {loading && rows.length === 0 ? (
+        <PageLoader label="Loading products..." />
+      ) : (
+        <>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <KpiCard label="Products" value={total} icon={Package} />
@@ -451,7 +454,8 @@ export default function ProductsPage() {
           </div>
         )}
       </Modal>
-
+        </>
+      )}
     </div>
   );
 }

@@ -88,29 +88,30 @@ function AdminSidebar() {
 
   return (
     <>
-      {/* Mobile Overlay */}
+      {/* Mobile Overlay — above sticky header (z-40) and bottom nav (z-60) */}
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm lg:hidden"
+            transition={{ type: 'tween', duration: 0.15, ease: 'easeOut' }}
+            className="fixed inset-0 z-[70] bg-background/70 lg:hidden"
             onClick={() => setMobileOpen(false)}
           />
         )}
       </AnimatePresence>
 
-      {/* Mobile Sidebar */}
+      {/* Mobile Sidebar — full height from top, over header + bottom tabs */}
       <AnimatePresence>
         {mobileOpen && (
           <motion.aside
             initial={{ x: '-100%' }}
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            transition={{ type: 'tween', duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             className={cn(
-              'flex flex-col premium-sidebar transition-all duration-300 relative h-screen overflow-hidden fixed z-50 lg:hidden pb-[calc(4.75rem+env(safe-area-inset-bottom))]',
+              'flex flex-col premium-sidebar overflow-hidden fixed inset-y-0 left-0 top-0 z-[70] h-dvh lg:hidden',
               'w-[260px]'
             )}
           >

@@ -34,8 +34,6 @@ export default function VendorReturnsPage() {
 
   const returnsCount = items.filter((r) => r.kind === 'Customer return').length;
 
-  if (!loaded) return <PageLoader label="Loading returns..." />;
-
   return (
     <VendorPage title="Returns" subtitle="Your lines that the customer returned or that were cancelled. Returned parcels go back to the merchant warehouse.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -44,6 +42,10 @@ export default function VendorReturnsPage() {
         <VendorStat label="Cancelled" value={items.length - returnsCount} icon={Ban} tone="rose" />
       </div>
 
+      {!loaded ? (
+        <PageLoader label="Loading returns..." />
+      ) : (
+        <>
       {items.length === 0 ? (
         <EmptyState
           icon={<RotateCcw className="h-6 w-6 text-muted-foreground" />}
@@ -86,6 +88,7 @@ export default function VendorReturnsPage() {
             </TableBody>
           </Table>
         </VendorSheet>
+      )}        </>
       )}
     </VendorPage>
   );

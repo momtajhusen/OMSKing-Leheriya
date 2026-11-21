@@ -116,6 +116,11 @@ function LineCost({ line }) {
           </Button>
         )}
       </div>
+
+      {loading ? (
+        <PageLoader label="Loading assignment..." />
+      ) : (
+        <>
       <p className="mt-1 text-[11px] text-muted-foreground">{costHint(cost)}</p>
     </div>
   );
@@ -390,8 +395,6 @@ export default function FulfilmentPage() {
     { id: 'all', label: 'Open', value: openOrders.length, icon: List, tone: 'blue' },
   ];
 
-  if (loading) return <PageLoader label="Loading assignment..." />;
-
   return (
     <div className="min-w-0 space-y-3">
       <div>
@@ -662,7 +665,8 @@ export default function FulfilmentPage() {
         }
       >
         <Input placeholder="Out of stock / cannot ship…" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
-      </Modal>
+      </Modal>        </>
+      )}
     </div>
   );
 }

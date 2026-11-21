@@ -450,8 +450,6 @@ export default function OrdersPage() {
       ]));
   };
 
-  if (loading) return <PageLoader label="Loading orders..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -486,6 +484,11 @@ export default function OrdersPage() {
           </Button>
         </div>
       </div>
+
+      {loading ? (
+        <PageLoader label="Loading orders..." />
+      ) : (
+        <>
 
       {loadError && (
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>
@@ -917,7 +920,8 @@ export default function OrdersPage() {
             </p>
           </div>
         </div>
-      </Modal>
+      </Modal>        </>
+      )}
     </div>
   );
 }

@@ -29,8 +29,6 @@ export default function DemoRequestsPage() {
       .finally(() => setLoading(false));
   }, [page]);
 
-  if (loading) return <PageLoader label="Loading demo requests…" />;
-
   return (
     <PlatformPage
       title="Demo requests"
@@ -73,6 +71,13 @@ export default function DemoRequestsPage() {
         </Table>
         <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
       </PlatformSheet>
+
+      {loading ? (
+        <PageLoader label="Loading demo requests…" />
+      ) : (
+        <>
+        </>
+      )}
     </PlatformPage>
   );
 }

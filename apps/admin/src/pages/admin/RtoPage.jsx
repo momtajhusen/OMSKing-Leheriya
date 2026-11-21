@@ -116,8 +116,6 @@ export default function RtoPage() {
     toast.success(`${row.id} QC failed — no restock`);
   };
 
-  if (!loaded) return <PageLoader label="Loading RTO..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -130,6 +128,11 @@ export default function RtoPage() {
           Sync RTO
         </Button>
       </div>
+
+      {!loaded ? (
+        <PageLoader label="Loading RTO..." />
+      ) : (
+        <>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <KpiCard label="Total RTO" value={rows.length} icon={RotateCcw} onClick={() => setActiveTab('All')} />
@@ -267,7 +270,8 @@ export default function RtoPage() {
             </div>
           </div>
         </CardContent>
-      </Card>
+      </Card>        </>
+      )}
     </div>
   );
 }

@@ -112,8 +112,6 @@ export default function PaymentReconciliationPage() {
       delivered.map((order) => [order.id, order.channel, order.externalOrderId, order.paymentMode, String(order.createdAt || '').slice(0, 10), order.total, order.ageing]));
   };
 
-  if (!loaded) return <PageLoader label="Loading payments..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -128,6 +126,11 @@ export default function PaymentReconciliationPage() {
           Export expected (CSV)
         </Button>
       </div>
+
+      {!loaded ? (
+        <PageLoader label="Loading payments..." />
+      ) : (
+        <>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <KpiCard label="Delivered orders" value={delivered.length} icon={Truck} />
@@ -314,7 +317,8 @@ export default function PaymentReconciliationPage() {
             </Table>
           )}
         </CardContent>
-      </Card>
+      </Card>        </>
+      )}
     </div>
   );
 }

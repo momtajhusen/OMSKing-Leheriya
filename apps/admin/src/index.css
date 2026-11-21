@@ -341,92 +341,96 @@
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(1.06); }
   }
-  @keyframes page-loader-fill {
-    0% { stroke-dashoffset: 264; opacity: 1; }
-    72% { stroke-dashoffset: 36; opacity: 1; }
-    100% { stroke-dashoffset: 0; opacity: 0.35; }
+  @keyframes page-loader-shell-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
   }
-  @keyframes page-loader-bar {
-    0% { transform: scaleX(0.08); opacity: 1; }
-    68% { transform: scaleX(0.82); opacity: 1; }
-    100% { transform: scaleX(1); opacity: 0.45; }
+  @keyframes page-loader-line-run {
+    0% { transform: translateX(-40%); }
+    100% { transform: translateX(140%); }
+  }
+  @keyframes page-loader-bone {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+  @keyframes page-loader-dot {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes page-loader-orbit {
+    to { transform: rotate(360deg); }
   }
 
-  .page-loader-mark {
+  .page-loader-shell {
+    animation: page-loader-shell-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .page-loader-line {
     position: relative;
-    display: grid;
-    place-items: center;
-    width: 6.5rem;
-    height: 6.5rem;
-  }
-
-  .page-loader-mark::before {
-    content: '';
-    position: absolute;
-    inset: -1.15rem;
-    border-radius: 999px;
-    background: radial-gradient(circle, hsl(var(--color-primary-blue) / 0.28), transparent 68%);
-    animation: pulse-soft 2.4s ease-in-out infinite;
-  }
-
-  .page-loader-ring {
-    position: absolute;
-    inset: 0;
+    height: 2px;
     width: 100%;
-    height: 100%;
-    transform: rotate(-90deg);
-  }
-
-  .page-loader-ring-track,
-  .page-loader-ring-fill {
-    fill: none;
-    stroke-width: 4;
-  }
-
-  .page-loader-ring-track {
-    stroke: hsl(var(--color-primary) / 0.12);
-  }
-
-  .page-loader-ring-fill {
-    stroke: hsl(var(--color-primary-blue));
-    stroke-linecap: round;
-    stroke-dasharray: 264;
-    stroke-dashoffset: 264;
-    animation: page-loader-fill 1.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
-  }
-
-  .page-loader-bar {
-    margin-top: 1.35rem;
-    height: 4px;
-    width: 10rem;
     overflow: hidden;
     border-radius: 999px;
-    background: hsl(var(--color-primary) / 0.12);
+    background: hsl(var(--color-primary) / 0.1);
   }
 
-  .page-loader-bar span {
-    display: block;
-    height: 100%;
-    width: 100%;
+  .page-loader-line::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 38%;
     border-radius: inherit;
-    background: linear-gradient(90deg, hsl(var(--color-primary-blue)), hsl(var(--color-indigo-accent)));
-    transform: scaleX(0.08);
-    transform-origin: left center;
-    animation: page-loader-bar 1.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+    background: linear-gradient(90deg, transparent, hsl(var(--color-primary-blue)), hsl(var(--color-indigo-accent)), transparent);
+    animation: page-loader-line-run 0.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+
+  .page-loader-line--compact {
+    width: 8.5rem;
+  }
+
+  .page-loader-bone {
+    border-radius: 0.5rem;
+    background-image: linear-gradient(
+      90deg,
+      hsl(var(--color-muted) / 0.55) 0%,
+      hsl(var(--color-muted) / 0.95) 42%,
+      hsl(var(--color-muted) / 0.55) 84%
+    );
+    background-size: 220% 100%;
+    animation: page-loader-bone 1.15s ease-in-out infinite;
+  }
+
+  .page-loader-dot {
+    display: inline-block;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 999px;
+    background: hsl(var(--color-primary-blue));
+    animation: page-loader-dot 0.9s ease-in-out infinite;
+  }
+
+  .page-loader-orbit {
+    position: absolute;
+    inset: -0.55rem;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    border-top-color: hsl(var(--color-primary-blue));
+    border-right-color: hsl(var(--color-primary-blue) / 0.25);
+    animation: page-loader-orbit 0.75s linear infinite;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .page-loader-ring-fill,
-    .page-loader-bar span,
-    .page-loader-mark::before {
+    .page-loader-shell,
+    .page-loader-line::after,
+    .page-loader-bone,
+    .page-loader-dot,
+    .page-loader-orbit {
       animation: none !important;
     }
-    .page-loader-ring-fill {
-      stroke-dashoffset: 70;
-      opacity: 1;
-    }
-    .page-loader-bar span {
-      transform: scaleX(0.55);
+    .page-loader-line::after {
+      width: 55%;
+      left: 0;
+      background: hsl(var(--color-primary-blue));
     }
   }
 

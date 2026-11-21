@@ -73,8 +73,6 @@ export default function VendorSettingsPage() {
     }
   };
 
-  if (!loaded) return <PageLoader label="Loading settings..." />;
-
   if (!vendor) {
     return (
       <VendorPage title="Settings" subtitle="Your business details for this merchant.">
@@ -143,6 +141,10 @@ export default function VendorSettingsPage() {
         </CardContent>
       </Card>
 
+      {!loaded ? (
+        <PageLoader label="Loading settings..." />
+      ) : (
+        <>
       <Card className="premium-card border-0 shadow-none">
         <CardHeader className="p-4 pb-2">
           <CardTitle className="text-base">Alerts</CardTitle>
@@ -158,7 +160,8 @@ export default function VendorSettingsPage() {
             <Badge variant="outline">{vendor.telegramGroup ? 'Saved' : 'Not set'}</Badge>
           </div>
         </CardContent>
-      </Card>
+      </Card>        </>
+      )}
     </VendorPage>
   );
 }

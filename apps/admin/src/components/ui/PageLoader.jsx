@@ -1,30 +1,43 @@
 import { cn } from '../../lib/utils';
 import BrandLogo from '../brand/BrandLogo';
 
-export default function PageLoader({ label = 'Loading…', fullscreen = false }) {
+/** Compact loader for the section that is fetching — not a full-page takeover. */
+export default function PageLoader({ label = 'Loading…', fullscreen = false, className }) {
+  if (fullscreen) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        aria-label={label}
+        className="grid min-h-dvh w-full place-items-center bg-background"
+      >
+        <div className="page-loader-shell flex flex-col items-center px-6">
+          <div className="relative mb-4 grid place-items-center">
+            <span className="page-loader-orbit" aria-hidden="true" />
+            <BrandLogo className="relative z-[1] h-11 w-11 rounded-2xl shadow-md shadow-emerald-900/15" />
+          </div>
+          <div className="page-loader-line page-loader-line--compact" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium tracking-wide text-muted-foreground">{label}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       role="status"
       aria-live="polite"
       aria-label={label}
       className={cn(
-        'grid w-full place-items-center',
-        fullscreen ? 'min-h-dvh bg-background' : 'min-h-[calc(100dvh-10.5rem)]'
+        'page-loader-shell flex min-h-[9.5rem] w-full flex-col items-center justify-center gap-3 rounded-xl border border-[hsl(var(--color-border-premium))]/80 bg-[hsl(var(--color-card-bg))]/35 px-4 py-8',
+        className
       )}
     >
-      <div className="flex flex-col items-center px-6">
-        <div className="page-loader-mark">
-          <svg className="page-loader-ring" viewBox="0 0 96 96" aria-hidden="true">
-            <circle className="page-loader-ring-track" cx="48" cy="48" r="42" />
-            <circle className="page-loader-ring-fill" cx="48" cy="48" r="42" />
-          </svg>
-          <BrandLogo className="relative z-[1] h-14 w-14 rounded-[18px] shadow-lg shadow-emerald-900/20" />
-        </div>
-        <div className="page-loader-bar" aria-hidden="true">
-          <span />
-        </div>
-        <p className="mt-4 text-sm font-medium tracking-wide text-muted-foreground">{label}</p>
-      </div>
+      <div className="page-loader-line page-loader-line--compact" aria-hidden="true" />
+      <p className="flex items-center gap-2 text-sm font-medium tracking-wide text-muted-foreground">
+        <span className="page-loader-dot" aria-hidden="true" />
+        {label}
+      </p>
     </div>
   );
 }

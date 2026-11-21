@@ -74,8 +74,6 @@ export default function AuditLogsPage() {
     ['When', 'Who', 'Role', 'Action', 'Record', 'Changes'],
     filtered.map((row) => [row.at, row.actorName || 'System', row.actorRole, row.action, row.resourceDisplay, changeText(row.changes)]));
 
-  if (rows === null) return <PageLoader label="Loading audit log..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -88,6 +86,11 @@ export default function AuditLogsPage() {
           Export
         </Button>
       </div>
+
+      {rows === null ? (
+        <PageLoader label="Loading audit log..." />
+      ) : (
+        <>
 
       {error && <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
 
@@ -225,7 +228,8 @@ export default function AuditLogsPage() {
           )}
           <Pagination page={ledgerPage} total={ledgerTotal} limit={PAGE_SIZE} onPage={setLedgerPage} />
         </CardContent>
-      </Card>
+      </Card>        </>
+      )}
     </div>
   );
 }

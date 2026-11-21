@@ -95,8 +95,6 @@ export default function ReturnsRefundsReconciliationPage() {
     }
   };
 
-  if (!loaded) return <PageLoader label="Loading refunds..." />;
-
   return (
     <div className="space-y-3">
       <div>
@@ -105,6 +103,11 @@ export default function ReturnsRefundsReconciliationPage() {
           Every cancellation and return, whether the parcel is back, and whether money goes back to the customer.
         </p>
       </div>
+
+      {!loaded ? (
+        <PageLoader label="Loading refunds..." />
+      ) : (
+        <>
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-44">
@@ -263,7 +266,8 @@ export default function ReturnsRefundsReconciliationPage() {
             </p>
           </div>
         </CardContent>
-      </Card>
+      </Card>        </>
+      )}
     </div>
   );
 }

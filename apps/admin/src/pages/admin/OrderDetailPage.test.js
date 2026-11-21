@@ -233,7 +233,7 @@ test('order detail waits for a full fetch before paint so list stubs do not flas
   assert.match(page, /const fetchOrder = useOrderStore\(\(s\) => s\.fetchOrder\)/);
   assert.match(page, /setDetailReady\(false\)/);
   assert.match(page, /fetchOrder\(orderId\)\.finally/);
-  assert.match(page, /if \(!detailReady\) return <div[^>]*>Loading order…<\/div>;/);
+  assert.match(page, /\{!detailReady \? \(\s*<PageLoader label="Loading order\.\.\." \/>/);
 });
 
 test('vendor tracking shows assignment message status, offline stock, and takes a tracking ID and delivery date', () => {

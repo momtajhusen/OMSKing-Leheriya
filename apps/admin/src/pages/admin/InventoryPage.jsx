@@ -219,8 +219,6 @@ export default function InventoryPage() {
     }
   };
 
-  if (loading && rows.length === 0 && tab !== 'ledger') return <PageLoader label="Loading inventory..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -252,6 +250,11 @@ export default function InventoryPage() {
           <Button variant="outline" onClick={() => navigate('/warehouses')}>Warehouses</Button>
         </div>
       </div>
+
+      {loading && rows.length === 0 && tab !== 'ledger' ? (
+        <PageLoader label="Loading inventory..." />
+      ) : (
+        <>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <KpiCard label="On hand" value={kpis.totalStock} icon={Package} onClick={() => { setTab('all'); setPage(1); }} />
@@ -574,7 +577,8 @@ export default function InventoryPage() {
           <Input type="number" min="1" value={reserve.qty} onChange={(e) => setReserve({ ...reserve, qty: e.target.value })} />
           <Input type="number" min="2" max="50" value={reserve.attempts} onChange={(e) => setReserve({ ...reserve, attempts: e.target.value })} />
         </div>
-      </Modal>
+      </Modal>        </>
+      )}
     </div>
   );
 }

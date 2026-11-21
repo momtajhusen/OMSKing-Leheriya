@@ -123,8 +123,6 @@ export default function GstInvoicePage() {
   const list = groups[tab] || [];
   const paged = useClientPage(list);
 
-  if (!loaded) return <PageLoader label="Loading invoices..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -161,6 +159,11 @@ export default function GstInvoicePage() {
           Export register (CSV)
         </Button>
       </div>
+
+      {!loaded ? (
+        <PageLoader label="Loading invoices..." />
+      ) : (
+        <>
 
       <div className="flex items-end gap-3 flex-wrap text-sm">
         <label className="flex flex-col gap-1">
@@ -313,6 +316,7 @@ export default function GstInvoicePage() {
             </Table>
           </CardContent>
         </Card>
+      )}        </>
       )}
     </div>
   );

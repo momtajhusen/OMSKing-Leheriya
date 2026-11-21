@@ -159,8 +159,6 @@ export default function UsersRolesPage() {
     setRolePerms([...(role.permissions || [])]);
   };
 
-  if (loading) return <PageLoader label="Loading users & roles..." />;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -177,6 +175,11 @@ export default function UsersRolesPage() {
           </Button>
         )}
       </div>
+
+      {loading ? (
+        <PageLoader label="Loading users & roles..." />
+      ) : (
+        <>
 
       <div className="flex gap-2 border-b">
         {[
@@ -466,7 +469,8 @@ export default function UsersRolesPage() {
             </div>
           </div>
         )}
-      </Modal>
+      </Modal>        </>
+      )}
     </div>
   );
 }

@@ -290,7 +290,16 @@ export default function SubscriptionPage() {
     }
   };
 
-  if (loading) return <PageLoader label="Loading subscription..." />;
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <div>
+          <h1 className="text-xl font-bold">Subscription</h1>
+        </div>
+        <PageLoader label="Loading subscription..." />
+      </div>
+    );
+  }
   if (!bill) return <EmptyState title="Subscription is not available" description="Open a company account to see its plan and bill." />;
 
   const payment = bill.payment || {};

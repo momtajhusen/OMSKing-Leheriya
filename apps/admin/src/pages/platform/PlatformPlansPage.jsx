@@ -138,14 +138,16 @@ export default function PlatformPlansPage() {
     }
   };
 
-  if (loading) return <PageLoader label="Loading pricing…" />;
-
   return (
     <PlatformPage
       title="Subscriptions"
       subtitle="Rate card, UPI checkout, and which month is paid."
       action={<Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save pricing'}</Button>}
     >
+      {loading ? (
+        <PageLoader label="Loading pricing…" />
+      ) : (
+        <>
       <div className="premium-card max-w-3xl space-y-5 p-6">
         <div className="max-w-xs">
           <label htmlFor="minimum" className="mb-1.5 block text-sm font-medium">Minimum per month (₹)</label>
@@ -345,7 +347,8 @@ export default function PlatformPlansPage() {
         onClose={() => setUndoing(null)}
       >
         This month goes back to Due, or to Payment sent if the company had sent a UPI reference. A payment made online through Razorpay cannot be undone here.
-      </ConfirmDialog>
+      </ConfirmDialog>        </>
+      )}
     </PlatformPage>
   );
 }

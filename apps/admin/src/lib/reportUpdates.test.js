@@ -98,10 +98,10 @@ test('developer mark options and the open developer statuses only appear when th
   assert.deepEqual(statusChips('confirmed', false).map((c) => c.label), ['Developer · Complete', 'Client · Confirmed']);
 });
 
-test('every login gets the Report button in its header: any admin, vendor or super admin, on localhost too', () => {
+test('merchant admin header has no Report button; vendor and platform headers still do', () => {
   const header = read('../components/layout/AdminHeader.jsx');
   const vendor = read('../components/layout/VendorLayout.jsx');
-  assert.match(header, /\{user && <ReportButton mode="merchant" \/>\}/, 'no role or localhost condition in the main header');
+  assert.doesNotMatch(header, /ReportButton/, 'Report removed from the merchant admin header');
   assert.doesNotMatch(header, /isLocalApp/);
   assert.match(vendor, /<ReportButton mode="merchant" \/>/, 'the vendor header has the Report button');
   assert.match(read('../components/layout/PlatformLayout.jsx'), /<ReportButton mode="platform" \/>/);

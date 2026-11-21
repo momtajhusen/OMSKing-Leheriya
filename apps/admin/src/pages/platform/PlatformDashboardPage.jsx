@@ -30,8 +30,6 @@ export default function PlatformDashboardPage() {
   const suspended = tenants.filter((t) => t.status === 'Suspended').length;
   const mrr = tenants.reduce((sum, t) => sum + (t.status === 'Suspended' ? 0 : t.mrr || 0), 0);
 
-  if (loading) return <PageLoader label="Loading platform..." />;
-
   const openTenant = async (tenant) => {
     if (tenant.status === 'Suspended') {
       toast.error('Activate this tenant before opening it');
@@ -53,6 +51,10 @@ export default function PlatformDashboardPage() {
       subtitle="This login is not a merchant. It owns OMSKing and every subscriber tenant."
       action={<Button onClick={() => navigate('/platform/tenants')}>Manage subscribers</Button>}
     >
+      {loading ? (
+        <PageLoader label="Loading platform..." />
+      ) : (
+        <>
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-800 via-emerald-600 to-teal-600 p-6 text-white shadow-lg">
         <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
         <p className="text-sm font-medium text-white/80">Platform Admin</p>
@@ -108,7 +110,8 @@ export default function PlatformDashboardPage() {
             </TableBody>
           </Table>
         </PlatformSheet>
-      </div>
+      </div>        </>
+      )}
     </PlatformPage>
   );
 }

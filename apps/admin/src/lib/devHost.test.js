@@ -8,9 +8,10 @@ test('isLocalHost is true only for the local machine', () => {
   for (const host of ['omsking.codersalpha.com', 'localhost.evil.com', '127.0.0.2', '192.168.1.5', '']) assert.equal(isLocalHost(host), false, host);
 });
 
-test('the auto-fix button sits next to Report and renders nothing off localhost', () => {
+test('the auto-fix button sits in the merchant header and renders nothing off localhost', () => {
   const header = fs.readFileSync(new URL('../components/layout/AdminHeader.jsx', import.meta.url), 'utf8');
-  assert.match(header, /<ReportButton mode="merchant" \/>\}\s*\{user && <AutoFixButton \/>\}/);
+  assert.match(header, /\{user && <AutoFixButton \/>\}/);
+  assert.doesNotMatch(header, /ReportButton/);
   const button = fs.readFileSync(new URL('../components/report/AutoFixButton.jsx', import.meta.url), 'utf8');
   assert.match(button, /if \(!isLocalHost\(window\.location\.hostname\)\) return null;/);
 });

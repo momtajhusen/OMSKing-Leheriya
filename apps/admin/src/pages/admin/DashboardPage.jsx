@@ -92,12 +92,6 @@ export default function DashboardPage() {
   const recentOrders = summary?.recent?.[activeTab] || [];
   const pulseCount = (tab) => summary?.counts?.[tab] || 0;
 
-  if (!summary) {
-    return loadError
-      ? <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>
-      : <PageLoader label="Loading dashboard..." />;
-  }
-
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -138,6 +132,10 @@ export default function DashboardPage() {
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>
       )}
 
+      {!summary ? (
+        <PageLoader label="Loading dashboard..." />
+      ) : (
+      <>
       <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 no-scrollbar">
         {STATUS_TABS.map((tab) => (
           <Button
@@ -389,6 +387,8 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      </>
+      )}
     </div>
   );
 }

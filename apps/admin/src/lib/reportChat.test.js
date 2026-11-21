@@ -106,8 +106,8 @@ test('signed media paths load from the API host in production and as-is in dev',
   assert.equal(mediaSrc('blob:http://localhost/1', 'https://x.com/api/v1'), 'blob:http://localhost/1');
 });
 
-test('Report button sits in the merchant header and the platform header', () => {
-  assert.match(header, /<ReportButton/);
+test('Report button sits in the platform header, not the merchant admin header', () => {
+  assert.doesNotMatch(header, /ReportButton/);
   assert.match(platform, /<ReportButton/);
   assert.match(chat, /onPaste=/);
   assert.match(chat, /MediaRecorder/);

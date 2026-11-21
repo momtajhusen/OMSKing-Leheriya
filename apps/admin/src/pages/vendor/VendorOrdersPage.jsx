@@ -153,14 +153,16 @@ export default function VendorOrdersPage() {
     setBulkOtherName('');
   };
 
-  if (!loaded) return <PageLoader label="Loading your orders..." />;
-
   return (
     <VendorPage
       title="My Orders"
       subtitle="Accept or reject each line. Fill tracking + courier and Save to dispatch. Tick rows that go in one parcel."
       action={(
         <Button type="button" onClick={() => saveMany(dirtyRows)} disabled={dirtyRows.length === 0 || busy === 'bulk'}>
+      {!loaded ? (
+        <PageLoader label="Loading your orders..." />
+      ) : (
+        <>
           <Save className="h-4 w-4 mr-2" />
           Save{dirtyRows.length > 0 ? ` (${dirtyRows.length})` : ''}
         </Button>
@@ -346,7 +348,8 @@ export default function VendorOrdersPage() {
         )}
       >
         <Input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Out of stock / cannot make in time…" />
-      </Modal>
+      </Modal>        </>
+      )}
     </VendorPage>
   );
 }

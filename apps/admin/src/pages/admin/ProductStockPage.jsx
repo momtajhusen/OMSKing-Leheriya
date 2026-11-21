@@ -120,9 +120,19 @@ export default function ProductStockPage() {
       .finally(() => setLoading(false));
   }, [masterSkuId]);
 
-  if (loading) return <PageLoader label="Loading product..." />;
-
   const back = <Button variant="outline" size="sm" onClick={() => navigate('/inventory')}><ArrowLeft className="w-4 h-4 mr-1" />Inventory</Button>;
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {back}
+          <h1 className="text-xl font-bold">Product</h1>
+        </div>
+        <PageLoader label="Loading product..." />
+      </div>
+    );
+  }
 
   if (error || !data) {
     return (
