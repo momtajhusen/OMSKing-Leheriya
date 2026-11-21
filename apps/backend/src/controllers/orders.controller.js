@@ -350,7 +350,7 @@ async function orderSummary(req, res) {
   const series = serverSeries.length ? serverSeries : clientSeries;
   const returnRows = await CustomerReturn.find({ tenantId }).select('orderNo status refundStatus refundAmount').setOptions({ skipTenantFilter: true }).lean();
   const voided = (row) => row.channel === 'Shopify' && row.sourceOrderData?.financial_status === 'voided';
-  const settledOrderNos = rows.filter((row) => isPaid(row) || voided(row)).map((row) => row.orderNo);
+  const settledOrderNos = data.filter((row) => isPaid(row) || voided(row)).map((row) => row.orderNo);
   const summary = buildOrderSummary(data, {
     returnRows: returnRows.map((row) => ({
       orderNo: row.orderNo, status: row.status, refundStatus: row.refundStatus, refundAmount: row.refundAmount,
