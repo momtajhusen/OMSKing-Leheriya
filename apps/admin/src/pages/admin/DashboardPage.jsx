@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -13,12 +13,14 @@ import { ordersChannelPath } from '../../lib/ordersChannelLink';
 import { periodParams, periodLabel } from '../../lib/dashboardPeriod';
 import { orderChannelLabel } from '../../constants/channelCatalog';
 import useConnectedChannels from '../../hooks/useConnectedChannels';
+import useCachedQuery from '../../hooks/useCachedQuery';
 import KpiCard from '../../components/ui/KpiCard';
 import Button from '../../components/ui/Button';
 import Select from '../../components/ui/Select';
 import Input from '../../components/ui/Input';
 import { FieldLabel } from '../../components/ui/TableToolbar';
 import PageLoader from '../../components/ui/PageLoader';
+import SoftRefresh from '../../components/ui/SoftRefresh';
 import EmptyState from '../../components/ui/EmptyState';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
@@ -41,8 +43,6 @@ export default function DashboardPage() {
   const tenantName = useAuthStore((s) => s.user?.tenantName || '');
   const statusError = useChannelStore((s) => s.statusError);
   const [jobs, setJobs] = useState([]);
-  const [summary, setSummary] = useState(null);
-  const [loadError, setLoadError] = useState('');
   const connected = useConnectedChannels({ refresh: true });
 
   const trendChannels = channelFilter === 'all'
@@ -50,15 +50,10 @@ export default function DashboardPage() {
     : connected.channels.filter((channel) => orderChannelLabel(channel) === channelFilter);
   const channelKey = connected.labels.join(',');
   const trendKey = trendChannels.map((channel) => `${channel.id}:${orderChannelLabel(channel)}`).join(',');
+  const tenantId = useAuthStore((s) => s.user?.tenantId || '');
 
-  useEffect(() => {
-    api.get('/integrations/jobs').then(({ data }) => setJobs((data.data || []).slice(0, 6))).catch(() => setJobs([]));
-  }, []);
-
-  useEffect(() => {
-    if (!connected.loaded) return undefined;
-    let cancel = false;
-    api.get('/orders/summary', {
+  const fetchSummary = useCallback(async () => {
+    const { data } = await api.get('/orders/summary', {
       params: {
         connected: statusError ? undefined : (channelKey || '__none__'),
         channelIds: trendChannels.map((channel) => channel.id).join(','),
@@ -67,15 +62,25 @@ export default function DashboardPage() {
         ...periodParams(range, fromDate, toDate),
         tzOffset: new Date().getTimezoneOffset(),
       },
-    }).then(({ data }) => {
-      if (cancel) return;
-      setSummary(data.data || null);
-      setLoadError('');
-    }).catch((err) => {
-      if (!cancel) setLoadError(apiError(err, 'Could not load dashboard'));
     });
-    return () => { cancel = true; };
-  }, [connected.loaded, channelKey, trendKey, channelFilter, range, fromDate, toDate, statusError]);
+    return data.data || null;
+  }, [statusError, channelKey, trendKey, channelFilter, range, fromDate, toDate]);
+
+  const {
+    data: summary,
+    loading: summaryLoading,
+    refreshing: summaryRefreshing,
+    error: summaryErr,
+  } = useCachedQuery(
+    ['dashboard-summary', tenantId, channelKey, trendKey, channelFilter, range, fromDate, toDate, statusError ? '1' : '0'],
+    fetchSummary,
+    { enabled: connected.loaded, ttlMs: 30_000 },
+  );
+  const loadError = summaryErr ? apiError(summaryErr, 'Could not load dashboard') : '';
+
+  useEffect(() => {
+    api.get('/integrations/jobs').then(({ data }) => setJobs((data.data || []).slice(0, 6))).catch(() => setJobs([]));
+  }, []);
 
   const stats = summary && {
     newOrders: summary.newOrders,
@@ -132,8 +137,11 @@ export default function DashboardPage() {
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>
       )}
 
-      {!summary ? (
+      <SoftRefresh show={summaryRefreshing} />
+      {summaryLoading && !summary ? (
         <PageLoader label="Loading dashboard..." />
+      ) : !summary ? (
+        <EmptyState title="No dashboard data" description="Connect a channel or sync orders to fill this page." />
       ) : (
       <>
       <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 no-scrollbar">

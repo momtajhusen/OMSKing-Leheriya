@@ -17,6 +17,9 @@ const { vendorByName, scopedVendorNames } = require('./vendors.controller');
 const { recordFromReq } = require('../services/auditLog.service');
 const { customerHistory } = require('../services/customerHistory.service');
 const { codCollectAmount, isPaid } = require('../utils/payment');
+const { tenantMemo, bustTenantMemo } = require('../lib/tenantMemo');
+
+const DESK_TTL_MS = 8_000;
 
 function nextProcessing(status) {
   if (status === 'New' || status === 'Pending') return 'Processing';
@@ -118,6 +121,20 @@ async function loadOrders(tenantId, vendorNames = null) {
     .sort({ orderDate: -1, createdAt: -1 })
     .lean()
     .setOptions({ skipTenantFilter: true });
+}
+
+/** One short-lived desk snapshot per tenant — list + summary share the heavy loadOrders/deskOrders work. */
+async function deskSnapshot(tenantId, vendorNames = null) {
+  const scope = vendorNames ? vendorNames.map((name) => String(name).toLowerCase()).sort().join(',') : '*';
+  return tenantMemo(`desk:${tenantId}:${scope}`, DESK_TTL_MS, async () => {
+    const rows = await loadOrders(tenantId, vendorNames);
+    return deskOrders(tenantId, rows);
+  });
+}
+
+function bustOrderDesk(tenantId) {
+  if (!tenantId) return;
+  bustTenantMemo(`desk:${tenantId}`);
 }
 
 async function findMaster(tenantId, rawId) {
@@ -222,8 +239,7 @@ async function listOrders(req, res) {
       counts: { total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0, Ready: 0, ...Object.fromEntries(SHIPPING_TABS.map((tab) => [tab, 0])) },
     });
   }
-  const rows = await loadOrders(tenantId, names);
-  const data = (await deskOrders(tenantId, rows)).map((row) => scopeToVendor(row, names));
+  const data = (await deskSnapshot(tenantId, names)).map((row) => scopeToVendor(row, names));
   let scoped = data;
   if (req.query.connected != null && String(req.query.connected) !== '') {
     const allowed = new Set(String(req.query.connected).split(',').map((name) => name.trim()).filter(Boolean));
@@ -312,8 +328,7 @@ async function orderSummary(req, res) {
     tzOffset: req.query.tzOffset,
   });
   if (names && !names.length) return successResponse(res, empty, 'Order summary');
-  const rows = await loadOrders(tenantId, names);
-  let data = (await deskOrders(tenantId, rows)).map((row) => scopeToVendor(row, names));
+  let data = (await deskSnapshot(tenantId, names)).map((row) => scopeToVendor(row, names));
   const serverSeries = await connectedOrderSeries(tenantId);
   if (req.query.connected != null && String(req.query.connected) !== '') {
     const connectedQ = String(req.query.connected).trim();
@@ -496,6 +511,7 @@ async function pullOrdersNow(req, res) {
   const channels = Array.isArray(req.body?.channels) ? req.body.channels : undefined;
   const { pullOrdersNow: run } = require('../services/orderPullNow.service');
   const results = await run(tenantId, { hours, channels });
+  bustOrderDesk(tenantId);
   const created = results.reduce((n, row) => n + (Number(row.created) || 0), 0);
   const failed = results.filter((row) => row.status === 'failed');
   const message = failed.length && !created
@@ -509,6 +525,7 @@ async function pullOrdersNow(req, res) {
 async function generateLabel(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
+  bustOrderDesk(tenantId);
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
   if (order.channel === 'Myntra') {
@@ -815,6 +832,7 @@ function lineMasterId(order, sub) {
 async function assignSubOrder(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
+  bustOrderDesk(tenantId);
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
   const sub = (order.subOrders || []).find((row) => row.id === req.params.subOrderId);
@@ -969,6 +987,7 @@ function staffOnly(req) {
 async function patchStatus(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
+  bustOrderDesk(tenantId);
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
   const beforeStatus = order.status;
@@ -1322,6 +1341,7 @@ async function courierRates(req, res) {
 async function shipOrder(req, res) {
   staffOnly(req);
   const tenantId = merchantTenant(req);
+  bustOrderDesk(tenantId);
   const order = await findMaster(tenantId, req.params.orderId);
   if (!order) throw new HttpError(404, 'Order not found');
   if (order.channel === 'Shopify') {

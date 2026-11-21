@@ -7,15 +7,17 @@ const {
   reserveStock, releaseReservation, consumeReservation, listLedger, lowStockAlerts, stressReserve,
 } = require('../services/inventory.service');
 const { getInventoryAuthority } = require('../services/warehouse.service');
+const { tenantMemo, bustTenantMemo } = require('../lib/tenantMemo');
 
 async function list(req, res) {
   const tenantId = merchantTenant(req);
-  const all = await listBalances(tenantId, {
+  const memoKey = `inv:${tenantId}:${req.query.warehouseId || ''}:${req.query.q || ''}:${req.query.sort || ''}`;
+  const all = await tenantMemo(memoKey, 8_000, () => listBalances(tenantId, {
     warehouseId: req.query.warehouseId,
     q: req.query.q,
     sort: req.query.sort,
     images: false,
-  });
+  }));
   const tab = req.query.tab;
   let rows = all;
   if (tab === 'low') rows = all.filter((row) => row.low);
@@ -72,45 +74,56 @@ async function alerts(req, res) {
   return successResponse(res, data, 'Low stock alerts');
 }
 
+function bustInventory(tenantId) {
+  bustTenantMemo(`inv:${tenantId}`);
+}
+
 async function inStock(req, res) {
   const tenantId = merchantTenant(req);
   const data = await stockIn(tenantId, req.user.id, req.body);
+  bustInventory(tenantId);
   return successResponse(res, data, 'Stock in posted');
 }
 
 async function outStock(req, res) {
   const tenantId = merchantTenant(req);
   const data = await stockOut(tenantId, req.user.id, req.body);
+  bustInventory(tenantId);
   return successResponse(res, data, 'Stock out posted');
 }
 
 async function adjust(req, res) {
   const tenantId = merchantTenant(req);
   const data = await adjustStock(tenantId, req.user.id, req.body);
+  bustInventory(tenantId);
   return successResponse(res, data, 'Stock adjusted');
 }
 
 async function threshold(req, res) {
   const tenantId = merchantTenant(req);
   const data = await setReorderPoint(tenantId, req.params.id, req.body.reorderPoint);
+  bustInventory(tenantId);
   return successResponse(res, data, 'Reorder point saved');
 }
 
 async function reserve(req, res) {
   const tenantId = merchantTenant(req);
   const data = await reserveStock(tenantId, req.user.id, req.body);
+  bustInventory(tenantId);
   return successResponse(res, data, data.idempotent ? 'Reservation already held' : 'Stock reserved');
 }
 
 async function release(req, res) {
   const tenantId = merchantTenant(req);
   const data = await releaseReservation(tenantId, req.user.id, req.body);
+  bustInventory(tenantId);
   return successResponse(res, data, 'Reservation released');
 }
 
 async function consume(req, res) {
   const tenantId = merchantTenant(req);
   const data = await consumeReservation(tenantId, req.user.id, req.body);
+  bustInventory(tenantId);
   return successResponse(res, data, 'Reservation consumed');
 }
 

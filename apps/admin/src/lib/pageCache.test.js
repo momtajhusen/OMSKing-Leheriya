@@ -20,10 +20,14 @@ test('Products and Inventory open from the remembered view and refresh it in the
   const products = fs.readFileSync(new URL('../pages/admin/ProductsPage.jsx', import.meta.url), 'utf8');
   assert.match(products, /const seed = cachedPage\('products'\);/);
   assert.match(products, /useState\(seed\?\.rows \|\| \[\]\)/);
+  assert.match(products, /useState\(!\(seed\?\.rows\?\.length\)\)/);
+  assert.match(products, /SoftRefresh/);
   assert.match(products, /if \(page === 1 && !searchQuery\) rememberPage\('products'/);
   const inventory = fs.readFileSync(new URL('../pages/admin/InventoryPage.jsx', import.meta.url), 'utf8');
   assert.match(inventory, /const seed = cachedPage\('inventory'\);/);
   assert.match(inventory, /useState\(seed\?\.rows \|\| \[\]\)/);
+  assert.match(inventory, /useState\(!\(seed\?\.rows\?\.length\)\)/);
+  assert.match(inventory, /SoftRefresh/);
   assert.match(inventory, /useState\(cachedPage\('warehouses'\) \|\| \[\]\)/);
   assert.match(inventory, /rememberPage\('warehouses'/);
   assert.match(inventory, /if \(!warehouseId && tab === 'all' && !q && !sort && page === 1\) rememberPage\('inventory'/);

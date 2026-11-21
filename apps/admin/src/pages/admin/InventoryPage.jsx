@@ -14,6 +14,7 @@ import Modal from '../../components/ui/Modal';
 import Drawer from '../../components/ui/Drawer';
 import KpiCard from '../../components/ui/KpiCard';
 import PageLoader from '../../components/ui/PageLoader';
+import SoftRefresh from '../../components/ui/SoftRefresh';
 import EmptyState from '../../components/ui/EmptyState';
 import ProductThumb from '../../components/ui/ProductThumb';
 import { FormBanner } from '../../components/ui/FormBanner';
@@ -55,7 +56,8 @@ export default function InventoryPage() {
   const [total, setTotal] = useState(seed?.total || 0);
   const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerTotal, setLedgerTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!(seed?.rows?.length));
+  const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [inOpen, setInOpen] = useState(false);
@@ -91,7 +93,9 @@ export default function InventoryPage() {
   };
 
   const load = async () => {
-    setLoading(true);
+    const soft = rows.length > 0;
+    if (soft) setRefreshing(true);
+    else setLoading(true);
     try {
       const [inv, led] = await Promise.all([
         api.get('/inventory', { params: { warehouseId: warehouseId || undefined, q: q || undefined, tab: tab === 'ledger' ? 'all' : tab, sort: sort || undefined, page, limit: PAGE_SIZE } }),
@@ -115,6 +119,7 @@ export default function InventoryPage() {
       toast.error(apiError(err, 'Could not load inventory'));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -251,6 +256,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      <SoftRefresh show={refreshing} />
       {loading && rows.length === 0 && tab !== 'ledger' ? (
         <PageLoader label="Loading inventory..." />
       ) : (

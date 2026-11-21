@@ -11,6 +11,7 @@ import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Modal from '../../components/ui/Modal';
 import PageLoader from '../../components/ui/PageLoader';
+import SoftRefresh from '../../components/ui/SoftRefresh';
 import { cachedPage, rememberPage } from '../../lib/pageCache';
 import EmptyState from '../../components/ui/EmptyState';
 import ProductThumb from '../../components/ui/ProductThumb';
@@ -45,7 +46,8 @@ export default function ProductsPage() {
   const [total, setTotal] = useState(seed?.total || 0);
   const [stats, setStats] = useState(seed?.stats || { active: 0, variants: 0 });
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!(seed?.rows?.length));
+  const [refreshing, setRefreshing] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState(emptyProduct);
@@ -53,7 +55,9 @@ export default function ProductsPage() {
   const [banner, setBanner] = useState('');
 
   const load = async () => {
-    setLoading(true);
+    const soft = rows.length > 0;
+    if (soft) setRefreshing(true);
+    else setLoading(true);
     try {
       const { data } = await api.get('/products', { params: { q: searchQuery, page, limit: PAGE_SIZE } });
       const next = { rows: data.data || [], total: data.meta?.total || 0, stats: { active: data.meta?.active || 0, variants: data.meta?.variants || 0 } };
@@ -65,6 +69,7 @@ export default function ProductsPage() {
       toast.error(apiError(err, 'Could not load products'));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -174,6 +179,7 @@ export default function ProductsPage() {
         </div>
       </div>
 
+      <SoftRefresh show={refreshing} />
       {loading && rows.length === 0 ? (
         <PageLoader label="Loading products..." />
       ) : (

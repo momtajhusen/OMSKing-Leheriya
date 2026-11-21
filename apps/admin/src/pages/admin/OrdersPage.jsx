@@ -13,7 +13,9 @@ import Select from '../../components/ui/Select';
 import Input from '../../components/ui/Input';
 import KpiCard from '../../components/ui/KpiCard';
 import PageLoader from '../../components/ui/PageLoader';
+import SoftRefresh from '../../components/ui/SoftRefresh';
 import EmptyState from '../../components/ui/EmptyState';
+import { cachedPage, rememberPage } from '../../lib/pageCache';
 import { ItemThumbs } from '../../components/ui/ProductThumb';
 import Modal from '../../components/ui/Modal';
 import { ShoppingCart, Filter, RefreshCw, Download, Search, FileText, Eye, RotateCcw, CheckCircle, Check, X, Printer } from 'lucide-react';
@@ -169,10 +171,11 @@ export default function OrdersPage() {
   const navigate = useNavigate();
   const navType = useNavigationType();
   const { can } = usePermissions();
-  const [orderList, setOrderList] = useState([]);
+  const ordersSeed = cachedPage('orders-default');
+  const [orderList, setOrderList] = useState(() => (ordersSeed?.rows || []).map((order) => withSubOrders(order)));
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [counts, setCounts] = useState({ total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0 });
+  const [total, setTotal] = useState(ordersSeed?.total || 0);
+  const [counts, setCounts] = useState(ordersSeed?.counts || { total: 0, New: 0, Packed: 0, 'Ready to Ship': 0, Unfulfillable: 0 });
   const generateInvoice = useOrderStore((s) => s.generateInvoice);
   const generateLabelInvoice = useOrderStore((s) => s.generateLabelInvoice);
   const markDelivered = useOrderStore((s) => s.markDelivered);
@@ -207,7 +210,8 @@ export default function OrdersPage() {
   const [syncing, setSyncing] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [manifestData, setManifestData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!(ordersSeed?.rows?.length));
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [query, setQuery] = useState(() => searchFromParams(searchParams));
   const urlQuery = searchFromParams(searchParams);
@@ -224,8 +228,10 @@ export default function OrdersPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const loadOrders = async (nextPage = page) => {
-    setLoading(true);
+  const loadOrders = async (nextPage = page, { soft } = {}) => {
+    const useSoft = soft || orderList.length > 0;
+    if (useSoft) setRefreshing(true);
+    else setLoading(true);
     try {
       const { data } = await api.get('/orders', {
         params: {
@@ -244,23 +250,29 @@ export default function OrdersPage() {
           q: query || undefined,
         },
       });
-      setOrderList((data.data || []).map((order) => withSubOrders(order)));
+      const rows = (data.data || []).map((order) => withSubOrders(order));
+      setOrderList(rows);
       setSelectedIds([]);
       setTotal(data.meta?.total || 0);
       if (data.meta?.counts) setCounts(data.meta.counts);
+      if (activeTab === 'all' && channelFilter === 'all' && !query && nextPage === 1) {
+        rememberPage('orders-default', { rows: data.data || [], total: data.meta?.total || 0, counts: data.meta?.counts || counts });
+      }
       setLoadError('');
     } catch (err) {
       setLoadError(apiError(err, 'Could not load orders'));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadOrders(page);
+    loadOrders(page, { soft: orderList.length > 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, activeTab, channelFilter, paymentFilter, sourceFilter, readyFilter, parcelFilter, dateFrom, dateTo, query, connectedKey]);
 
-  // Page open / browser refresh: pull channels immediately, then reload the list (no 15‑min wait).
+  // Background channel pull — never blocks the list paint.
   useEffect(() => {
     if (!can(PERMISSIONS.ORDERS_EDIT) && !can(PERMISSIONS.SETTINGS_MANAGE)) return undefined;
     let cancelled = false;
@@ -270,11 +282,12 @@ export default function OrdersPage() {
         const { created, results, message } = await pullOrdersNow({ hours: 48 });
         if (cancelled) return;
         const failed = (results || []).filter((row) => row.status === 'failed');
-        if (created > 0) toast.success(message || `${created} new order${created === 1 ? '' : 's'} from channels`);
-        else if (failed.length && !(results || []).some((row) => row.status === 'success')) {
+        if (created > 0) {
+          toast.success(message || `${created} new order${created === 1 ? '' : 's'} from channels`);
+          await loadOrders(page, { soft: true });
+        } else if (failed.length && !(results || []).some((row) => row.status === 'success')) {
           toast.error(failed[0].lastError || 'Could not pull orders');
         }
-        await loadOrders(page);
       } catch (err) {
         if (!cancelled && err?.response?.status !== 403) {
           /* keep DB list; Sync button still works */
@@ -485,7 +498,8 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {loading ? (
+      <SoftRefresh show={refreshing || syncing} />
+      {loading && orderList.length === 0 ? (
         <PageLoader label="Loading orders..." />
       ) : (
         <>
