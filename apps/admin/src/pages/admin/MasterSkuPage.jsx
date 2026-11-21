@@ -46,11 +46,6 @@ function PackageFields({ value, onChange }) {
   return (
     <div className="space-y-2">
       <p className="text-sm font-medium">Courier package</p>
-
-      {loading ? (
-        <PageLoader label="Loading Master SKUs..." />
-      ) : (
-        <>
       <p className="text-xs text-muted-foreground">Leave 0 to use the default package from Settings → Courier.</p>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div>
@@ -185,6 +180,10 @@ export default function MasterSkuPage() {
         </div>
       </div>
 
+      {loading ? (
+        <PageLoader label="Loading Master SKUs..." />
+      ) : (
+        <>
       <Card>
         <CardContent className="p-3">
           <div className="flex gap-2">

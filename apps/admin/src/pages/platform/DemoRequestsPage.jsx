@@ -20,6 +20,7 @@ export default function DemoRequestsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     api.get('/demo-requests', { params: { page, limit: PAGE_SIZE } })
       .then(({ data }) => {
         setRows(data.data || []);
@@ -34,49 +35,46 @@ export default function DemoRequestsPage() {
       title="Demo requests"
       subtitle="People who asked for a walkthrough. This list does not create a merchant login."
     >
-      <PlatformSheet>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Company</TableHead>
-              <TableHead>Contact</TableHead>
-              <TableHead>Volume</TableHead>
-              <TableHead>Channels</TableHead>
-              <TableHead>Note</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">No demo requests yet.</TableCell>
-              </TableRow>
-            )}
-            {rows.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell>
-                  <p className="font-medium">{row.company}</p>
-                  <p className="text-xs text-muted-foreground">{row.city || '—'} · {new Date(row.createdAt).toLocaleString()}</p>
-                </TableCell>
-                <TableCell>
-                  <p>{row.name}</p>
-                  <p className="text-xs text-muted-foreground">{row.email}</p>
-                  <p className="text-xs text-muted-foreground">{row.phone}</p>
-                </TableCell>
-                <TableCell>{BANDS[row.monthlyOrders] || row.monthlyOrders}</TableCell>
-                <TableCell>{(row.channels || []).join(', ')}</TableCell>
-                <TableCell className="max-w-[16rem] whitespace-normal text-sm">{row.message || '—'}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-        <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
-      </PlatformSheet>
-
       {loading ? (
         <PageLoader label="Loading demo requests…" />
       ) : (
-        <>
-        </>
+        <PlatformSheet>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Company</TableHead>
+                <TableHead>Contact</TableHead>
+                <TableHead>Volume</TableHead>
+                <TableHead>Channels</TableHead>
+                <TableHead>Note</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-muted-foreground">No demo requests yet.</TableCell>
+                </TableRow>
+              )}
+              {rows.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>
+                    <p className="font-medium">{row.company}</p>
+                    <p className="text-xs text-muted-foreground">{row.city || '—'} · {new Date(row.createdAt).toLocaleString()}</p>
+                  </TableCell>
+                  <TableCell>
+                    <p>{row.name}</p>
+                    <p className="text-xs text-muted-foreground">{row.email}</p>
+                    <p className="text-xs text-muted-foreground">{row.phone}</p>
+                  </TableCell>
+                  <TableCell>{BANDS[row.monthlyOrders] || row.monthlyOrders}</TableCell>
+                  <TableCell>{(row.channels || []).join(', ')}</TableCell>
+                  <TableCell className="max-w-[16rem] whitespace-normal text-sm">{row.message || '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Pagination page={page} total={total} limit={PAGE_SIZE} onPage={setPage} />
+        </PlatformSheet>
       )}
     </PlatformPage>
   );

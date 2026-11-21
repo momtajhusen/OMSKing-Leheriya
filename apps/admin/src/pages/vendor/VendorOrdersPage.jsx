@@ -159,15 +159,15 @@ export default function VendorOrdersPage() {
       subtitle="Accept or reject each line. Fill tracking + courier and Save to dispatch. Tick rows that go in one parcel."
       action={(
         <Button type="button" onClick={() => saveMany(dirtyRows)} disabled={dirtyRows.length === 0 || busy === 'bulk'}>
-      {!loaded ? (
-        <PageLoader label="Loading your orders..." />
-      ) : (
-        <>
           <Save className="h-4 w-4 mr-2" />
           Save{dirtyRows.length > 0 ? ` (${dirtyRows.length})` : ''}
         </Button>
       )}
     >
+      {!loaded ? (
+        <PageLoader label="Loading your orders..." />
+      ) : (
+        <>
       {loadError && <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{loadError}</p>}
 
       {overdueRows.length > 0 && (

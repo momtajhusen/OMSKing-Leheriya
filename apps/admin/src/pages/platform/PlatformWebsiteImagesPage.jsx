@@ -361,15 +361,15 @@ export default function PlatformWebsiteImagesPage() {
       subtitle="Photos for the public OMSKing website. Every slot shows where it appears, the exact size, and a ChatGPT prompt. An upload goes live on the site straight away."
       action={(
         <a href="/" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-lg border border-[hsl(var(--color-border-premium))] bg-[hsl(var(--color-card-bg))] px-4 text-sm font-medium transition hover:bg-muted">
-      {loading ? (
-        <PageLoader label="Loading website images…" />
-      ) : (
-        <>
           <ExternalLink className="h-4 w-4" />
           Open website
         </a>
       )}
     >
+      {loading ? (
+        <PageLoader label="Loading website images…" />
+      ) : (
+        <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="premium-card p-5 sm:col-span-2">
           <div className="flex items-center justify-between gap-3">

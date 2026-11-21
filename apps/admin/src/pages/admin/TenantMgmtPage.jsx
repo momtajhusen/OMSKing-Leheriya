@@ -150,15 +150,15 @@ export default function TenantMgmtPage() {
       subtitle="Each row is a merchant tenant — own users, channels, and data. Not a vendor packing list."
       action={
         <Button onClick={startWizard}>
-      {loading ? (
-        <PageLoader label="Loading subscribers..." />
-      ) : (
-        <>
           <Plus className="w-4 h-4 mr-2" />
           New Tenant
         </Button>
       }
     >
+      {loading ? (
+        <PageLoader label="Loading subscribers..." />
+      ) : (
+        <>
       <div className="flex flex-wrap gap-2">
         <button type="button" className={tab === 'tenants' ? 'pill-tab pill-tab-active' : 'pill-tab pill-tab-inactive'} onClick={() => setTab('tenants')}>
           Tenants

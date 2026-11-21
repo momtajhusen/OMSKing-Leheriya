@@ -116,11 +116,6 @@ function LineCost({ line }) {
           </Button>
         )}
       </div>
-
-      {loading ? (
-        <PageLoader label="Loading assignment..." />
-      ) : (
-        <>
       <p className="mt-1 text-[11px] text-muted-foreground">{costHint(cost)}</p>
     </div>
   );
@@ -402,6 +397,10 @@ export default function FulfilmentPage() {
         <p className="text-xs text-muted-foreground">One marketplace order stays one master order. The oldest open order takes WH-001 first.</p>
       </div>
 
+      {loading ? (
+        <PageLoader label="Loading assignment..." />
+      ) : (
+        <>
       <div className="kpi-grid">
         {tabs.map((tab) => (
           <KpiCard
